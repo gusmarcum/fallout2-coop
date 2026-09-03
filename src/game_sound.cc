@@ -764,6 +764,17 @@ void backgroundSoundDelete()
     }
 }
 
+bool backgroundSoundIsPlaying()
+{
+    // Paused counts as playing: a movie parks the track and resumes it itself.
+    return gBackgroundSound != nullptr && (soundIsPlaying(gBackgroundSound) || soundIsPaused(gBackgroundSound));
+}
+
+bool gameSoundIsInitialized()
+{
+    return gGameSoundInitialized;
+}
+
 // 0x450B0C
 void backgroundSoundRestart(int value)
 {

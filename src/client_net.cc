@@ -30,6 +30,7 @@
 #include "game.h" // GameMode — modal-screen detection for the viewer service ticker
 #include "game_mouse.h" // wait-watch cursor over combat transitions (§3.a)
 #include "game_sound.h" // sfx (§3.e S2)
+#include "audio_engine.h"
 #include "input.h" // enqueueInputEvent / tickersAdd — viewer modal service ticker
 #include "interface.h" // combat HUD bar hooks (§3.a)
 #include "inventory.h" // _inven_reset_dude — re-anchor the inventory on a local-actor rebind
@@ -2858,6 +2859,7 @@ private:
 
     void onSnapshotEnd(Reader&)
     {
+        audioNotice();
         // The baseline walk just finished scoring against the blob-loaded world
         // (§D tripwire). ok>0 && bad==0 is the mid-join gate's oracle line.
         debugPrint("client_net: baseline tripwire ok=%d bad=%d (load #%d)\n",
@@ -4194,8 +4196,11 @@ private:
         // this" check — it deletes and reloads unconditionally, so without this a
         // rebaseline would restart the track from the top under everyone already
         // listening. Cleared by STOP so a retune to the same name still replays.
-        if (name == _musicTrack) return;
+        // ...but only while that track is actually still playing. If it died
+        // (see musicWatchdog) the re-announce is exactly what brings it back.
+        if (name == _musicTrack && backgroundSoundIsPlaying()) return;
         _musicTrack = name;
+        _musicRetryAtMs = 0;
 
         _gsound_background_play_level_music(name.c_str(), fadeIn);
     }
@@ -4517,6 +4522,46 @@ private:
     int _loadCount = 0;
     bool _inCombat = false; // P3 combat framing (presentation-only)
     std::string _musicTrack; // currently-playing background track, for MUSIC_PLAY dedupe
+    unsigned int _musicRetryAtMs = 0; // musicWatchdog backoff deadline (getTicks)
+    bool _audioNoticeShown = false; // one-time why-is-there-no-sound line on the HUD
+
+public:
+    // Background music watchdog, run once per pump. The track is a streamed,
+    // looping Sound; a long stall on this thread (a rebaseline blob, a modal,
+    // a map change) starves the mixer and the sound library retires the track
+    // as finished. Nothing restarted it: the server only re-announces music on
+    // baselines and onMusicPlay used to drop that by name. Vanilla music never
+    // stops, so re-arm the expected track whenever it is not playing, with a
+    // backoff so a missing music file cannot spin the load.
+    void musicWatchdog()
+    {
+        if (_musicTrack.empty() || backgroundSoundIsPlaying()) return;
+        unsigned int now = getTicks();
+        if (_musicRetryAtMs != 0 && now < _musicRetryAtMs) return;
+        _musicRetryAtMs = now + 10000;
+        _gsound_background_play_level_music(_musicTrack.c_str(), 12);
+    }
+
+    // One-time HUD line explaining silence. Shown after the first snapshot so
+    // the display monitor exists; a player with no sound otherwise has no clue.
+    void audioNotice()
+    {
+        if (_audioNoticeShown) return;
+        _audioNoticeShown = true;
+        static char line[320];
+        if (!settings.sound.initialize) {
+            snprintf(line, sizeof(line), "Sound is OFF in fallout2.cfg ([sound] initialize=0)");
+        } else if (audioEngineInitError() != nullptr) {
+            snprintf(line, sizeof(line), "Audio failed to start (%s): no sound this session", audioEngineInitError());
+        } else if (!gameSoundIsInitialized()) {
+            snprintf(line, sizeof(line), "Sound engine failed to initialize: no sound this session");
+        } else {
+            return;
+        }
+        displayMonitorAddMessage(line);
+    }
+
+private:
     bool _myTurn = false;
     bool _invGrantPending = false; // server granted an in-combat inventory; main loop opens it
     bool _encPromptPending = false; // encounter prompt latched out of the decoder
@@ -4588,6 +4633,8 @@ public:
         : _decoder()
     {
     }
+
+    void musicWatchdog() { _decoder.musicWatchdog(); }
 
     void feed(const unsigned char* data, size_t n)
     {
@@ -4867,6 +4914,7 @@ bool ClientConnection::pump()
     if (!netSocketValid(_impl->fd) || _impl->stream == nullptr) {
         return false;
     }
+    _impl->stream->musicWatchdog();
     unsigned char buf[8192];
     // Bound the bytes ingested per pump so a peer that streams as fast as the socket
     // delivers cannot spin this loop indefinitely, starving render/ESC and letting
