@@ -1,5 +1,7 @@
 #include "server_players.h"
 
+#include "party_member.h" // partyMemberLeader
+
 #include <cstdlib> // getenv — the action-gate kill switch
 #include <cstring> // strcmp
 
@@ -387,6 +389,13 @@ Object* scriptContextDude(Program* program)
         // A self-less program is a map/system script — no geometry to resolve
         // against, so it keeps the host anchor.
         return gDude;
+    }
+
+    // A party member's script (its critter_p_proc follow loop reads dude_obj)
+    // follows its recruiter, not whichever player happens to be nearest this
+    // beat. That flip-flop is the "confused who to follow" report.
+    if (objectIsPartyMember(self)) {
+        return partyMemberLeader(self);
     }
 
     Object* nearest = nullptr;

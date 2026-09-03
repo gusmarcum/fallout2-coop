@@ -2615,6 +2615,23 @@ void gameDialogRenderReply()
     windowRefresh(gGameDialogReplyWindow);
 }
 
+// Reply-text paging for the wire viewer. Vanilla pages an over-long reply
+// inside _gdProcess's own loop (SPACE / a 10 s timer); the viewer never runs
+// that loop, so the overflow offset text_to_rect_wrapped left in dword_58F4E0
+// was simply dropped and the tail of the reply was never shown.
+bool gameDialogReplyHasMore()
+{
+    return dword_58F4E0 != 0;
+}
+
+void gameDialogReplyNextPage()
+{
+    if (dword_58F4E0 == 0) {
+        return;
+    }
+    gameDialogRenderReply(); // renders from the offset and advances it (0 at the end)
+}
+
 // Resolve option `index`'s final display text (including the SFALL number/bullet
 // prefix, exactly as the render loop bakes it) into `out`. Shared by the render
 // loop and the dialog-streaming emitter so the two can never drift on how an

@@ -60,6 +60,8 @@ bool gameDialogGetOptionText(int index, char* out, size_t size);
 // option via gameDialogAddTextOptionWithProc (messageListId=-4, proc=0).
 void gameDialogSetReplyText(const char* text);
 void gameDialogClearOptions();
+bool gameDialogReplyHasMore();
+void gameDialogReplyNextPage();
 
 // Render the current reply and options into the dialog sub-windows (call from the
 // viewer after seeding wire text). No-op on the server / when dialog is closed.
