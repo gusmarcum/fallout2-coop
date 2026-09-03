@@ -229,6 +229,11 @@ void serverControlEndDialogDrive()
     gPendingDialogRequesterSlot = -1;
 }
 
+bool serverControlDialogDriveActive()
+{
+    return gDialogDriverSlot >= 0;
+}
+
 bool serverControlDialogDriverPresent()
 {
     if (gDialogDriverSlot < 0) {
@@ -470,6 +475,12 @@ static void interactionFire(int verb, Object* actor, Object* target, int arg)
     int rc = 0;
     switch (verb) {
     case kInteractUse:
+        // Scenery with a use_p_proc that opens a conversation (the Gecko power
+        // plant terminals, consoles) never passes through the TALK request, so
+        // the drive stayed unowned (host-only) and every non-host dsay/dend was
+        // refused: the terminal printed its description and went dead. Attribute
+        // a conversation the script opens to this player, exactly as TALK does.
+        serverControlSetPendingDialogRequester(playerActorSlotOf(actor));
         rc = _action_use_an_object(actor, target); // scenery: routes doors/ladders/stairs
         fprintf(stderr, "f2_server: interact FIRE use netId=%d rc=%d actorTile=%d targetTile=%d\n",
             target->netId, rc, actor->tile, target->tile);

@@ -1247,6 +1247,11 @@ static int mainClientViewer(const char* connectSpec)
     _gmouse_enable();
     gameMouseSetMode(GAME_MOUSE_MODE_MOVE);
     gameMouseObjectsShow();
+    // Belt and braces for the "no cursor until I rejoin" report: the visible
+    // cursor depends on state that worldEnable() may or may not have re-armed
+    // during the blob load. Re-assert it here so this step never depends on it.
+    mouseShowCursor();
+    gameMouseSetCursor(MOUSE_CURSOR_NONE);
 
     // Presentation layer (client_present): glide critters between tiles on stepped
     // MOVE hops, replay the vanilla attack/hit/death choreography from
@@ -2229,6 +2234,37 @@ static int mainClientViewer(const char* connectSpec)
                         actionPending ? 1 : 0,
                         clientAnimActiveFor(gDude) ? 1 : 0);
                 }
+            }
+        }
+        // Wait-cursor watchdog. `!myTurn` and `combatPresentationBusy` have no
+        // timeout of their own, so a stalled beat left the watch cursor up until
+        // Escape's quit box happened to repaint it. After 8 s with no
+        // presentation progress, drop back to the normal cursor (the busy gate
+        // itself is unchanged: the server still owns whether an action goes).
+        {
+            static unsigned int busyHeldSince = 0;
+            static unsigned int busyHeldProgress = 0;
+            static bool busyOverride = false;
+            const unsigned int kBusyWatchdogMs = 8000;
+            if (!(combatBusy || oocBusy)) {
+                busyHeldSince = 0;
+                busyOverride = false;
+            } else {
+                unsigned int nowB = getTicks();
+                unsigned int progressB = clientAnimLastProgressTick();
+                if (busyHeldSince == 0 || progressB != busyHeldProgress) {
+                    busyHeldSince = nowB;
+                    busyHeldProgress = progressB;
+                    busyOverride = false;
+                } else if (!busyOverride && getTicksBetween(nowB, busyHeldSince) >= kBusyWatchdogMs) {
+                    busyOverride = true;
+                    debugPrint("client-viewer: busy watchdog released the wait cursor after %ums\n",
+                        getTicksBetween(nowB, busyHeldSince));
+                }
+            }
+            if (busyOverride) {
+                combatBusy = false;
+                oocBusy = false;
             }
         }
         if ((combatBusy || oocBusy) && !watchCursorShown) {

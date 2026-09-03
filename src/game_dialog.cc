@@ -2,6 +2,8 @@
 #include "msg_channel.h"
 #include "game_dialog.h"
 
+#include "script_request_handler.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -935,6 +937,7 @@ int _gdialogInitFromScript(int headFid, int reaction)
     if (serverLoopActive()) {
         _gdialog_state = 1;
         _gdDialogWentOff = true;
+        scriptRequestHandler()->dialogDriveBegin();
         return 0;
     }
 
@@ -1004,6 +1007,7 @@ int _gdialogExitFromScript()
     // head, tickers or lips were ever created, so tear down only the state latch.
     if (serverLoopActive()) {
         _gdialog_state = 0;
+        scriptRequestHandler()->dialogDriveEnd();
         return 0;
     }
 
