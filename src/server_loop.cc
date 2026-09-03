@@ -325,6 +325,15 @@ void serverSetHolodiskAnnouncer(std::function<void()> announcer)
     gHolodiskAnnouncer = std::move(announcer);
 }
 
+// Worldmap-knowledge baseline emitter, installed by f2_server (server_worldmap.cc
+// is server-only; this file also builds into the client's headless server loop).
+static std::function<void()> gWorldmapBaseline;
+
+void serverSetWorldmapBaseline(std::function<void()> emitter)
+{
+    gWorldmapBaseline = std::move(emitter);
+}
+
 static void serverEmitBaseline()
 {
     gBaselineGeneration = mapGetLoadGeneration();
@@ -398,6 +407,9 @@ static void serverEmitBaseline()
     // its OWN screen (while others saw it correctly off the wire). No-op under the
     // null/file presenter, so goldens are unaffected. [[vault-suit-appearance-gap]]
     presenter()->movieSeenState(gameMoviesSeenData(), MOVIE_COUNT);
+    if (gWorldmapBaseline) {
+        gWorldmapBaseline();
+    }
 
     // Server-authored holodisks (SERVER INFORMATION). Re-announced with every baseline,
     // which is why they need no persistence — see server_control.cc serverEmitHolodisks.

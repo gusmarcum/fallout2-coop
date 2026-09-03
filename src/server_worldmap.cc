@@ -102,6 +102,19 @@ static void emitState()
     presenter()->worldDelta(WORLD_DELTA_GAMETIME);
 }
 
+void worldmapServerEmitBaseline()
+{
+    // A join or reconnect rebuilds the viewer from the blob, and the blob is
+    // the MAP save pipeline: city/subtile knowledge lives in the full-game
+    // save (wmWorldMap_save), so it was only ever streamed when the worldmap
+    // screen opened. A player who reconnected and never opened the worldmap
+    // saw every visited town flip back to unknown. Same fix shape as the
+    // movie-seen state that already rides the baseline (server_loop.cc).
+    gSubtileShadow.clear();
+    emitState();
+    emitSubtilesIfChanged();
+}
+
 int worldmapServerDriver()
 {
     ScopedGameMode gm(GameMode::kWorldmap);

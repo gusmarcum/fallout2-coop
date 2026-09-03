@@ -3510,11 +3510,12 @@ void serverControlLine(int sessionId, const char* line)
             // _adjust_ac(critter, oldArmor, newArmor). Harmless for non-armor (guarded).
             Object* oldArmor = critterGetArmor(gDude);
             _inven_wield(gDude, item, hand);
-            // A genuine two-handed weapon occupies BOTH hand slots (the UI represents that
-            // as leftHand==rightHand); _inven_wield only sets one flag, so pair them here.
-            if (itemGetType(item) == ITEM_TYPE_WEAPON && weaponIsTwoHanded(item)) {
-                item->flags |= (OBJECT_IN_LEFT_HAND | OBJECT_IN_RIGHT_HAND);
-            }
+            // NOTE: a two-handed weapon does NOT occupy both hand slots. Vanilla keeps
+            // the two slots independent (a rifle in one hand and a pistol in the
+            // other is normal play); "two-handed" is only a to-hit modifier. An
+            // earlier version set both hand flags here, which made rifles and
+            // shotguns show up in both inventory slots and confused every later
+            // wield/unwield of the other hand.
             if (itemGetType(item) == ITEM_TYPE_ARMOR) {
                 _adjust_ac(gDude, oldArmor, item);
                 // Server-authoritative APPEARANCE, the armor twin of the weapon block
