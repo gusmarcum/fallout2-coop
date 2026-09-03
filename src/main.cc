@@ -29,6 +29,7 @@
 #include "command.h"
 #include "credits.h"
 #include "critter.h"
+#include "display_monitor.h" // death / revive prompts
 #include "cycle.h"
 #include "db.h"
 #include "dbox.h" // showDialogBox — vanilla pipboy-in-combat refusal
@@ -1466,10 +1467,26 @@ static int mainClientViewer(const char* connectSpec)
         if (conn.inCombat() && clientSayActive()) {
             clientSayCancel();
         }
+        // Death prompt: the server refuses every action from a dead actor, but the
+        // viewer never said so or offered a way out. Latch on the transition only.
+        {
+            static bool wasDead = false;
+            bool dead = gDude != nullptr && critterIsDead(gDude);
+            if (dead && !wasDead) {
+                displayMonitorAddMessage((char*)"You are dead. Press R to get back up.");
+            }
+            wasDead = dead;
+        }
         bool sayConsumedKey = false;
         if (clientSayActive()) {
             sayConsumedKey = clientSayHandleKey(keyCode);
         } else if (keyCode == KEY_RETURN && !conn.inCombat() && !clientDialogActive()) {
+            clientSayOpen();
+            sayConsumedKey = true;
+        } else if ((keyCode == KEY_LOWERCASE_T || keyCode == KEY_UPPERCASE_T) && !clientDialogActive()) {
+            // 'T' opens chat in AND out of combat. Enter cannot in combat: there it
+            // is vanilla's end-combat key (the in-combat block below), so players had
+            // no way to talk mid-fight.
             clientSayOpen();
             sayConsumedKey = true;
         }
@@ -1722,6 +1739,20 @@ static int mainClientViewer(const char* connectSpec)
             // Uniform with 'I'/'S': reap deferred frees, let the main loop drain a
             // blob that buffered while the screen blocked.
             clientViewerFlushDeferredItemFrees();
+        } else if (keyCode == KEY_TAB) {
+            // TAB → the automap. Vanilla's gameHandleKey does this; the viewer's own
+            // dispatch never had a branch, so both the key and the interface bar's
+            // MAP button (registered with KEY_TAB) did nothing. Read-only, drawn from
+            // the same mirrored objects the pipboy's automap tab already renders;
+            // GameMode::kAutomap is in kViewerModalMask so the wire keeps pumping.
+            if (conn.inCombat()) {
+                soundPlayFile("iisxxxx1");
+            } else if (!clientDialogActive()) {
+                automapShow(true, false);
+            }
+        } else if ((keyCode == KEY_LOWERCASE_R || keyCode == KEY_UPPERCASE_R) && gDude != nullptr && critterIsDead(gDude)) {
+            // 'R' while dead → ask the server to stand us back up (selfrevive).
+            conn.sendLine("selfrevive");
         } else if (keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P) {
             // 'P' → the pipboy. Owner-reported as a dead button: this dispatch is the
             // viewer's OWN and deliberately never calls gameHandleKey, so until now there

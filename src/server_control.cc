@@ -2189,7 +2189,8 @@ void serverControlLine(int sessionId, const char* line)
             || strcmp(verb, "invclose") == 0
             || strcmp(verb, "look") == 0
             || serverControlIsSheetVerb(verb) // sheet bookkeeping, no world footprint
-            || strcmp(verb, "cancel") == 0; // aborting your own pending walk is not an action
+            || strcmp(verb, "cancel") == 0 // aborting your own pending walk is not an action
+            || strcmp(verb, "selfrevive") == 0; // the one thing a dead player may do
         // (`claim` needs no entry — it is answered above, before an actor is resolved.)
         if (!readOnlyVerb) {
             fprintf(stderr, "f2_server: control %s dropped (actor is dead, session %d)\n",
@@ -2197,6 +2198,21 @@ void serverControlLine(int sessionId, const char* line)
             serverControlRefuse(sessionId, "You are dead.");
             return;
         }
+    }
+
+    if (strcmp(verb, "selfrevive") == 0) {
+        // Self-revive. Always the calling session's OWN actor, never a slot
+        // argument, so it cannot land on anyone else; same body as the
+        // operator's `revive` verb (server_admin.cc). Up at 1 HP where you fell.
+        if (!critterIsDead(actor)) {
+            serverControlRefuse(sessionId, "You are not dead.");
+            return;
+        }
+        critterRevive(actor);
+        char line[128];
+        snprintf(line, sizeof(line), "%s got back up.", critterGetName(actor));
+        presenter()->consoleMessageStyled(0, kMsgChannelSystem, line);
+        return;
     }
 
     // A BUSY player actor's next MUTATING verb is refused until its action animation

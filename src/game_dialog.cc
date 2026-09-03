@@ -2711,6 +2711,11 @@ static bool gDialogOptionsClipped = false;
 
 void gameDialogClearOptions()
 {
+    // The wire path (clientDialogRenderPendingNode) is the one re-render that
+    // used to skip this: the old node's option BUTTONS survived under the new
+    // node's text, so stale replies drew over live ones and caught clicks.
+    // Every other re-render in this file cleans up first; do it here too.
+    _gdProcessCleanup();
     gGameDialogOptionEntriesLength = 0;
     // A new node starts at the top. Without this, picking an option while scrolled down
     // would open the next node already scrolled, hiding its first replies.
