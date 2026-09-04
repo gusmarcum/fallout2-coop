@@ -561,6 +561,39 @@ static int _check_registry(Object* obj)
 // Returns -1 if object is playing some animation.
 //
 // 0x413EC8
+void animationDescribeBusy(Object* obj, char* out, size_t cap)
+{
+    size_t used = 0;
+    if (cap == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (obj == nullptr) {
+        return;
+    }
+    for (int s = 0; s < ANIMATION_SEQUENCE_LIST_CAPACITY; s++) {
+        AnimationSequence* seq = &(gAnimationSequences[s]);
+        if (s == gAnimationSequenceCurrentIndex || seq->field_0 == -1000) {
+            continue;
+        }
+        for (int d = 0; d < seq->length; d++) {
+            AnimationDescription* desc = &(seq->animations[d]);
+            if (desc->owner != obj) {
+                continue;
+            }
+            int n = snprintf(out + used, cap - used, "%sseq%d[%d/%d cur=%d] kind=%d anim=%d",
+                used != 0 ? ", " : "", s, d, seq->length, seq->animationIndex, desc->kind, desc->anim);
+            if (n < 0) {
+                return;
+            }
+            used += (size_t)n;
+            if (used >= cap) {
+                return;
+            }
+        }
+    }
+}
+
 int animationIsBusy(Object* a1)
 {
     if (gAnimationDescriptionCurrentIndex >= ANIMATION_DESCRIPTION_LIST_CAPACITY || a1 == nullptr) {
