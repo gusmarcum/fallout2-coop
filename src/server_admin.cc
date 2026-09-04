@@ -540,6 +540,33 @@ static Object* stressSpawnOne(int pid, int tile, int elevation)
     return obj;
 }
 
+// Attach scripts.lst entry `scriptNumber` (1-based, the SCRIPT_* numbers the
+// game's own scripts use) to a critter that was created from its proto alone.
+// Most named NPCs carry no script in their proto (Vic and Cassidy both have
+// sid -1 there): on a map the map file supplies it, so a console-spawned copy
+// stands mute and ignores every click until this is done. Same recipe as the
+// script engine's create_object_sid (interpreter_extra.cc opCreateObject).
+static bool spawnAttachScript(Object* object, int scriptNumber)
+{
+    if (object->sid != -1) {
+        scriptRemove(object->sid);
+        object->sid = -1;
+    }
+    if (scriptAdd(&(object->sid), SCRIPT_TYPE_CRITTER) == -1) {
+        return false;
+    }
+    Script* script;
+    if (scriptGetScript(object->sid, &script) == -1) {
+        return false;
+    }
+    script->index = scriptNumber - 1;
+    object->id = scriptsNewObjectId();
+    script->ownerId = object->id;
+    script->owner = object;
+    _scr_find_str_run_info(scriptNumber - 1, &(script->field_50), object->sid);
+    return true;
+}
+
 // True iff this record's pointer still names the object it was recorded for:
 // present in the world walk AND carrying the same id+pid.
 static bool stressRecordAlive(const StressSpawnRecord& record)
@@ -1564,8 +1591,10 @@ bool serverAdminLine(const char* line,
     }
 
     if (strcmp(verb, "spawn") == 0) {
-        // `spawn <pid> [n] [tile]` — place n critters of pid; tile -1/absent =
-        // random near the players. pid takes 0x-hex or decimal (strtol base 0).
+        // `spawn <pid> [n] [tile] [script]` — place n critters of pid; tile -1/absent
+        // = random near the players. pid takes 0x-hex or decimal (strtol base 0).
+        // script = scripts.lst line number (1-based) to attach, for NPCs whose proto
+        // carries none (see spawnAttachScript); 0/absent = the proto's own, if any.
         if (!worldLoaded) {
             reply("spawn: no world loaded");
             return true;
@@ -1574,13 +1603,20 @@ bool serverAdminLine(const char* line,
         char pidText[32];
         char nText[32];
         char tileText[32];
+        char scriptText[32];
         const char* args = splitVerb(rest != nullptr ? rest : "", pidText, sizeof(pidText));
         args = splitVerb(args != nullptr ? args : "", nText, sizeof(nText));
-        splitVerb(args != nullptr ? args : "", tileText, sizeof(tileText));
+        args = splitVerb(args != nullptr ? args : "", tileText, sizeof(tileText));
+        splitVerb(args != nullptr ? args : "", scriptText, sizeof(scriptText));
 
         int pid = static_cast<int>(strtol(pidText, nullptr, 0));
         int count = nText[0] != '\0' ? atoi(nText) : 1;
         int wantTile = tileText[0] != '\0' ? atoi(tileText) : -1;
+        int scriptNumber = scriptText[0] != '\0' ? atoi(scriptText) : 0;
+        if (scriptNumber < 0) {
+            reply("spawn: script must be a scripts.lst line number (1-based)");
+            return true;
+        }
 
         Proto* proto;
         if (PID_TYPE(pid) != OBJ_TYPE_CRITTER || protoGetProto(pid, &proto) == -1) {
@@ -1594,6 +1630,7 @@ bool serverAdminLine(const char* line,
 
         std::mt19937 rng(std::random_device {}());
         int placed = 0;
+        int lastTile = -1;
         int unreachable = 0; // only counted on the random path; an explicit tile is honored
         for (int i = 0; i < count; i++) {
             int tile = wantTile != -1 && hexGridTileIsValid(wantTile)
@@ -1602,15 +1639,23 @@ bool serverAdminLine(const char* line,
             if (tile == -1) {
                 break;
             }
-            if (stressSpawnOne(pid, tile, gElevation) != nullptr) {
-                placed++;
+            Object* spawned = stressSpawnOne(pid, tile, gElevation);
+            if (spawned == nullptr) {
+                continue;
             }
+            placed++;
+            if (scriptNumber > 0 && !spawnAttachScript(spawned, scriptNumber)) {
+                snprintf(msg, sizeof(msg), "spawn: script %d could not be attached (bad scripts.lst number?)", scriptNumber);
+                reply(msg);
+            }
+            lastTile = spawned->tile;
         }
 
-        snprintf(msg, sizeof(msg), "spawn: placed %d/%d of pid 0x%X (%zu tracked)",
-            placed, count, pid, gStressSpawned.size());
+        snprintf(msg, sizeof(msg), "spawn: placed %d/%d of pid 0x%X%s%s at tile %d (%zu tracked)",
+            placed, count, pid, scriptNumber > 0 ? " with script " : "",
+            scriptNumber > 0 ? scriptText : "", lastTile, gStressSpawned.size());
         reply(msg);
-        fprintf(stderr, "f2_server: admin spawn pid=0x%X placed=%d\n", pid, placed);
+        fprintf(stderr, "f2_server: admin spawn pid=0x%X placed=%d script=%d\n", pid, placed, scriptNumber);
         return true;
     }
 
