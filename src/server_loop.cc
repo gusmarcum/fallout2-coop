@@ -31,6 +31,8 @@
 #include "scripts.h"
 #include "server_players.h"
 #include "sim_clock.h"
+#include "game_dialog.h"
+#include "script_request_handler.h"
 #include "worldmap.h" // wmMapMusicStart — baseline music re-announce
 #include "object.h"
 #include "party_member.h" // objectIsPartyMember — companions ride the baseline (§C domain)
@@ -462,6 +464,21 @@ void serverTick(int tick, const std::function<void(int)>& intentsDrain, bool adv
     simClockAdvance(kServerTickDelta);
     _process_bk();
     scriptsHandleRequests();
+    // dialogue_system_enter (how scenery that talks starts its conversation:
+    // the Gecko robot terminal, consoles, computers) parks a pending-dialog
+    // game state plus gGameDialogSpeaker for the vanilla UI loop to pick up
+    // (_gdialogSystemEnter, game_ui.cc). The dedicated server has no UI loop,
+    // so the request sat there forever and the player only saw _obj_use's
+    // "You see: Computer". Service it here through the same handler the TALK
+    // request uses, so the drive is attributed to the clicking player and the
+    // nodes are streamed; mirror _gdialogSystemEnter's state bookkeeping.
+    if (gameGetState() == GAME_STATE_5 && gGameDialogSpeaker != nullptr) {
+        Object* speaker = gGameDialogSpeaker;
+        gameUpdateState(); // 5 -> 4
+        scriptRequestHandler()->dialogEnter(speaker);
+        gameRequestState(GAME_STATE_2);
+        gameUpdateState(); // 3 -> 2
+    }
 
     // Player-initiated combat start (cstart verb): honor the claimant's intent to
     // enter combat on the idle tick — the wire equivalent of vanilla's 'A' toggle

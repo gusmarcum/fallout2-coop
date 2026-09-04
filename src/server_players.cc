@@ -391,6 +391,20 @@ Object* scriptContextDude(Program* program)
         return gDude;
     }
 
+    // The proc's own SOURCE wins when it is a player: use_p_proc, pickup,
+    // talk and friends are triggered BY a player, and their scripts open with
+    // `if (source_obj == dude_obj)`. Resolving dude_obj to the nearest player
+    // instead failed that check whenever another player stood closer to the
+    // object than the one who clicked it (the Gecko robot terminal printed
+    // only the engine's "You see: Computer" with two players at the desk).
+    {
+        Script* script;
+        if (scriptGetScript(scriptGetSid(program), &script) != -1 && script->source != nullptr
+            && playerActorIs(script->source) && !critterIsDead(script->source)) {
+            return script->source;
+        }
+    }
+
     // A party member's script (its critter_p_proc follow loop reads dude_obj)
     // follows its recruiter, not whichever player happens to be nearest this
     // beat. That flip-flop is the "confused who to follow" report.

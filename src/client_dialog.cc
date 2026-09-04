@@ -286,7 +286,8 @@ bool clientDialogHandleKey(int keyCode)
 
     // REPLY PAGING: a reply longer than the 379x58 window used to be cut off
     // (see gameDialogReplyNextPage). SPACE shows the next page, as in vanilla.
-    if (keyCode == KEY_SPACE && gameDialogReplyHasMore()) {
+    if (gameDialogReplyHasMore()
+        && (keyCode == KEY_SPACE || keyCode == KEY_PAGE_DOWN || keyCode == KEY_ARROW_DOWN)) {
         gameDialogReplyNextPage();
         return true;
     }
