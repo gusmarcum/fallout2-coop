@@ -3462,8 +3462,25 @@ void serverControlLine(int sessionId, const char* line)
                 seconds = 180;
             }
             seconds -= seconds % 10;
-            _obj_arm_explosive(item, seconds);
-            fprintf(stderr, "f2_server: control useitem_armexplosive pid=%d seconds=%d\n", pid, seconds);
+            // Arm ONE unit, not the stack. A stack is a single object whose pid
+            // explosiveActivate() rewrites, so arming five plastic explosives
+            // armed all five and every drop peeled one unit off a live fuse.
+            // Split a single unit off first: a partial itemRemove leaves a
+            // fresh copy in the inventory holding the remainder and detaches
+            // THIS object as the removed unit, which is then armed and re-added
+            // as its own stack (the armed pid never merges with the unarmed one).
+            if (stackQty > 1) {
+                if (itemRemove(gDude, item, 1) != 0) {
+                    fprintf(stderr, "f2_server: control useitem_armexplosive pid=%d could not split the stack\n", pid);
+                    serverControlRefuse(sessionId, "Couldn't separate one from the stack.");
+                    return;
+                }
+                _obj_arm_explosive(item, seconds);
+                itemAdd(gDude, item, 1);
+            } else {
+                _obj_arm_explosive(item, seconds);
+            }
+            fprintf(stderr, "f2_server: control useitem_armexplosive pid=%d seconds=%d (one unit of %d)\n", pid, seconds, stackQty);
             return;
         }
 
