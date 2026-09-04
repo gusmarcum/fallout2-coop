@@ -2082,6 +2082,21 @@ static void partyOrdersApply(Object* member, int type, int index)
     }
 }
 
+// The vanilla Combat Control window's five preset buttons, top to bottom, and the
+// disposition each one selects (game_dialog.cc: rest state = buttons[4 - disposition];
+// the Custom button also sets 0 before opening the Customize window). The names are
+// the window's own art labels; custom.msg has no text for them.
+static const char* partyOrdersDispositionName(int disposition)
+{
+    switch (disposition) {
+    case 4: return "Berserk";
+    case 3: return "Aggressive";
+    case 2: return "Defensive";
+    case 1: return "Coward";
+    default: return "Custom";
+    }
+}
+
 static void serverDialogPartyOrders()
 {
     Object* member = gGameDialogSpeaker;
@@ -2101,6 +2116,14 @@ static void serverDialogPartyOrders()
         snprintf(gDialogReplyText, sizeof(gDialogReplyText),
             "%s: How do you want me to fight? Pick a line to change it.", critterGetName(member));
         gameDialogClearOptions(); // length, scroll and clipping reset
+        {
+            // Line 0: the preset (the window's Berserk / Aggressive / Defensive / Coward /
+            // Custom buttons). Picking it cycles to the next preset, which swaps the
+            // member's whole AI packet exactly as the buttons do (aiSetDisposition).
+            char line[256];
+            snprintf(line, sizeof(line), "Disposition: %s", partyOrdersDispositionName(aiGetDisposition(member)));
+            gameDialogAddTextOption(-1, line, GAME_DIALOG_REACTION_NEUTRAL);
+        }
         for (int type = 0; type < PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT; type++) {
             int index = partyOrdersCurrentIndex(member, type);
             char line[256];
@@ -2134,10 +2157,23 @@ static void serverDialogPartyOrders()
         if (intent.kind != DIALOG_INTENT_SELECT) {
             break; // Combat Control / barter pressed again: treat as Done
         }
-        if (intent.arg < 0 || intent.arg >= PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT) {
+        if (intent.arg < 0 || intent.arg > PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT) {
             break; // Done (or out of range)
         }
-        int type = intent.arg;
+        if (intent.arg == 0) {
+            int nextDisposition = (aiGetDisposition(member) + 1) % 5;
+            aiSetDisposition(member, nextDisposition);
+            fprintf(stderr, "f2_server: party orders %s: disposition -> %s\n", critterGetName(member),
+                partyOrdersDispositionName(aiGetDisposition(member)));
+            continue;
+        }
+        int type = intent.arg - 1;
+        // Editing a single order is what the window's Customize screen does, and vanilla
+        // switches to the Custom preset before opening it (a preset packet is shared
+        // by every companion using it). Same here.
+        if (aiGetDisposition(member) != 0) {
+            aiSetDisposition(member, 0);
+        }
         int next = (partyOrdersCurrentIndex(member, type) + 1) % partyOrdersCount(type);
         partyOrdersApply(member, type, next);
         fprintf(stderr, "f2_server: party orders %s: %s -> %s\n", critterGetName(member),
