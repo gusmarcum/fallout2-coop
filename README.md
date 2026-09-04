@@ -1,10 +1,10 @@
 # Fallout 2 — Dedicated (co-op) Server & Client
 
-> **This is a maintained fork** of [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop)
-> (v0.4) with bug fixes from live two-player play and a Windows test harness. The fixes are
-> offered upstream as a pull request; until they land there, this fork is where they live.
-> Same licence (Sustainable Use, non-commercial), same "bring your own Fallout 2" rule: no
-> game assets are included.
+> **This project is derived from** [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop)
+> (v0.4), itself built on [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce).
+> It carries bug fixes from live two-player play and a Windows test harness, and is developed
+> here as its own project. Same licence (Sustainable Use, non-commercial), same "bring your own
+> Fallout 2" rule: no game assets are included.
 >
 > **What is fixed here (compared with v0.4):**
 > talking terminals and computers open their screens; clients with a failed audio device
