@@ -1,31 +1,79 @@
 # Fallout 2 Co-op
 
-A dedicated server and a network client for Fallout 2, built on
-[Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce). One PC runs the
-server, which owns the world: scripts, combat, dialogue, the worldmap, saves. Each player runs
-the client, which shows the shared world and sends what the player does. Several people play
-one persistent game with their own characters.
+Play Fallout 2 together. One PC runs a dedicated server that owns the world: scripts, combat,
+dialogue, the worldmap, saves. Every player runs a client that shows that shared world and
+sends what they do. Several people, one persistent game, each with their own character.
 
-This project started from [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop)
-v0.4 and is developed here as its own project. It carries about twenty fixes found in live
-two-player sessions and a test harness that runs on Windows.
+Built on [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce), derived
+from [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop) v0.4, and developed
+here as its own project. No game files are included: bring your own Fallout 2 (Steam or GOG,
+US 1.02d). Licence: Sustainable Use (non-commercial), inherited from Fallout 2 Community
+Edition.
 
-No game files are included. You need your own copy of Fallout 2 (Steam or GOG, US 1.02d).
-Licence: Sustainable Use (non-commercial), inherited from Fallout 2 Community Edition.
+## What this project adds
 
-## What you need
+Everything below came out of real two-player sessions, was traced to its cause in the engine,
+fixed at the cause, and verified against a 41-scenario regression suite before it shipped.
+The commit history carries the full reasoning for each one.
 
-- Windows PCs for the host and every player (the server also builds and runs on Linux).
-- Fallout 2 installed on each PC. The server needs a full copy of the game files too.
-- A network path between the PCs. A VPN such as ZeroTier is the recommended way to play over
-  the internet. Do not forward the game port to the internet: the wire has no authentication.
+**The world now survives a reconnect.** Co-op players reconnect a lot. Before, a rejoining
+client came back to a map where every visited town had turned unknown again, the Pip-Boy
+showed finished quests as open, and dead players stood back up. All three had the same
+shape: the server knew the truth, but a joining client was only ever sent the changes that
+happened after it arrived. Joins now carry the whole city table, the whole quest-variable
+table, and no longer rebuild a dead player's standing pose.
+
+**Computers and terminals work.** Every talking piece of scenery in the game, the Gecko
+power plant's robot terminal among them, starts its conversation through an engine request
+that only the vanilla client loop ever serviced. The dedicated server never ran that loop, so
+each of those terminals silently did nothing in co-op. The server tick now services the
+request, and the conversation is attributed to the player who clicked, so their answers are
+accepted.
+
+**Companions know who they belong to.** The follow logic read the single-player "the
+player" variable, which on a server with several players resolved to whoever the last action
+left behind, usually the host. Companions beelined for the wrong person or flip-flopped
+between two. Each party member now records who recruited them and follows that player,
+falling back to the nearest one on the same floor.
+
+**Companion combat orders in co-op.** Vanilla's Combat Control window runs a local loop on
+the machine that opens it and edits a local copy of the companion's settings, which the
+server never sees, so the feature was unreachable in co-op. The Combat Control button on a
+companion now opens their orders as a dialogue node served by the server: burst, run away,
+weapon preference, distance, target, chem use. Pick a line to cycle it, Done to return. Same
+settings, same labels, saved with the game.
+
+**Sound that tells you what is wrong.** The client's audio initialisation compared the SDL
+result with the wrong failure value, so a refused audio device passed as open and a player
+simply had no sound, with no error anywhere. The client now detects it, tries the other
+audio drivers, and prints the reason on the message line if it still cannot play. Music that
+died (a stall while another player joined, a movie that never resumed it) is restarted by a
+watchdog instead of staying dead for the session.
+
+**Dialogue that works over the wire.** Stale reply options no longer draw over the new node.
+Long replies page (Down, Page Down or SPACE forward, Up or Page Up back). The Review button
+shows the conversation's history, which the client now records itself. Chat opens on `T`,
+also in combat, where Enter is the end-combat key.
+
+**Small things that mattered in play.** Two-handed weapons stopped occupying both hand slots.
+Arming one explosive from a stack arms one, not the stack. A dead player presses `R` to get
+back up instead of waiting for the operator. TAB opens the automap. Push works on companions.
+A stuck wait cursor clears itself. The operator's `save` refuses at moments when it would
+have failed silently, and a `gvar` console command exists for repairing a world's quest
+flags.
+
+**A test harness that runs on Windows.** The engine's two golden suites, 41 headless
+scenarios that replay fixed inputs and compare the resulting world state byte for byte, only
+ran on Linux. Headless probes now run on Windows: exempt from the single-instance locks,
+deterministic (the RNG seed no longer comes from the wall clock), and blessed against a
+Windows result set. Every commit in this repository passes both suites.
 
 ## Quick start
 
-**Host (one PC runs the server and, usually, a client too)**
+**Host** (runs the server, and usually a client too)
 
-1. Copy your Fallout 2 folder somewhere new, for example `D:\Games\Fallout2Coop`. This copy is
-   the world: its `data\SAVEGAME` holds the co-op saves.
+1. Copy your Fallout 2 folder somewhere new, for example `D:\Games\Fallout2Coop`. That copy
+   is the world; its `data\SAVEGAME` holds the co-op saves.
 2. Put `f2_server.exe` and `fallout2-ce.exe` from a release into that folder.
 3. Start the server from a `.cmd` file in that folder:
 
@@ -63,7 +111,9 @@ Put `fallout2-ce.exe` next to your own Fallout 2 files and start it with the hos
 time a name is seen you create a character; after that the same name is the same character.
 Names must differ between players and stay the same across sessions.
 
-The client reads `fallout2.cfg` from the folder the exe is in. Keep it next to the game files.
+A VPN such as ZeroTier is the recommended way to play over the internet. Do not forward the
+game port to the internet: the wire has no authentication. The client reads `fallout2.cfg`
+from the folder the exe is in, so keep it next to the game files.
 
 ## Keys in the client
 
@@ -75,7 +125,7 @@ The client reads `fallout2.cfg` from the folder the exe is in. Keep it next to t
 | `R` | when dead: get back up at 1 HP where you fell |
 | `Down` / `PgDn` / `SPACE` | next page of a long dialogue reply; `Up` / `PgUp` previous page |
 | Review button | this conversation's history |
-| Combat Control button | on a companion: their combat orders (burst, run away, weapon, distance, target, chems) |
+| Combat Control button | on a companion: their combat orders |
 | hold left click on a companion | menu with Push |
 
 ## Server settings
@@ -109,21 +159,12 @@ command per line. It answers once a client is connected.
 | `save <1-10> [label]` | save the world (refused during combat, dialogue, travel, map change) |
 | `load <1-15>` / `new <map.map>` | restore a slot / boot a fresh world (lobby only) |
 | `revive <slot>` | stand a dead player up (players can also press `R`) |
+| `give <pid> <count>` | give items to the host character; `count` is stacks (boxes for ammo) |
+| `gvar <index> [value]` | read or set a global script variable (quest flags) |
 | `say <channel> <text>` | a line to every client |
 | `quit` | stop the server |
 
 The admin port has no password. Keep it bound to localhost or a VPN interface only.
-
-## Fixed here compared with v0.4
-
-Talking terminals and computers open their screens; a client whose audio device fails to open
-is told so instead of playing silently, and music restarts itself after it dies; visited
-worldmap locations survive a reconnect; dead players stay down after a reconnect; two-handed
-weapons use one slot; old dialogue options no longer draw over new ones; long replies page;
-the Review button works; chat during combat; automap; self-revive; companions follow the
-player who recruited them; the companion combat-orders menu; arming an explosive arms one unit
-of a stack, not all of them; a stuck wait cursor clears itself; the operator `save` refuses at
-the wrong moment instead of failing. See the commit history for causes and details.
 
 ## Building on Windows
 
@@ -137,12 +178,9 @@ cmake --build build-win --target f2_server fallout2-ce -j4
 ```
 
 The two exes in `build-win` depend only on Windows system libraries. SDL2 and zlib are fetched
-and built during configure. Linux builds follow the upstream instructions in `DEDICATED_HOWTO.md`.
+and built during configure. Linux builds follow `DEDICATED_HOWTO.md`.
 
 ## Testing
-
-Two headless golden suites replay fixed scenarios and compare the world state dump against
-checked-in results. On Windows:
 
 ```bash
 export F2_GAME_DIR=/path/to/a/game/folder F2_BIN=$F2_GAME_DIR/fallout2-ce.exe
@@ -150,14 +188,15 @@ F2_GOLDEN_DIR=$PWD/tests/golden/server-win tests/golden/run_golden_server.sh
 F2_GOLDEN_DIR=$PWD/tests/golden/legacy-win  tests/golden/run_golden.sh
 ```
 
-Copy the client exe into the game folder first: it reads its config from its own directory.
-The Windows results live in `tests/golden/server-win` and `legacy-win`; the Linux set is the
-checked-in default. Both suites pass on every commit of this repository.
+Copy the client exe into the game folder first: it reads its config from its own directory,
+and the Windows goldens were blessed on Hard difficulty. The Windows result sets live in
+`tests/golden/server-win` and `legacy-win`; the Linux sets are the checked-in default. Both
+suites pass on every commit of this repository.
 
 ## Known limits
 
 - No authentication on the game port; the admin port has none either. Use a VPN.
-- One client per PC (the engine's single-instance lock); the headless test probes are exempt.
+- One client per PC (the engine's single-instance lock); headless test probes are exempt.
 - The world is one map at a time; players travel together.
 - A companion's recruiter is not stored in saves; after a load they follow the nearest player
   until re-recruited.
