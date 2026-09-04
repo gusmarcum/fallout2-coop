@@ -61,6 +61,49 @@ static void emitSubtilesIfChanged()
     presenter()->worldmapSubtiles(flat.data(), (int)flat.size());
 }
 
+// City table (known / visited / entrance states). emitState() only carries the
+// CURRENT area's visited flag, so a viewer that (re)joined started from the
+// stock map: every town it had visited showed as unknown again. Shadowed so
+// the beat hook below is free when nothing changed.
+static std::vector<unsigned char> gAreasShadow;
+
+static void emitAreasIfChanged()
+{
+    if (wmMaxAreaNum <= 0 || wmAreaInfoList == nullptr) {
+        return;
+    }
+    std::vector<int> states(wmMaxAreaNum);
+    std::vector<int> visited(wmMaxAreaNum);
+    std::vector<unsigned int> masks(wmMaxAreaNum);
+    std::vector<unsigned char> flat;
+    flat.reserve(wmMaxAreaNum * 6);
+    for (int i = 0; i < wmMaxAreaNum; i++) {
+        CityInfo* city = &(wmAreaInfoList[i]);
+        unsigned int mask = 0;
+        int count = city->entrancesLength;
+        if (count > 32) count = 32;
+        for (int e = 0; e < count; e++) {
+            if (city->entrances[e].state != 0) mask |= 1u << e;
+        }
+        states[i] = city->state;
+        visited[i] = city->visitedState;
+        masks[i] = mask;
+        flat.push_back((unsigned char)city->state);
+        flat.push_back((unsigned char)city->visitedState);
+        for (int b = 0; b < 4; b++) flat.push_back((unsigned char)(mask >> (8 * b)));
+    }
+    if (flat == gAreasShadow) {
+        return;
+    }
+    gAreasShadow = flat;
+    presenter()->worldmapAreas(states.data(), visited.data(), masks.data(), wmMaxAreaNum);
+}
+
+void worldmapServerEmitAreasIfChanged()
+{
+    emitAreasIfChanged();
+}
+
 static void emitState()
 {
     // WHICH DISTRICTS ARE KNOWN. Only for the area underfoot — it is the only one whose
@@ -111,8 +154,10 @@ void worldmapServerEmitBaseline()
     // saw every visited town flip back to unknown. Same fix shape as the
     // movie-seen state that already rides the baseline (server_loop.cc).
     gSubtileShadow.clear();
+    gAreasShadow.clear();
     emitState();
     emitSubtilesIfChanged();
+    emitAreasIfChanged();
 }
 
 int worldmapServerDriver()
@@ -258,6 +303,7 @@ int worldmapServerDriver()
 
             emitState();
             emitSubtilesIfChanged();
+            emitAreasIfChanged();
 
             // A random encounter fired and staged its map. LEAVE NOW — the tail
             // below performs the mapLoadById. Falling through to `continue` would
@@ -314,6 +360,7 @@ int worldmapServerDriver()
             wmPartyInitWalking(intent.x, intent.y);
             emitState();
             emitSubtilesIfChanged();
+            emitAreasIfChanged();
         } else if (intent.kind == WM_INTENT_ENTER) {
             if (wmGenData.currentAreaId != -1) {
                 CityInfo* city = &(wmAreaInfoList[wmGenData.currentAreaId]);

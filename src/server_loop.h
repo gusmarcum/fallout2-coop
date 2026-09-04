@@ -127,6 +127,7 @@ int serverSessionForSlot(int slot);
 void serverSetHolodiskAnnouncer(std::function<void()> announcer);
 // Installed by f2_server: (re)sends worldmap knowledge with every baseline.
 void serverSetWorldmapBaseline(std::function<void()> emitter);
+void serverSetWorldmapBeat(std::function<void()> emitter);
 
 // Install the in-combat interaction executor (server_control.cc's
 // serverControlRunCombatInteract). Same bridge idiom as the queries above, and

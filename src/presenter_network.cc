@@ -240,6 +240,7 @@ enum EventType : unsigned char {
     EVENT_LOOT_GRANT = 59, // co-op: the server opened a container for THIS actor — show the screen
     EVENT_STATE_AUDIT = 60, // authoritative per-object state, for mirror divergence checking
     EVENT_UI_LOCK = 61, // scripted cutscene input lock (op_game_ui_disable/_enable), addressed
+    EVENT_WORLDMAP_AREAS = 62, // worldmap city table: known/visited/entrances for every area
 };
 
 // Event flag bits.
@@ -1182,6 +1183,21 @@ public:
         putI32((int)currentAreaEntranceMask);
         endEvent();
         flushFrame();
+    }
+
+    void worldmapAreas(const int* states, const int* visited, const unsigned int* entranceMasks, int count) override
+    {
+        if (presenterEmissionsSuppressed()) return;
+        if (count <= 0 || states == nullptr || visited == nullptr || entranceMasks == nullptr) return;
+        if (eventTraceEnabled()) fprintf(stderr, "[worldmap] SEND areas n=%d\n", count);
+        beginEvent(EVENT_WORLDMAP_AREAS, 0);
+        putU16((unsigned short)count);
+        for (int i = 0; i < count; i++) {
+            putU8((unsigned char)states[i]);
+            putU8((unsigned char)visited[i]);
+            putI32((int)entranceMasks[i]);
+        }
+        endEvent();
     }
 
     void worldmapSubtiles(const unsigned char* states, int count) override

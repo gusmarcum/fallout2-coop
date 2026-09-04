@@ -681,6 +681,9 @@ public:
     // only ~840 bytes for FO2's 20 tiles, so it ships whole rather than as
     // per-subtile deltas; the server suppresses it unless something changed.
     virtual void worldmapSubtiles(const unsigned char* states, int count) {}
+    // Whole city table: per area its map state (known/unknown), visited state and
+    // an entrance-state bitmask. Full-save state the viewer never receives.
+    virtual void worldmapAreas(const int* states, const int* visited, const unsigned int* entranceMasks, int count) {}
 
     // World view invalidation (legacy tileWindowRefresh / ...Rect).
     virtual void worldInvalidate() {}

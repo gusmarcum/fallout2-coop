@@ -51,6 +51,7 @@
 int main(int argc, char** argv)
 {
     fallout::serverSetWorldmapBaseline(fallout::worldmapServerEmitBaseline);
+    fallout::serverSetWorldmapBeat(fallout::worldmapServerEmitAreasIfChanged);
     using namespace fallout;
 
     // F2_SERVER_MAP=<map.map>: boot the headless simulation core, load the map,

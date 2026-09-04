@@ -11,6 +11,8 @@ int worldmapServerDriver();
 // (visited/known cities, subtile fog). Forces the subtile emit so a fresh
 // viewer gets it even when nothing changed since the last emit.
 void worldmapServerEmitBaseline();
+// Beat hook: (re)send the city table when it changed (scripts mark towns known outside the worldmap screen).
+void worldmapServerEmitAreasIfChanged();
 
 void worldmapSetServerPump(std::function<bool()> pump);
 
