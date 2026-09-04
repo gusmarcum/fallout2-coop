@@ -57,6 +57,8 @@ int _partyMemberSyncPosition();
 // Co-op: the player this member follows (its recruiter when reachable, else the
 // nearest live player on its elevation, else gDude). gDude in single-player.
 Object* partyMemberLeader(Object* member);
+int partyMemberCount(); // list length incl. the dude at index 0
+Object* partyMemberAt(int index);
 int _partyMemberRestingHeal(int a1);
 void restHealReset();
 bool restHealCheck(int minutes);

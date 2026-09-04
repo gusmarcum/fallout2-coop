@@ -778,6 +778,12 @@ int partyMembersLoad(File* stream)
             if (object != nullptr) {
                 gPartyMembers[index].object = object;
                 gPartyMembers[index].ownerSlot = -1; // not persisted; nearest player until re-recruited
+                // The map save was written with these flags CLEARED (_partyMemberPrepSave,
+                // so objectSaveAll would include the member) and nothing re-armed them
+                // after a load. Without NO_REMOVE the next map change's _obj_remove_all
+                // deleted every companion; the following save wrote their ids with no
+                // object behind them, and the load after that dropped them for good.
+                object->flags |= (OBJECT_NO_REMOVE | OBJECT_NO_SAVE);
             } else {
                 debugPrint("Couldn't find party member on map...trying to load anyway.\n");
                 // ►► THIS IS SILENT DATA LOSS, AND IT MUST NOT BE. The id resolved
@@ -890,6 +896,16 @@ Object* partyMemberLeader(Object* member)
         }
     }
     return nearest != nullptr ? nearest : gDude;
+}
+
+int partyMemberCount()
+{
+    return gPartyMembersLength;
+}
+
+Object* partyMemberAt(int index)
+{
+    return index >= 0 && index < gPartyMembersLength ? gPartyMembers[index].object : nullptr;
 }
 
 int _partyMemberSyncPosition()

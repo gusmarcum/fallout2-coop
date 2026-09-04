@@ -1068,6 +1068,56 @@ bool serverAdminLine(const char* line,
         return true;
     }
 
+    if (strcmp(verb, "party") == 0) {
+        // party: list the server's party members (index 0 is the host body).
+        if (!worldLoaded) {
+            reply("party: no world loaded");
+            return true;
+        }
+        snprintf(msg, sizeof(msg), "party: %d entries", partyMemberCount());
+        reply(msg);
+        for (int index = 1; index < partyMemberCount(); index++) {
+            Object* member = partyMemberAt(index);
+            snprintf(msg, sizeof(msg), "  [%d] %s pid=%d id=%d tile=%d %s", index,
+                member != nullptr ? critterGetName(member) : "?", member != nullptr ? (int)(member->pid & 0xFFFFFF) : -1,
+                member != nullptr ? member->id : -1, member != nullptr ? member->tile : -1,
+                member != nullptr && critterIsDead(member) ? "(dead)" : "");
+            reply(msg);
+        }
+        return true;
+    }
+    if (strcmp(verb, "partyadd") == 0) {
+        // partyadd <critter pid>: re-attach a critter standing on the current map to
+        // the party (e.g. 89 = John Cassidy). The repair for companions the old
+        // build turned back into plain NPCs on a map change after a load.
+        if (!worldLoaded) {
+            reply("partyadd: no world loaded");
+            return true;
+        }
+        int pid = rest != nullptr ? atoi(rest) : 0;
+        if (pid <= 0) {
+            reply("usage: partyadd <critter pid number>   (see pro_crit.msg; 89 = John Cassidy)");
+            return true;
+        }
+        Object* found = nullptr;
+        for (Object* o = objectFindFirst(); o != nullptr; o = objectFindNext()) {
+            if (PID_TYPE(o->pid) == OBJ_TYPE_CRITTER && (int)(o->pid & 0xFFFFFF) == pid && !critterIsDead(o)) {
+                found = o;
+                break;
+            }
+        }
+        if (found == nullptr) {
+            snprintf(msg, sizeof(msg), "partyadd: no living critter with pid %d on this map", pid);
+            reply(msg);
+            return true;
+        }
+        int rc = partyMemberAdd(found);
+        snprintf(msg, sizeof(msg), "partyadd: %s (pid %d) -> rc=%d, party now %d entries",
+            critterGetName(found), pid, rc, partyMemberCount());
+        reply(msg);
+        fprintf(stderr, "f2_server: admin partyadd pid=%d rc=%d\n", pid, rc);
+        return true;
+    }
     if (strcmp(verb, "gvar") == 0) {
         // `gvar <index> [value]` — read or set one global script variable. The
         // repair tool for a world whose quest flags went wrong (indices are the
