@@ -3899,6 +3899,13 @@ static void _obj_insert(ObjectListNode* objectListNode)
 }
 
 // 0x48DA58
+static ObjectFreedHook gObjectFreedHook = nullptr;
+
+void objectSetFreedHook(ObjectFreedHook hook)
+{
+    gObjectFreedHook = hook;
+}
+
 static int _obj_remove(ObjectListNode* a1, ObjectListNode* a2)
 {
     if (a1->obj == nullptr) {
@@ -3907,6 +3914,10 @@ static int _obj_remove(ObjectListNode* a1, ObjectListNode* a2)
 
     if ((a1->obj->flags & OBJECT_NO_REMOVE) != 0) {
         return -1;
+    }
+
+    if (gObjectFreedHook != nullptr) {
+        gObjectFreedHook(a1->obj); // before the inventory walk: carried items fire their own
     }
 
     _obj_inven_free(&(a1->obj->data.inventory));

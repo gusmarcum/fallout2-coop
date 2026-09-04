@@ -57,6 +57,13 @@ int objectEnableOutline(Object* obj, Rect* rect);
 int objectDisableOutline(Object* obj, Rect* rect);
 int _obj_toggle_flat(Object* obj, Rect* rect);
 int objectDestroy(Object* object, Rect* rect);
+
+// Called for every object the engine is about to free, world objects and carried
+// items alike (_obj_remove, which _obj_inven_free also goes through). The network
+// client hangs its netId -> Object* bookkeeping on it, so no wire event can ever
+// resolve a netId to freed memory. Null by default; the server never sets it.
+typedef void (*ObjectFreedHook)(Object* object);
+void objectSetFreedHook(ObjectFreedHook hook);
 int _obj_inven_free(Inventory* inventory);
 bool _obj_action_can_use(Object* obj);
 bool _obj_action_can_talk_to(Object* obj);

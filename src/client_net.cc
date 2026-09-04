@@ -43,6 +43,7 @@
 #include "actions.h" // actionExplodeReplay + actionPresReplayShowDeath — viewer explosion replay
 #include "automap.h" // automapSaveCurrent — a viewer records its OWN pipboy map
 #include "animation.h" // reg_anim_* / animationRegister* — the real engine the recorded stream drives
+#include "memory.h" // internal_realloc — mirrorInventoryAppend
 #include "object.h"
 #include "pipboy.h" // pipboyServerHolodisk* — server-authored holodisks
 #include "perk.h" // perkPlayerActorSeedRanks — per-actor sheet rows
@@ -369,6 +370,33 @@ static bool gEncounterPromptActive = false;
 
 // The decoder's live index: wire netId -> local Object*. Seeded from the loaded
 // blob's post-walk objects, maintained by SPAWN/DESTROY.
+class Decoder;
+static Decoder* gActiveDecoder = nullptr; // the live mirror, for the engine's freed-object hook
+
+// Append a wire stack to an inventory as its own slot, never merging. The engine's
+// itemAdd merges anything _item_identical, and its merge FREES the existing slot's
+// object and swaps the new one in. The mirror had just matched and kept that object
+// for an earlier wire stack of the same pid (an equipped weapon and a spare, two
+// ammo boxes), and _net still named it, so the next event for it was a
+// use-after-free: the 0xc0000374 heap-corruption crash inside onDestroy.
+static void mirrorInventoryAppend(Object* owner, Object* item, int quantity)
+{
+    Inventory* inventory = &(owner->data.inventory);
+    if (inventory->length == inventory->capacity || inventory->items == nullptr) {
+        InventoryItem* items = (InventoryItem*)internal_realloc(inventory->items, sizeof(InventoryItem) * (inventory->capacity + 10));
+        if (items == nullptr) {
+            objectDestroy(item, nullptr);
+            return;
+        }
+        inventory->items = items;
+        inventory->capacity += 10;
+    }
+    inventory->items[inventory->length].item = item;
+    inventory->items[inventory->length].quantity = quantity;
+    inventory->length++;
+    item->owner = owner;
+}
+
 class Decoder {
 public:
     // One ATTACK_RESULT held for serialized replay (§3.c). netIds, not pointers, so
@@ -475,7 +503,49 @@ public:
     static constexpr int kMaxHolodiskLines = 512;
 
     Decoder()
-        : _loaded(false), _tripwireOk(0), _tripwireBad(0) {}
+        : _loaded(false), _tripwireOk(0), _tripwireBad(0)
+    {
+        gActiveDecoder = this;
+        objectSetFreedHook([](Object* object) {
+            if (gActiveDecoder != nullptr) {
+                gActiveDecoder->forgetFreedObject(object);
+            }
+        });
+    }
+    ~Decoder()
+    {
+        if (gActiveDecoder == this) {
+            gActiveDecoder = nullptr;
+            objectSetFreedHook(nullptr);
+        }
+    }
+
+    // Every engine free lands here (objectSetFreedHook), whoever triggered it: a wire
+    // DESTROY, a rebaseline teardown, or the engine's own stack merge. Drop every
+    // mirror reference to the object so no later event resolves its netId to freed
+    // memory, and never free it a second time from the deferred list.
+    void forgetFreedObject(Object* object)
+    {
+        if (object == nullptr) {
+            return;
+        }
+        if (object->netId != 0) {
+            auto it = _net.find(object->netId);
+            if (it != _net.end() && it->second == object) {
+                _net.erase(it);
+            }
+            auto tr = _adoptTransients.find(object->netId);
+            if (tr != _adoptTransients.end() && tr->second == object) {
+                _adoptTransients.erase(tr);
+            }
+        }
+        for (size_t i = 0; i < gDudeDeferredItemFrees.size(); i++) {
+            if (gDudeDeferredItemFrees[i] == object) {
+                gDudeDeferredItemFrees.erase(gDudeDeferredItemFrees.begin() + i);
+                break;
+            }
+        }
+    }
 
     int tripwireOk() const { return _tripwireOk; }
     int tripwireBad() const { return _tripwireBad; }
@@ -2459,7 +2529,7 @@ private:
                     if (objectCreateWithPid(&item, wi.pid) == 0 && item != nullptr) {
                         _obj_disconnect(item, nullptr); // inventory-only, not in the world
                         applyWireItemAmmo(item, wi.ammoQuantity, wi.ammoTypePid);
-                        itemAdd(obj, item, qty);
+                        mirrorInventoryAppend(obj, item, qty); // never itemAdd: its merge frees the matched slot
                     }
                 }
             }
@@ -2606,7 +2676,7 @@ private:
                         item->flags |= equip;
                         applyWireItemAmmo(item, wi.ammoQuantity, wi.ammoTypePid);
                         adoptItemNetId(item, wi.netId);
-                        itemAdd(obj, item, qty);
+                        mirrorInventoryAppend(obj, item, qty); // never itemAdd: its merge frees the matched slot
                     }
                 }
             }
