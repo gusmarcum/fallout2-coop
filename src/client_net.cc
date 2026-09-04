@@ -1135,7 +1135,15 @@ private:
     {
         if (netId == 0) return nullptr; // 0 = "no object"
         auto it = _net.find(netId);
-        return it != _net.end() ? it->second : nullptr;
+        if (it == _net.end()) return nullptr;
+        if (!objectIsLive(it->second)) {
+            // A stale entry: the engine freed this object without the mirror hearing
+            // (every such path should fire the freed hook; this is the backstop).
+            debugPrint("client_net: netId %d maps to a freed object (%p): entry dropped\n", netId, (void*)it->second);
+            _net.erase(it);
+            return nullptr;
+        }
+        return it->second;
     }
 
     // Drop EVERY registry reference to `obj` before it is freed (or queued for a
@@ -5886,6 +5894,13 @@ void clientViewerFlushDeferredItemFrees()
         return;
     }
     for (Object* item : gDudeDeferredItemFrees) {
+        if (!objectIsLive(item)) {
+            // Already freed elsewhere (a world teardown, a DESTROY): freeing it again is
+            // the 0xc0000374 heap-corruption crash (2026-09-04 11:59, Pip-Boy rest).
+            debugPrint("client-viewer: deferred free of %p skipped: object already freed\n", (void*)item);
+            continue;
+        }
+        debugPrint("client-viewer: deferred free pid=0x%X netId=%d\n", item->pid, item->netId);
         objectDestroy(item, nullptr);
     }
     gDudeDeferredItemFrees.clear();

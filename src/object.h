@@ -63,6 +63,11 @@ int objectDestroy(Object* object, Rect* rect);
 // client hangs its netId -> Object* bookkeeping on it, so no wire event can ever
 // resolve a netId to freed memory. Null by default; the server never sets it.
 typedef void (*ObjectFreedHook)(Object* object);
+// True while `object` is a live engine allocation (objectAllocate .. objectDeallocate).
+// A pointer that fails this is stale: it was freed, or never an object. The network
+// client checks it before acting on remembered pointers, turning a would-be double
+// free or use-after-free into a logged skip.
+bool objectIsLive(const Object* object);
 void objectSetFreedHook(ObjectFreedHook hook);
 int _obj_inven_free(Inventory* inventory);
 bool _obj_action_can_use(Object* obj);
