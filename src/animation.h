@@ -1,6 +1,8 @@
 #ifndef ANIMATION_H
 #define ANIMATION_H
 
+#include <stddef.h>
+
 #include "combat_defs.h"
 #include "obj_types.h"
 #include "path.h"
@@ -109,6 +111,9 @@ int _register_priority(int a1);
 int reg_anim_clear(Object* a1);
 int reg_anim_end();
 int animationIsBusy(Object* a1);
+// Diagnostic twin of animationIsBusy: writes the sequences that count as busy for
+// `obj` (sequence, slot, kind, anim) into `out`. Empty string when nothing does.
+void animationDescribeBusy(Object* obj, char* out, size_t cap);
 int animationRegisterMoveToObject(Object* owner, Object* destination, int actionPoints, int delay);
 int animationRegisterRunToObject(Object* owner, Object* destination, int actionPoints, int delay);
 int animationRegisterMoveToTile(Object* owner, int tile, int elevation, int actionPoints, int delay);

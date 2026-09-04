@@ -2228,7 +2228,7 @@ static int mainClientViewer(const char* connectSpec)
                 if (getTicksBetween(nowT, busySince) >= 3000
                     && getTicksBetween(nowT, lastBusyTrace) >= 2000) {
                     lastBusyTrace = nowT;
-                    fprintf(stderr, "[busy] STUCK %ums myTurn=%d presBusy=%d combatAnim=%d actionPending=%d dudeGlide=%d\n",
+                    debugPrint("[busy] STUCK %ums myTurn=%d presBusy=%d combatAnim=%d actionPending=%d dudeGlide=%d\n",
                         getTicksBetween(nowT, busySince), conn.myTurn() ? 1 : 0,
                         conn.combatPresentationBusy() ? 1 : 0, clientCombatAnimActive() ? 1 : 0,
                         actionPending ? 1 : 0,
@@ -2260,6 +2260,38 @@ static int mainClientViewer(const char* connectSpec)
                     busyOverride = true;
                     debugPrint("client-viewer: busy watchdog released the wait cursor after %ums\n",
                         getTicksBetween(nowB, busyHeldSince));
+                }
+            }
+            // OUT-OF-COMBAT CAP. oocBusy rides on animationIsBusy(gDude), and the
+            // "presentation progress" clock above is refreshed by every drained wire
+            // event, so with a live stream the 8 s watchdog never fires: a stuck
+            // register on the dude ate every click for as long as it stayed stuck
+            // (observed 15.7 s, released only once the stream went quiet). No
+            // legitimate out-of-combat sequence on the dude (draw, holster, door,
+            // pickup, fidget) runs anywhere near 3 s. Past that, release the block
+            // (the server still decides what an action does) and name what was
+            // registered, so the cause stops being a guess.
+            {
+                static unsigned int oocHeldSince = 0;
+                static bool oocOverride = false;
+                const unsigned int kOocCapMs = 3000;
+                if (!oocBusy || handSwitchPending) {
+                    oocHeldSince = 0;
+                    oocOverride = false;
+                } else {
+                    unsigned int nowO = getTicks();
+                    if (oocHeldSince == 0) {
+                        oocHeldSince = nowO;
+                    } else if (!oocOverride && getTicksBetween(nowO, oocHeldSince) >= kOocCapMs) {
+                        oocOverride = true;
+                        char what[256];
+                        animationDescribeBusy(gDude, what, sizeof(what));
+                        debugPrint("client-viewer: out-of-combat input block held %ums by the dude's animation register (%s): released\n",
+                            getTicksBetween(nowO, oocHeldSince), what);
+                    }
+                }
+                if (oocOverride) {
+                    oocBusy = false;
                 }
             }
             if (busyOverride) {
