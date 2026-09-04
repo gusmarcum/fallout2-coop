@@ -2615,6 +2615,22 @@ void gameDialogRenderReply()
     windowRefresh(gGameDialogReplyWindow);
 }
 
+// Review history on the wire viewer. Vanilla records entries from the script
+// setters (which run on the server), so the viewer's Review button had nothing
+// to show and was a hard no-op. The viewer now records what it renders: the
+// streamed reply when a node lands, the picked option when the player answers.
+void gameDialogReviewRecordReply(const char* text)
+{
+    gameDialogAddReviewText(text);
+}
+
+void gameDialogReviewRecordOption(const char* text)
+{
+    if (gGameDialogReviewEntriesLength > 0) {
+        gameDialogSetReviewOptionText(text);
+    }
+}
+
 // Reply-text paging for the wire viewer. Vanilla pages an over-long reply
 // inside _gdProcess's own loop (SPACE / a 10 s timer); the viewer never runs
 // that loop, so the overflow offset text_to_rect_wrapped left in dword_58F4E0

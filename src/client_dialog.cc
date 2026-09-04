@@ -179,6 +179,7 @@ void clientDialogRenderPendingNode()
 
     gameDialogClearOptions();
     gameDialogSetReplyText(gPendingReply.c_str());
+    gameDialogReviewRecordReply(gPendingReply.c_str()); // Review button history
     for (size_t i = 0; i < gPendingOptions.size(); i++) {
         // ►► THE REACTION IS THE AUTHORITY'S, NOT A CONSTANT. This used to pass a
         // hardcoded 50 (NEUTRAL) for every option, which meant the Empathy perk — whose
@@ -313,6 +314,7 @@ bool clientDialogHandleKey(int keyCode)
     int optionCount = (int)gPendingOptions.size();
     if (optionCount > 0 && keyCode >= 49 && keyCode < 49 + optionCount) {
         int index = keyCode - 49;
+        gameDialogReviewRecordOption(gPendingOptions[index].c_str()); // Review button history
         clientViewerDialogSay(index);
         gClientDialogWaitingForResponse = true;
         return true;
