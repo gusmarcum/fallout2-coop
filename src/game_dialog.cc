@@ -1,3 +1,4 @@
+#include "client_dialog.h"
 #include "client_net.h"
 #include "msg_channel.h"
 #include "game_dialog.h"
@@ -945,7 +946,8 @@ int _gdialogInitFromScript(int headFid, int reaction)
     animationStop();
 
     _boxesWereDisabled = indicatorBarHide();
-    gGameDialogSpeakerIsPartyMember = objectIsPartyMember(gGameDialogSpeaker);
+    // The viewer has no party list; the flag came with the node (client_dialog).
+    gGameDialogSpeakerIsPartyMember = clientViewerActive() ? clientDialogSpeakerIsPartyMember() : objectIsPartyMember(gGameDialogSpeaker);
     _oldFont = fontGetCurrent();
     fontSetCurrent(101);
     dialogSetReplyWindow(135, 225, 379, 58, nullptr);
@@ -1270,7 +1272,7 @@ void _gdialogUpdatePartyStatus()
         return;
     }
 
-    bool isPartyMember = objectIsPartyMember(gGameDialogSpeaker);
+    bool isPartyMember = clientViewerActive() ? clientDialogSpeakerIsPartyMember() : objectIsPartyMember(gGameDialogSpeaker);
     if (isPartyMember == gGameDialogSpeakerIsPartyMember) {
         return;
     }
@@ -2003,7 +2005,7 @@ static void dialogEmitNode()
     presenter()->dialogNode(gGameDialogSpeaker, gDude, gGameDialogFidget,
         gDialogReplyText, optionPtrs, count,
         gDialogPendingAudio[0] != '\0' ? gDialogPendingAudio : nullptr,
-        gGameDialogHeadFid, optionReactions);
+        gGameDialogHeadFid, optionReactions, gGameDialogSpeakerIsPartyMember);
 }
 
 // 0x4465C0

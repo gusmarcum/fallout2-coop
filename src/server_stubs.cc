@@ -894,6 +894,7 @@ void clientViewerStealVerb(const char* verb, int pid, int quantity) { serverStub
 void clientModalWindowsSync() { serverStubAbort("clientModalWindowsSync"); }
 void clientDialogRenderPendingNode() { serverStubAbort("clientDialogRenderPendingNode"); }
 void clientViewerDialogParty() { serverStubAbort("clientViewerDialogParty"); }
+bool clientDialogSpeakerIsPartyMember() { return false; } // never reached: gated on clientViewerActive()
 
 } // namespace fallout
 
