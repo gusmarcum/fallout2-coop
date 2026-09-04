@@ -1,5 +1,29 @@
 # Fallout 2 — Dedicated (co-op) Server & Client
 
+> **This is a maintained fork** of [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop)
+> (v0.4) with bug fixes from live two-player play and a Windows test harness. The fixes are
+> offered upstream as a pull request; until they land there, this fork is where they live.
+> Same licence (Sustainable Use, non-commercial), same "bring your own Fallout 2" rule: no
+> game assets are included.
+>
+> **What is fixed here (compared with v0.4):**
+> talking terminals and computers open their screens; clients with a failed audio device
+> are detected instead of playing silently, and music no longer dies for good; visited
+> worldmap locations survive a reconnect; dead players stay down; two-handed weapons use
+> one slot; stale dialogue options no longer draw over new ones; long replies page
+> (SPACE / Down / PgDn forward, Up / PgUp back); the Review button works; `T` opens chat
+> also in combat; TAB opens the automap; `R` revives you when dead; companions follow the
+> player who recruited them; a stuck wait cursor clears itself.
+>
+> **Building on Windows:** MSYS2 MINGW64 with `gcc cmake ninja git`, then
+> `cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_C_FLAGS=-std=gnu17 -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"`
+> and `cmake --build build-win --target f2_server fallout2-ce`. Run the client from the game
+> folder: it reads `fallout2.cfg` from its own directory.
+>
+> **Testing on Windows:** `F2_GAME_DIR=<game folder> F2_BIN=<game folder>/fallout2-ce.exe F2_GOLDEN_DIR=$PWD/tests/golden/server-win tests/golden/run_golden_server.sh`
+> (and `legacy-win` with `run_golden.sh`). Both suites pass on every commit of this fork.
+
+
 A fork of [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce) that
 adds a **dedicated server** and turns the normal game binary into a **network client /
 viewer**, so several players can share one persistent Fallout 2 world — co-op combat,
