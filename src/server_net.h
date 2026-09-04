@@ -158,6 +158,7 @@ private:
         // client, and when its socket first refused to take more (0 = draining).
         size_t queuedBytes = 0;
         long long stalledSinceMs = 0;
+        long long backlogReportedAtMs = 0; // last "not draining" line for this client
     };
 
     void dropClient(size_t index, const char* why);

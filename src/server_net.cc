@@ -357,6 +357,13 @@ void SocketByteSink::pump()
                 break;
             }
             if (blocked) {
+                // Operator visibility: a client that is not draining shows up in the
+                // server window, at most once every 5 s per client, with its backlog.
+                if (now - c.backlogReportedAtMs >= 5000 && (c.queuedBytes >= (64u << 10) || (c.stalledSinceMs != 0 && now - c.stalledSinceMs >= 1000))) {
+                    c.backlogReportedAtMs = now;
+                    fprintf(stderr, "f2_server: session %d not draining: %zu KB queued, socket full for %lld ms\n",
+                        c.sessionId, (size_t)(c.queuedBytes >> 10), c.stalledSinceMs != 0 ? (long long)(now - c.stalledSinceMs) : 0LL);
+                }
                 if (c.stalledSinceMs == 0) {
                     c.stalledSinceMs = now;
                 } else if (now - c.stalledSinceMs >= kStallDropMs) {
