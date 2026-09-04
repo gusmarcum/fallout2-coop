@@ -13,7 +13,10 @@
 > one slot; stale dialogue options no longer draw over new ones; long replies page
 > (SPACE / Down / PgDn forward, Up / PgUp back); the Review button works; `T` opens chat
 > also in combat; TAB opens the automap; `R` revives you when dead; companions follow the
-> player who recruited them; a stuck wait cursor clears itself.
+> player who recruited them; a stuck wait cursor clears itself; the Combat Control button
+> on a companion serves their combat orders as a dialogue node (burst, run away, weapon,
+> distance, target, chems); the operator `save` refuses mid-combat instead of failing;
+> `F2_TRACE_WORLD=1` logs door, container and map-state changes on the server console.
 >
 > **Building on Windows:** MSYS2 MINGW64 with `gcc cmake ninja git`, then
 > `cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_C_FLAGS=-std=gnu17 -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"`
