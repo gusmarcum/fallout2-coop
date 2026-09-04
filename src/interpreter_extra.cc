@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "actions.h"
+#include <map>
 #include "animation.h"
 #include "art.h"
 #include "color.h"
@@ -4281,11 +4282,74 @@ static void opObjectOpen(Program* program)
 
 // obj_close
 // 0x45B35C
+// A script closing a door while a player is walking up to or through it.
+//
+// Several gate scripts open a door for the player and arm a timer that closes and
+// locks it again 10 game ticks (one second) later: the Vault City gate guard's
+// "come in" is one (VCGatGrd talk_p_proc -> VIEntDor timed_event_p_proc). In single
+// player the player is already at the gate and steps through inside the second. In
+// co-op the walk request travels client -> server first, and a walk from a few
+// hexes away is still in flight when the timer fires: the door closes in the
+// player's face, the walk stops, and every later click reports "cannot get there"
+// while the client still draws the door open (2026-09-04, Vault City inner gate).
+//
+// So on the dedicated server, a scripted close of an OPEN door is deferred, one
+// second at a time and at most ten times, while an online player within three
+// hexes of the door is still moving. The script's own timer is re-armed with the
+// same fixed parameter, so the close (and the lock that follows it) still happens
+// once the player is through or has stopped.
+static std::map<Object*, int> gDoorCloseDeferrals;
+
+static bool doorCloseShouldWait(Program* program, Object* door)
+{
+    if (!serverDedicatedActive() || door == nullptr || door->frame == 0) {
+        return false; // headless goldens and the client keep vanilla behaviour; a closed door has nothing to wait for
+    }
+    if (PID_TYPE(door->pid) != OBJ_TYPE_SCENERY) {
+        return false;
+    }
+    bool walking = false;
+    for (int slot = 0; slot < playerActorCount(); slot++) {
+        Object* actor = playerActorAt(slot);
+        if (actor == nullptr || !playerActorOnline(slot) || critterIsDead(actor) || actor->elevation != door->elevation) {
+            continue;
+        }
+        if (tileDistanceBetween(actor->tile, door->tile) <= 3 && animationIsBusy(actor)) {
+            walking = true;
+            break;
+        }
+    }
+    if (!walking) {
+        gDoorCloseDeferrals.erase(door);
+        return false;
+    }
+    int& count = gDoorCloseDeferrals[door];
+    if (count >= 10) {
+        gDoorCloseDeferrals.erase(door);
+        return false;
+    }
+    count++;
+    int sid = scriptGetSid(program);
+    Script* script = nullptr;
+    int param = 0;
+    if (sid != -1 && scriptGetScript(sid, &script) != -1 && script != nullptr) {
+        param = script->fixedParam;
+    }
+    if (sid == -1 || scriptAddTimerEvent(sid, 10, param) == -1) {
+        gDoorCloseDeferrals.erase(door);
+        return false; // cannot re-arm: close now rather than leave the door open for good
+    }
+    fprintf(stderr, "f2_server: door netId=%d close deferred (%d): a player is walking through\n", door->netId, count);
+    return true;
+}
+
 static void opObjectClose(Program* program)
 {
     Object* object = static_cast<Object*>(programStackPopPointer(program));
-
     if (object != nullptr) {
+        if (doorCloseShouldWait(program, object)) {
+            return;
+        }
         objectClose(object);
     } else {
         scriptPredefinedError(program, "obj_close", SCRIPT_ERROR_OBJECT_IS_NULL);
