@@ -48,7 +48,9 @@ result with the wrong failure value, so a refused audio device passed as open an
 simply had no sound, with no error anywhere. The client now detects it, tries the other
 audio drivers, and prints the reason on the message line if it still cannot play. Music that
 died (a stall while another player joined, a movie that never resumed it) is restarted by a
-watchdog instead of staying dead for the session.
+watchdog instead of staying dead for the session. The watchdog also remembers a track
+the client started on its own map load, so music that dies during a map change comes back
+without a rejoin.
 
 **Dialogue that works over the wire.** Stale reply options no longer draw over the new node.
 Long replies page (Down, Page Down or SPACE forward, Up or Page Up back). The Review button
@@ -61,6 +63,20 @@ back up instead of waiting for the operator. TAB opens the automap. Push works o
 A stuck wait cursor clears itself. The operator's `save` refuses at moments when it would
 have failed silently, and a `gvar` console command exists for repairing a world's quest
 flags.
+
+**The server never waits on a slow client.** Every frame went out through a blocking send
+with a five-second timeout, so a client that stopped reading its socket, which every client
+does for a few seconds while it loads a new map, froze the whole world for everyone: movement
+landed seconds late, queued clicks arrived in a burst, menus lagged and the music mixer
+starved. Sends are now non-blocking with a per-client queue, and a client that takes nothing
+for a minute is dropped instead of stalling the rest. Measured with a client that stops
+reading: a 20 second freeze before, 0.2 seconds after.
+
+**Companions survive a map change after a load.** The map save writes party members with
+their keep-on-map flags cleared and nothing re-armed them after a load, so the first map
+change after restoring a world deleted every companion's body and the next load dropped them
+from the party. The flags are re-armed on load, and the console gained `party` (list) and
+`partyadd <pid>` (re-attach a companion standing on the current map) for worlds already hit.
 
 **A test harness that runs on Windows.** The engine's two golden suites, 41 headless
 scenarios that replay fixed inputs and compare the resulting world state byte for byte, only
@@ -161,6 +177,8 @@ command per line. It answers once a client is connected.
 | `revive <slot>` | stand a dead player up (players can also press `R`) |
 | `give <pid> <count>` | give items to the host character; `count` is stacks (boxes for ammo) |
 | `gvar <index> [value]` | read or set a global script variable (quest flags) |
+| `party` | list the party as the server sees it |
+| `partyadd <pid>` | re-attach a companion standing on the current map (89 = John Cassidy) |
 | `say <channel> <text>` | a line to every client |
 | `quit` | stop the server |
 
