@@ -65,6 +65,11 @@ void clientDialogOnNode(int speakerNetId, int driverNetId, int reaction,
     gPendingReaction = reaction;
     gPendingHeadFid = headFid;
     gPendingReply = reply != nullptr ? reply : "";
+    // Review button history: one entry per node, recorded on arrival (the render
+    // below can run more than once per node and would duplicate it).
+    if (!gPendingReply.empty()) {
+        gameDialogReviewRecordReply(gPendingReply.c_str());
+    }
     gPendingOptions.clear();
     gPendingOptionReactions.clear();
     if (optionCount > 0 && options != nullptr) {
@@ -179,7 +184,6 @@ void clientDialogRenderPendingNode()
 
     gameDialogClearOptions();
     gameDialogSetReplyText(gPendingReply.c_str());
-    gameDialogReviewRecordReply(gPendingReply.c_str()); // Review button history
     for (size_t i = 0; i < gPendingOptions.size(); i++) {
         // ►► THE REACTION IS THE AUTHORITY'S, NOT A CONSTANT. This used to pass a
         // hardcoded 50 (NEUTRAL) for every option, which meant the Empathy perk — whose
