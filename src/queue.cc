@@ -382,6 +382,17 @@ int queueAddEvent(int delay, Object* obj, void* data, int eventType)
 }
 
 // 0x4A25F4
+#include <stdlib.h>
+#include <stdio.h>
+static const bool kQueueWorldTrace = getenv("F2_TRACE_WORLD") != nullptr; // [world-trace]
+static void queueTraceDrop(const char* why, QueueListNode* node)
+{
+    if (kQueueWorldTrace && node->type == EVENT_TYPE_SCRIPT) {
+        fprintf(stderr, "[world] queue drop (%s): script event owner pid=0x%08X due %u now %u\n",
+            why, node->owner != nullptr ? node->owner->pid : 0, node->time, gameTimeGetTime());
+    }
+}
+
 int queueRemoveEvents(Object* owner)
 {
     QueueListNode* queueListNode = gQueueListHead;
@@ -390,6 +401,7 @@ int queueRemoveEvents(Object* owner)
     while (queueListNode) {
         if (queueListNode->owner == owner) {
             QueueListNode* temp = queueListNode;
+            queueTraceDrop("remove_events", temp);
 
             queueListNode = queueListNode->next;
             *queueListNodePtr = queueListNode;
