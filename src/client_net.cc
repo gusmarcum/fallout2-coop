@@ -5704,6 +5704,14 @@ void clientViewerDialogEnd()
     gViewerConn->sendLine("dend");
 }
 
+void clientViewerDialogParty()
+{
+    if (gViewerConn == nullptr) {
+        return;
+    }
+    gViewerConn->sendLine("dparty");
+}
+
 void clientViewerWmMove(int x, int y)
 {
     if (gViewerConn == nullptr) {

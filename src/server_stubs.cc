@@ -893,6 +893,7 @@ bool clientStealConsumeCloseRequest() { serverStubAbort("clientStealConsumeClose
 void clientViewerStealVerb(const char* verb, int pid, int quantity) { serverStubAbort("clientViewerStealVerb"); }
 void clientModalWindowsSync() { serverStubAbort("clientModalWindowsSync"); }
 void clientDialogRenderPendingNode() { serverStubAbort("clientDialogRenderPendingNode"); }
+void clientViewerDialogParty() { serverStubAbort("clientViewerDialogParty"); }
 
 } // namespace fallout
 
