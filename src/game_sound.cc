@@ -785,6 +785,20 @@ bool gameSoundIsInitialized()
     return gGameSoundInitialized;
 }
 
+// The track backgroundSoundLoad was last asked for, whether or not it is still
+// playing. The client's music watchdog re-arms it after a stall retired the
+// stream; a MUSIC_STOP from the server forgets it so silence meant as silence
+// (a map with no track) stays silent.
+const char* backgroundSoundLastName()
+{
+    return gBackgroundSoundFileName;
+}
+
+void backgroundSoundForgetName()
+{
+    gBackgroundSoundFileName[0] = '\0';
+}
+
 // 0x450B0C
 void backgroundSoundRestart(int value)
 {
