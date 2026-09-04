@@ -550,6 +550,22 @@ void commandDispatch(const Command& command)
                     _obj_action_can_use(o) ? 1 : 0, o->netId, o->pid, o->tile, o->sid, objectGetName(o));
             }
         }
+    } else if (strcmp(command.name, "partyadd") == 0) {
+        // Re-attach a critter on the current map to the party by critter pid number
+        // (e.g. 89 = John Cassidy). Repair/diagnostic twin of the admin verb.
+        Object* found = nullptr;
+        for (Object* o = objectFindFirst(); o != nullptr; o = objectFindNext()) {
+            if (PID_TYPE(o->pid) == OBJ_TYPE_CRITTER && (o->pid & 0xFFFFFF) == command.arg && !critterIsDead(o)) {
+                found = o;
+                break;
+            }
+        }
+        if (found != nullptr) {
+            int rc = partyMemberAdd(found);
+            debugPrint("headless-probe: partyadd pid=%d id=%d rc=%d members=%d\n", command.arg, found->id, rc, partyMemberCount());
+        } else {
+            debugPrint("headless-probe: partyadd pid=%d not found on map\n", command.arg);
+        }
     } else if (strcmp(command.name, "useobj") == 0) {
         // Use ANY object by netId (scenery with a use_p_proc: terminals, consoles).
         // Diagnostic twin of usedoor: goes straight to _obj_use like the server's
