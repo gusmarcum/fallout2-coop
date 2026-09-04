@@ -2622,6 +2622,15 @@ void gameDialogRenderReply()
 // setters (which run on the server), so the viewer's Review button had nothing
 // to show and was a hard no-op. The viewer now records what it renders: the
 // streamed reply when a node lands, the picked option when the player answers.
+void gameDialogReviewReset()
+{
+    // dialogReviewEntriesClear frees the texts but leaves the COUNT alone (vanilla
+    // zeroes it in the dialog-entry path the viewer never runs), so a new
+    // conversation's review opened with the old one's entries as blank lines.
+    dialogReviewEntriesClear();
+    gGameDialogReviewEntriesLength = 0;
+}
+
 void gameDialogReviewRecordReply(const char* text)
 {
     gameDialogAddReviewText(text);

@@ -63,6 +63,7 @@ void gameDialogClearOptions();
 bool gameDialogReplyHasMore();
 bool gameDialogReplyCanPageUp();
 void gameDialogReplyPrevPage();
+void gameDialogReviewReset();
 void gameDialogReviewRecordReply(const char* text);
 void gameDialogReviewRecordOption(const char* text);
 void gameDialogReplyNextPage();

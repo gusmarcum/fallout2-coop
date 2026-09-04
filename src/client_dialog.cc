@@ -66,7 +66,11 @@ void clientDialogOnNode(int speakerNetId, int driverNetId, int reaction,
     gPendingHeadFid = headFid;
     gPendingReply = reply != nullptr ? reply : "";
     // Review button history: one entry per node, recorded on arrival (the render
-    // below can run more than once per node and would duplicate it).
+    // below can run more than once per node and would duplicate it). A fresh
+    // conversation starts with an empty history, as in vanilla.
+    if (!gClientDialogActive) {
+        gameDialogReviewReset();
+    }
     if (!gPendingReply.empty()) {
         gameDialogReviewRecordReply(gPendingReply.c_str());
     }
