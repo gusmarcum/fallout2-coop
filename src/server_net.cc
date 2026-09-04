@@ -21,12 +21,17 @@ namespace {
 // The v1 command vocabulary is tiny "verb arg arg2"; 1 KB is generous.
 constexpr size_t kMaxInbuf = 1024;
 
-// Bound a single blocking send so one client that has stopped draining its
-// socket cannot freeze the single-threaded serve loop forever. On timeout the
-// send fails → writeAll fails → the client is dropped.
-// (v2 hardening: fully non-blocking outbound with a per-client backpressure
-// queue; for v1 connect-at-start viewers a bounded stall-then-drop suffices.)
-constexpr int kSendTimeoutSec = 5;
+// Outbound is NON-BLOCKING with a per-client queue (pump). The old path sent
+// with a blocking write bounded by a 5 s timeout, so a client that stopped
+// reading its socket stalled the single-threaded serve loop for up to 5 s per
+// frame — and a client loading a new map does exactly that for seconds, a
+// slow VPN link for longer. Every player then saw the world freeze, commands
+// pile up and land in a burst, and the music mixer starve. Now bytes that do
+// not fit are kept in the client's queue and retried next pump; the sim never
+// waits on a socket. A client that has not accepted a byte for kStallDropMs,
+// or whose backlog passes kQueueDropBytes, is dropped instead.
+constexpr long long kStallDropMs = 60 * 1000;
+constexpr size_t kQueueDropBytes = (size_t)64 << 20;
 
 // Monotonic wall clock in ms — the outbox schedule's time base (§8.6). Anchored to
 // wall, NOT the sim clock: the sim already runs ~1:1 real time, and a sim-clock anchor
@@ -167,16 +172,15 @@ bool SocketByteSink::acceptClients(int minClients)
         // without waiting to coalesce (latency over throughput).
         netSetNoDelay(fd);
 
-        // Bound blocking sends (see kSendTimeoutSec): a client that stops reading
-        // must not hang the serve loop — the send fails and we drop it instead.
-        netSetSendTimeout(fd, kSendTimeoutSec);
-
         int sessionId = _nextSessionId++;
+        // The 10-byte preamble goes out on the fresh (blocking) socket; everything
+        // after it is queued and sent non-blocking by pump().
         if (!writeClientPreamble(fd, sessionId)) {
             fprintf(stderr, "f2_server: client dropped on preamble write\n");
             netCloseSocket(fd);
             continue;
         }
+        netSetNonBlocking(fd, true);
 
         _clients.push_back(Client { fd, std::string(), sessionId });
         _clients.back().lastReleaseAtMs = nowMs(); // seed the release cursor (§8.6)
@@ -214,11 +218,10 @@ int SocketByteSink::acceptPending()
         }
 
         // Winsock children inherit the listener's non-blocking mode (POSIX ones
-        // do not); writeAll's bounded BLOCKING sends need blocking sockets, so
-        // force the mode rather than inherit it.
+        // do not). The preamble is written blocking (a fresh socket takes 10
+        // bytes without waiting); the stream after it is non-blocking (pump).
         netSetNonBlocking(fd, false);
         netSetNoDelay(fd);
-        netSetSendTimeout(fd, kSendTimeoutSec);
 
         int sessionId = _nextSessionId++;
         if (!writeClientPreamble(fd, sessionId)) {
@@ -226,6 +229,7 @@ int SocketByteSink::acceptPending()
             netCloseSocket(fd);
             continue;
         }
+        netSetNonBlocking(fd, true);
 
         _clients.push_back(Client { fd, std::string(), sessionId });
         _clients.back().lastReleaseAtMs = nowMs(); // seed the release cursor (§8.6)
@@ -299,6 +303,7 @@ void SocketByteSink::writeFrame(const unsigned char* header, unsigned int header
             c.lastReleaseAtMs = qf.releaseAtMs;
             c.lastCostMs = meta.costMs;
         }
+        c.queuedBytes += buf->size();
         c.outq.push_back(std::move(qf));
     }
     pump();
@@ -310,21 +315,58 @@ void SocketByteSink::pump()
     // place (same safe index-walk the old broadcast used). A frame is sent only once
     // its releaseAtMs has passed (0 = due now, the unpaced default); the queue is FIFO
     // and release times are monotonic per client, so the first not-due frame stops the
-    // client's drain this pass. Due frames use the bounded blocking writeAll.
+    // client's drain this pass. Sends are NON-BLOCKING: what the socket does not take
+    // stays queued (qf.sent remembers the resume point) and is retried next pump, so a
+    // client that is busy loading a map, or behind a slow link, costs the sim nothing.
+    // A client that takes nothing for kStallDropMs, or whose backlog passes
+    // kQueueDropBytes, is dropped.
     const long long now = nowMs();
     size_t out = 0;
     for (size_t i = 0; i < _clients.size(); i++) {
         Client& c = _clients[i];
         bool alive = true;
+        char why[128];
+        why[0] = '\0';
         while (!c.outq.empty()) {
             QueuedFrame& qf = c.outq.front();
             if (qf.releaseAtMs > now) {
                 break; // not due yet; later frames are scheduled no earlier
             }
             const std::vector<unsigned char>& b = *qf.bytes;
-            if (!writeAll(c.fd, b.data() + qf.sent, b.size() - qf.sent)) {
-                alive = false;
+            bool blocked = false;
+            while (qf.sent < b.size()) {
+                long sent = netSend(c.fd, b.data() + qf.sent, b.size() - qf.sent);
+                if (sent < 0) {
+                    int err = netLastError();
+                    if (netErrorInterrupted(err)) {
+                        continue;
+                    }
+                    if (netErrorWouldBlock(err)) {
+                        blocked = true;
+                        break;
+                    }
+                    alive = false;
+                    snprintf(why, sizeof(why), "%s", netErrorString(err));
+                    break;
+                }
+                qf.sent += (size_t)sent;
+                c.queuedBytes -= (size_t)sent;
+                c.stalledSinceMs = 0;
+            }
+            if (!alive) {
                 break;
+            }
+            if (blocked) {
+                if (c.stalledSinceMs == 0) {
+                    c.stalledSinceMs = now;
+                } else if (now - c.stalledSinceMs >= kStallDropMs) {
+                    alive = false;
+                    snprintf(why, sizeof(why), "took no bytes for %lld s", (long long)(kStallDropMs / 1000));
+                } else if (c.queuedBytes > kQueueDropBytes) {
+                    alive = false;
+                    snprintf(why, sizeof(why), "backlog over %zu MB", (size_t)(kQueueDropBytes >> 20));
+                }
+                break; // socket full: resume this frame next pump
             }
             c.outq.pop_front();
         }
@@ -334,7 +376,7 @@ void SocketByteSink::pump()
             }
             out++;
         } else {
-            fprintf(stderr, "f2_server: client dropped on write: %s\n", netErrorString(netLastError()));
+            fprintf(stderr, "f2_server: client dropped on write: %s\n", why);
             netCloseSocket(_clients[i].fd);
         }
     }

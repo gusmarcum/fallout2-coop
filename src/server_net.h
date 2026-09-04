@@ -154,14 +154,17 @@ private:
         // Seeded to now at accept; max()-reanchored so an idle client accrues no credit.
         long long lastReleaseAtMs = 0;
         unsigned int lastCostMs = 0;
+        // Non-blocking outbound bookkeeping (pump): bytes still queued for this
+        // client, and when its socket first refused to take more (0 = draining).
+        size_t queuedBytes = 0;
+        long long stalledSinceMs = 0;
     };
 
     void dropClient(size_t index, const char* why);
 
-    // Drain each client's outbound queue toward its socket, dropping a client whose
-    // send fails. Increment 2: every queued frame is due, sent with the bounded
-    // blocking writeAll (behavior-identical to the old broadcast). Increment 3 gates
-    // on per-frame release times and flips sends non-blocking.
+    // Drain each client's outbound queue toward its socket with non-blocking sends;
+    // a full socket keeps its frame queued for the next pump. Drops a client whose
+    // send fails, that takes no bytes for a minute, or whose backlog passes the cap.
     void pump();
 
     NetSocket _listenFd = kNetInvalidSocket;

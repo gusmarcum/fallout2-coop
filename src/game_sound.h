@@ -52,6 +52,8 @@ int _gsound_background_play_level_music(const char* a1, int a2);
 void backgroundSoundDelete();
 bool backgroundSoundIsPlaying();
 bool gameSoundIsInitialized();
+const char* backgroundSoundLastName(); // last track handed to backgroundSoundLoad, "" = none
+void backgroundSoundForgetName();
 void backgroundSoundRestart(int value);
 void backgroundSoundPause();
 void backgroundSoundResume();

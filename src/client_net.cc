@@ -4203,6 +4203,7 @@ private:
         if (name == _musicTrack && backgroundSoundIsPlaying()) return;
         _musicTrack = name;
         _musicRetryAtMs = 0;
+        _musicFailNoticed = false;
 
         _gsound_background_play_level_music(name.c_str(), fadeIn);
     }
@@ -4213,6 +4214,7 @@ private:
         if (!clientViewerActive()) return;
         _musicTrack.clear();
         backgroundSoundDelete();
+        backgroundSoundForgetName(); // silence is intended: the watchdog must not undo it
     }
 
     void onSfxAt(Reader& r)
@@ -4552,6 +4554,7 @@ private:
     bool _inCombat = false; // P3 combat framing (presentation-only)
     std::string _musicTrack; // currently-playing background track, for MUSIC_PLAY dedupe
     unsigned int _musicRetryAtMs = 0; // musicWatchdog backoff deadline (getTicks)
+    bool _musicFailNoticed = false; // one HUD line per track when a restart keeps failing
     bool _audioNoticeShown = false; // one-time why-is-there-no-sound line on the HUD
 
 public:
@@ -4564,11 +4567,27 @@ public:
     // backoff so a missing music file cannot spin the load.
     void musicWatchdog()
     {
-        if (_musicTrack.empty() || backgroundSoundIsPlaying()) return;
+        // The expected track is what the wire last announced, else what this client
+        // last loaded on its own: its local mapLoad starts map music through the
+        // client presenter, which never passes onMusicPlay, so a map change followed
+        // by a stall (the very moment the stream is retired) used to leave the
+        // watchdog with no name and the player with no music until a rejoin. A
+        // MUSIC_STOP forgets both names.
+        const char* last = backgroundSoundLastName();
+        const char* want = !_musicTrack.empty() ? _musicTrack.c_str() : (last != nullptr ? last : "");
+        if (want[0] == '\0' || backgroundSoundIsPlaying()) return;
         unsigned int now = getTicks();
         if (_musicRetryAtMs != 0 && now < _musicRetryAtMs) return;
         _musicRetryAtMs = now + 10000;
-        _gsound_background_play_level_music(_musicTrack.c_str(), 12);
+        std::string track = want; // backgroundSoundLoad rewrites the buffer `last` points into
+        int rc = _gsound_background_play_level_music(track.c_str(), 12);
+        debugPrint("client-viewer: music watchdog restarted '%s' rc=%d\n", track.c_str(), rc);
+        if (rc != 0 && !_musicFailNoticed) {
+            _musicFailNoticed = true;
+            static char line[160];
+            snprintf(line, sizeof(line), "Music '%s' could not be restarted (see debug.log)", track.c_str());
+            displayMonitorAddMessage(line);
+        }
     }
 
     // One-time HUD line explaining silence. Shown after the first snapshot so
