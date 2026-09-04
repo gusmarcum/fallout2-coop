@@ -336,6 +336,13 @@ void serverSetWorldmapBaseline(std::function<void()> emitter)
     gWorldmapBaseline = std::move(emitter);
 }
 
+static std::function<void()> gWorldmapBeat;
+
+void serverSetWorldmapBeat(std::function<void()> emitter)
+{
+    gWorldmapBeat = std::move(emitter);
+}
+
 static void serverEmitBaseline()
 {
     gBaselineGeneration = mapGetLoadGeneration();
@@ -478,6 +485,9 @@ void serverTick(int tick, const std::function<void(int)>& intentsDrain, bool adv
         scriptRequestHandler()->dialogEnter(speaker);
         gameRequestState(GAME_STATE_2);
         gameUpdateState(); // 3 -> 2
+    }
+    if (gWorldmapBeat) {
+        gWorldmapBeat(); // city table to viewers when a script marked a town known
     }
 
     // Player-initiated combat start (cstart verb): honor the claimant's intent to

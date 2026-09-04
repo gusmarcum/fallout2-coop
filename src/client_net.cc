@@ -213,6 +213,7 @@ enum : unsigned char {
     EVENT_LOOT_GRANT = 59, // the server opened a container FOR US — open the loot screen
     EVENT_STATE_AUDIT = 60, // authoritative object state — diff it against our mirror
     EVENT_UI_LOCK = 61, // scripted cutscene input lock, addressed (0 = everyone)
+    EVENT_WORLDMAP_AREAS = 62, // worldmap city table: known/visited/entrances for every area
 };
 
 // crc32 (IEEE, reflected) — MUST match server_loop.cc's joinBlobCrc32.
@@ -1028,6 +1029,7 @@ public:
         case EVENT_WORLDMAP_END: onWorldmapEnd(r); break;
         case EVENT_WORLDMAP_STATE: onWorldmapState(r); break;
         case EVENT_WORLDMAP_SUBTILES: onWorldmapSubtiles(r); break;
+        case EVENT_WORLDMAP_AREAS: onWorldmapAreas(r); break;
         case EVENT_PLAYER_ROSTER: onPlayerRoster(r); break;
         case EVENT_INVENTORY_GRANT: onInventoryGrant(r); break;
         case EVENT_INVENTORY_REVOKE: onInventoryRevoke(r); break;
@@ -4487,6 +4489,32 @@ private:
     // session left behind. Scatter the flattened grid back into wmTileInfoList
     // (same tile-major/row/column order the server flattened it in) and mark the
     // worldmap dirty so the modal repaints with the new fog.
+    void onWorldmapAreas(Reader& r)
+    {
+        if (!clientViewerActive() || r.overflow()) return;
+        int count = r.u16();
+        if (count != wmMaxAreaNum || wmAreaInfoList == nullptr) {
+            debugPrint("client_net: worldmap areas size mismatch got=%d want=%d\n", count, wmMaxAreaNum);
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            int state = r.u8();
+            int visited = r.u8();
+            unsigned int mask = (unsigned int)r.i32();
+            if (r.overflow()) return;
+            CityInfo* city = &(wmAreaInfoList[i]);
+            city->state = state;
+            city->visitedState = visited;
+            int entrances = city->entrancesLength;
+            if (entrances > 32) entrances = 32;
+            for (int e = 0; e < entrances; e++) {
+                city->entrances[e].state = (mask >> e) & 1u;
+            }
+        }
+        debugPrint("client_net: onWorldmapAreas applied n=%d\n", count);
+        gWorldmapStateDirty = true;
+    }
+
     void onWorldmapSubtiles(Reader& r)
     {
         if (!clientViewerActive() || r.overflow()) return;
