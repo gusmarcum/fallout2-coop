@@ -292,6 +292,10 @@ bool clientDialogHandleKey(int keyCode)
         gameDialogReplyNextPage();
         return true;
     }
+    if (gameDialogReplyCanPageUp() && (keyCode == KEY_PAGE_UP || keyCode == KEY_ARROW_UP)) {
+        gameDialogReplyPrevPage();
+        return true;
+    }
     // OPTION SCROLLING (the panel is fixed-size and the renderer drops what does not fit).
     // Both the page keys and the arrows/wheel, since a viewer does not run the reply's own
     // paging state and so has nothing to compete with.

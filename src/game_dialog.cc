@@ -586,6 +586,7 @@ static void gameDialogReviewWindowUpdate(int win, int origin);
 static void dialogReviewEntriesClear();
 static int gameDialogAddReviewMessage(int messageListId, int messageId);
 static int gameDialogAddReviewText(const char* text);
+static void gameDialogReplyPagesReset();
 static int gameDialogSetReviewOptionMessage(int messageListId, int messageId);
 static int gameDialogSetReviewOptionText(const char* text);
 static int _gdProcessInit();
@@ -1210,6 +1211,7 @@ int gameDialogSetMessageReply(Program* program, int messageListId, int messageId
     gDialogReplyMessageListId = messageListId;
     gDialogReplyMessageId = messageId;
     dword_58F4E0 = 0;
+    gameDialogReplyPagesReset();
     gDialogReplyText[0] = '\0';
     gGameDialogOptionEntriesLength = 0;
 
@@ -1223,6 +1225,7 @@ int gameDialogSetTextReply(Program* program, int messageListId, const char* text
 
     gDialogReplyProgram = program;
     dword_58F4E0 = 0;
+    gameDialogReplyPagesReset();
     gDialogReplyMessageListId = -4;
     gDialogReplyMessageId = -4;
 
@@ -2635,17 +2638,51 @@ void gameDialogReviewRecordOption(const char* text)
 // inside _gdProcess's own loop (SPACE / a 10 s timer); the viewer never runs
 // that loop, so the overflow offset text_to_rect_wrapped left in dword_58F4E0
 // was simply dropped and the tail of the reply was never shown.
+// Page stack, same shape as vanilla's pageOffsets[10] in _gdProcess: entry i is
+// the text offset page i starts at. dword_58F4E0 is the offset the NEXT page
+// starts at after a render (0 once the last page has been drawn).
+static int gDialogReplyPageOffsets[10];
+static int gDialogReplyPageIndex = 0;
+static int gDialogReplyPageCount = 0;
+
+static void gameDialogReplyPagesReset()
+{
+    gDialogReplyPageOffsets[0] = 0;
+    gDialogReplyPageIndex = 0;
+    gDialogReplyPageCount = 0;
+}
+
 bool gameDialogReplyHasMore()
 {
     return dword_58F4E0 != 0;
 }
 
+bool gameDialogReplyCanPageUp()
+{
+    return gDialogReplyPageIndex > 0;
+}
+
 void gameDialogReplyNextPage()
 {
-    if (dword_58F4E0 == 0) {
+    if (dword_58F4E0 == 0 || gDialogReplyPageIndex >= 9) {
         return;
     }
+    gDialogReplyPageIndex++;
+    gDialogReplyPageOffsets[gDialogReplyPageIndex] = dword_58F4E0;
+    if (gDialogReplyPageIndex > gDialogReplyPageCount) {
+        gDialogReplyPageCount = gDialogReplyPageIndex;
+    }
     gameDialogRenderReply(); // renders from the offset and advances it (0 at the end)
+}
+
+void gameDialogReplyPrevPage()
+{
+    if (gDialogReplyPageIndex <= 0) {
+        return;
+    }
+    gDialogReplyPageIndex--;
+    dword_58F4E0 = gDialogReplyPageOffsets[gDialogReplyPageIndex];
+    gameDialogRenderReply();
 }
 
 // Resolve option `index`'s final display text (including the SFALL number/bullet
@@ -2731,6 +2768,8 @@ bool gameDialogGetOptionText(int index, char* out, size_t size)
 void gameDialogSetReplyText(const char* text)
 {
     snprintf(gDialogReplyText, sizeof(gDialogReplyText), "%s", text != nullptr ? text : "");
+    dword_58F4E0 = 0;
+    gameDialogReplyPagesReset();
 }
 
 // ►► OPTION-LIST SCROLLING. The options panel is a fixed 393x117 and the renderer drops

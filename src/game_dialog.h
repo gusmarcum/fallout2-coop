@@ -61,6 +61,8 @@ bool gameDialogGetOptionText(int index, char* out, size_t size);
 void gameDialogSetReplyText(const char* text);
 void gameDialogClearOptions();
 bool gameDialogReplyHasMore();
+bool gameDialogReplyCanPageUp();
+void gameDialogReplyPrevPage();
 void gameDialogReviewRecordReply(const char* text);
 void gameDialogReviewRecordOption(const char* text);
 void gameDialogReplyNextPage();
