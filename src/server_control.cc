@@ -417,7 +417,16 @@ static void interactionTargetTaken(Object* actor)
 // approach walk completed — see bugs/001-dialog-range-early-fire.md.
 static bool interactionRuleSatisfied(int verb, Object* actor, Object* target)
 {
-    (void)verb;
+    if (verb == kInteractTalk) {
+        // Vanilla's rule (_action_can_talk_to): within 9 hexes with a clear line of
+        // sight, no adjacency needed. Requiring adjacency for talk dropped every
+        // conversation whose approach walk could not end next to the speaker: a
+        // bartender behind a counter, an NPC in a crowd, a critter on a tile the
+        // pathfinder stops short of. The walk ended at distance 5 and the request
+        // was DROPPED walk-ended-short, so the player saw nothing happen.
+        return objectGetDistanceBetween(actor, target) < 9
+            && !_combat_is_shot_blocked(actor, actor->tile, target->tile, target, nullptr);
+    }
     return objectGetDistanceBetween(actor, target) <= 1;
 }
 
