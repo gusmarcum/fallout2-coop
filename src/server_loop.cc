@@ -419,6 +419,7 @@ static void serverEmitBaseline()
     if (gWorldmapBaseline) {
         gWorldmapBaseline();
     }
+    gvarDeltaEmitAll(); // quest/karma variables for the joiner (deltas alone never catch it up)
 
     // Server-authored holodisks (SERVER INFORMATION). Re-announced with every baseline,
     // which is why they need no persistence — see server_control.cc serverEmitHolodisks.
