@@ -57,11 +57,19 @@ static std::string gPendingAudio;
 // EVENT_DIALOG_NODE handler. LATCHES the node — no window calls (I6). The first
 // node marks the conversation live; clientModalWindowsSync() builds the windows on
 // the next frame and clientDialogRenderPendingNode() applies this content into them.
+static bool gPendingSpeakerIsPartyMember = false;
+
+bool clientDialogSpeakerIsPartyMember()
+{
+    return gPendingSpeakerIsPartyMember;
+}
+
 void clientDialogOnNode(int speakerNetId, int driverNetId, int reaction,
     const char* reply, const char* const* options, int optionCount,
-    const char* audioFileName, int headFid, const int* optionReactions)
+    const char* audioFileName, int headFid, const int* optionReactions, bool speakerIsPartyMember)
 {
     gPendingSpeakerNetId = speakerNetId;
+    gPendingSpeakerIsPartyMember = speakerIsPartyMember;
     gPendingReaction = reaction;
     gPendingHeadFid = headFid;
     gPendingReply = reply != nullptr ? reply : "";
@@ -136,6 +144,7 @@ void clientModalWindowsSync()
         // _gdSetupFidget read gGameDialogHeadFid to locate the head art for lipsync
         // and the idle fidget. See client_dialog history for the Arroyo Elder repro.
         gGameDialogSpeaker = speaker;
+        gGameDialogSpeakerIsPartyMember = gPendingSpeakerIsPartyMember; // party-member window (Combat Control)
         gGameDialogHeadFid = gPendingHeadFid;
         gGameDialogFidget = gPendingReaction;
         _gdialogInitFromScript(gPendingHeadFid, gPendingReaction);

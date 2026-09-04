@@ -4396,10 +4396,11 @@ private:
             optionPtrs[i] = optionStorage[i].c_str();
             optionReactions[i] = r.i32(); // per-option reaction — the Empathy colours
         }
+        bool speakerIsPartyMember = r.remaining() >= 1 ? r.u8() != 0 : false; // trailing, optional
         if (!clientViewerActive() || r.overflow()) return;
         clientDialogOnNode(speakerNetId, driverNetId, reaction,
             reply.c_str(), optionPtrs, optionCount, audioFileName.c_str(), headFid,
-            optionReactions);
+            optionReactions, speakerIsPartyMember);
     }
 
     void onDialogEnd(Reader& r)

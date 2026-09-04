@@ -536,7 +536,7 @@ public:
     virtual void dialogNode(Object* speaker, Object* driver, int reaction,
         const char* reply, const char* const* options, int optionCount,
         const char* audioFileName = nullptr, int headFid = -1,
-        const int* optionReactions = nullptr) {}
+        const int* optionReactions = nullptr, bool speakerIsPartyMember = false) {}
 
     // The conversation ended (every _gdProcess exit: normal end, ESC/dend, or a bail
     // on disconnect/combat/quit). Every viewer tears down its dialog window —

@@ -928,7 +928,7 @@ public:
     void dialogNode(Object* speaker, Object* driver, int reaction,
         const char* reply, const char* const* options, int optionCount,
         const char* audioFileName = nullptr, int headFid = -1,
-        const int* optionReactions = nullptr) override
+        const int* optionReactions = nullptr, bool speakerIsPartyMember = false) override
     {
         if (presenterEmissionsSuppressed()) return;
         if (eventTraceEnabled()) fprintf(stderr, "[dialog] SEND node speaker=%d driver=%d reaction=%d headFid=0x%X audio=%s opts=%d\n",
@@ -950,6 +950,11 @@ public:
             // of step, and so a truncated list truncates both halves together.
             putI32(optionReactions != nullptr ? optionReactions[i] : GAME_DIALOG_REACTION_NEUTRAL);
         }
+        // TRAILING: the viewer has no party list (that is full-save state), so it
+        // cannot tell a companion from an NPC and never built the party-member
+        // dialog window (the one with the Combat Control button). Older readers
+        // stop before this byte and are unaffected.
+        putU8(speakerIsPartyMember ? 1 : 0);
         endEvent();
         // Modal: the server tick is BLOCKED in the dialog barrier for the whole
         // conversation, so no beatEnd will flush this. Ship it now (mirrors
