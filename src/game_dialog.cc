@@ -2007,6 +2007,147 @@ static void dialogEmitNode()
 }
 
 // 0x4465C0
+// ---------------------------------------------------------------------------
+// Party-member COMBAT ORDERS as a streamed dialog node (co-op server).
+//
+// Vanilla edits a party member's AI packet through the Combat Control /
+// Customize windows: SDL windows with their own blocking loops that the
+// headless server cannot run and the wire viewer must not run (it would edit
+// a local copy the server never sees). So the server aborted that branch and
+// the feature was simply missing in co-op.
+//
+// Here the six customizable orders are served as an ordinary dialog node: one
+// line per order showing its current value, picking a line cycles it to the
+// next value (same tables and message file as the Customize window), "Done"
+// returns to the conversation node that was showing. State lives on the
+// server, in the same AI packet fields vanilla writes, so it saves as before.
+// ---------------------------------------------------------------------------
+static bool gCustomMessageListLoaded = false;
+
+static const char* partyOrdersMessage(int num)
+{
+    if (!gCustomMessageListLoaded) {
+        if (messageListInit(&gCustomMessageList) && messageListLoad(&gCustomMessageList, "game\\custom.msg")) {
+            gCustomMessageListLoaded = true;
+        }
+    }
+    MessageListItem item;
+    item.num = num;
+    if (gCustomMessageListLoaded && messageListGetItem(&gCustomMessageList, &item)) {
+        return item.text;
+    }
+    return "?";
+}
+
+static int partyOrdersCount(int type)
+{
+    int count = 0;
+    while (count < 6 && _custom_settings[type][count].messageId != -1) {
+        count++;
+    }
+    return count;
+}
+
+static int partyOrdersCurrentIndex(Object* member, int type)
+{
+    int value = 0;
+    switch (type) {
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_AREA_ATTACK_MODE: value = aiGetAreaAttackMode(member); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_RUN_AWAY_MODE: value = aiGetRunAwayMode(member); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_BEST_WEAPON: value = aiGetBestWeapon(member); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_DISTANCE: value = aiGetDistance(member); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_ATTACK_WHO: value = aiGetAttackWho(member); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_CHEM_USE: value = aiGetChemUse(member); break;
+    }
+    // The Customize window uses the getter's value directly as the table index
+    // (partyMemberCustomizationWindowInit), so do the same, clamped.
+    int count = partyOrdersCount(type);
+    if (value < 0) value = 0;
+    if (value >= count) value = count - 1;
+    return value;
+}
+
+static void partyOrdersApply(Object* member, int type, int index)
+{
+    int value = _custom_settings[type][index].value;
+    switch (type) {
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_AREA_ATTACK_MODE: aiSetAreaAttackMode(member, value); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_RUN_AWAY_MODE: aiSetRunAwayMode(member, value); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_BEST_WEAPON: aiSetBestWeapon(member, value); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_DISTANCE: aiSetDistance(member, value); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_ATTACK_WHO: aiSetAttackWho(member, value); break;
+    case PARTY_MEMBER_CUSTOMIZATION_OPTION_CHEM_USE: aiSetChemUse(member, value); break;
+    }
+}
+
+static void serverDialogPartyOrders()
+{
+    Object* member = gGameDialogSpeaker;
+    if (member == nullptr || !objectIsPartyMember(member)) {
+        return;
+    }
+
+    // Park the real node so "Done" can put it back exactly.
+    static GameDialogOptionEntry savedOptions[DIALOG_OPTION_ENTRIES_CAPACITY];
+    static char savedReply[sizeof(gDialogReplyText)];
+    int savedLength = gGameDialogOptionEntriesLength;
+    if (savedLength > DIALOG_OPTION_ENTRIES_CAPACITY) savedLength = DIALOG_OPTION_ENTRIES_CAPACITY;
+    memcpy(savedOptions, gDialogOptionEntries, sizeof(GameDialogOptionEntry) * savedLength);
+    memcpy(savedReply, gDialogReplyText, sizeof(savedReply));
+
+    for (;;) {
+        snprintf(gDialogReplyText, sizeof(gDialogReplyText),
+            "%s: How do you want me to fight? Pick a line to change it.", critterGetName(member));
+        gameDialogClearOptions(); // length, scroll and clipping reset
+        for (int type = 0; type < PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT; type++) {
+            int index = partyOrdersCurrentIndex(member, type);
+            char line[256];
+            snprintf(line, sizeof(line), "%s: %s", partyOrdersMessage(type),
+                partyOrdersMessage(_custom_settings[type][index].messageId));
+            gameDialogAddTextOption(-1, line, GAME_DIALOG_REACTION_NEUTRAL);
+        }
+        gameDialogAddTextOption(-1, partyOrdersMessage(10), GAME_DIALOG_REACTION_NEUTRAL); // Done
+
+        if (gDialogServerPump != nullptr) {
+            dialogEmitNode();
+        }
+        DialogIntent intent;
+        bool haveIntent = dialogIntentPeek(&intent);
+        if (gDialogServerPump != nullptr) {
+            while (!haveIntent) {
+                if (!gDialogServerPump()) {
+                    break;
+                }
+                haveIntent = dialogIntentPeek(&intent);
+            }
+        }
+        if (!haveIntent) {
+            break; // pump gave up: restore and let the caller's own wait decide
+        }
+        dialogIntentPop();
+        if (intent.kind == DIALOG_INTENT_END) {
+            dialogIntentPush(DIALOG_INTENT_END, 0); // the caller ends the conversation
+            break;
+        }
+        if (intent.kind != DIALOG_INTENT_SELECT) {
+            break; // Combat Control / barter pressed again: treat as Done
+        }
+        if (intent.arg < 0 || intent.arg >= PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT) {
+            break; // Done (or out of range)
+        }
+        int type = intent.arg;
+        int next = (partyOrdersCurrentIndex(member, type) + 1) % partyOrdersCount(type);
+        partyOrdersApply(member, type, next);
+        fprintf(stderr, "f2_server: party orders %s: %s -> %s\n", critterGetName(member),
+            partyOrdersMessage(type), partyOrdersMessage(_custom_settings[type][next].messageId));
+    }
+
+    gameDialogClearOptions(); // drops the orders node's entries, resets scroll/clipping
+    memcpy(gDialogOptionEntries, savedOptions, sizeof(GameDialogOptionEntry) * savedLength);
+    memcpy(gDialogReplyText, savedReply, sizeof(savedReply));
+    gGameDialogOptionEntriesLength = savedLength;
+}
+
 int _gdProcess()
 {
     if (_gdReenterLevel == 0) {
@@ -2117,6 +2258,12 @@ int _gdProcess()
             }
 
             int choiceResult = 0;
+            if (intent.kind == DIALOG_INTENT_PARTY) {
+                // Combat Control on a party member: serve the orders node, then
+                // fall through to re-emit the conversation node it replaced.
+                serverDialogPartyOrders();
+                continue;
+            }
             if (intent.kind == DIALOG_INTENT_BARTER) {
                 // The routed Barter button (server_control dbarter). WHETHER this
                 // speaker barters is ours to decide, exactly as the interactive
@@ -4441,6 +4588,13 @@ void partyMemberControlWindowUpdate()
 // 0x44928C
 void gameDialogCombatControlButtonOnMouseUp(int btn, int keyCode)
 {
+    // Wire viewer: the control window is a local SDL loop editing a LOCAL copy
+    // of the AI packet the server never sees. Ask the server for its
+    // combat-orders node instead (serverDialogPartyOrders).
+    if (clientViewerActive()) {
+        clientViewerDialogParty();
+        return;
+    }
     _dialogue_switch_mode = 8;
     _dialogue_state = 10;
 

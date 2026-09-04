@@ -2368,7 +2368,8 @@ void serverControlLine(int sessionId, const char* line)
     //     never hardcode "viewer 0 drives"). A spectator's dsay must no-op.
     // Fully DORMANT today: no viewer sends these yet (TALK→LOOK until A3) and no
     // pump runs by default, so the gate short-circuits at _gdialogActive().
-    if (strcmp(verb, "dsay") == 0 || strcmp(verb, "dend") == 0 || strcmp(verb, "dbarter") == 0) {
+    if (strcmp(verb, "dsay") == 0 || strcmp(verb, "dend") == 0 || strcmp(verb, "dbarter") == 0
+        || strcmp(verb, "dparty") == 0) {
         // WHOEVER STARTED IT ANSWERS IT (owner ruling 2026-07-21). The stderr text
         // keeps the "host-only screen" wording it has always had — scripts grep it,
         // and it is still accurate for the NPC-initiated fallback.
@@ -2407,7 +2408,12 @@ void serverControlLine(int sessionId, const char* line)
             serverControlRefuse(sessionId, "That conversation is no longer open.");
             return;
         }
-        if (strcmp(verb, "dbarter") == 0) {
+        if (strcmp(verb, "dparty") == 0) {
+            // The on-screen Combat Control button on a party member, routed:
+            // the server serves the combat-orders node (serverDialogPartyOrders).
+            dialogIntentPush(DIALOG_INTENT_PARTY, 0);
+            fprintf(stderr, "f2_server: control dparty\n");
+        } else if (strcmp(verb, "dbarter") == 0) {
             // The on-screen Barter button, routed. Whether this speaker WILL
             // barter is the server's call (CRITTER_BARTER), made in the drain.
             dialogIntentPush(DIALOG_INTENT_BARTER, 0);
