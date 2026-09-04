@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <unordered_set>
 
 #include "animation.h"
 #include "art.h"
@@ -3709,6 +3710,16 @@ int _obj_load_dude(File* stream)
 }
 
 // 0x48D778
+// Every live Object allocation (see objectIsLive). A set of pointers: an insert per
+// create and an erase per free, both far rarer than the lookups that keep the
+// network mirror from touching freed memory.
+static std::unordered_set<const Object*> gLiveObjects;
+
+bool objectIsLive(const Object* object)
+{
+    return object != nullptr && gLiveObjects.find(object) != gLiveObjects.end();
+}
+
 static int objectAllocate(Object** objectPtr)
 {
     if (objectPtr == nullptr) {
@@ -3719,6 +3730,7 @@ static int objectAllocate(Object** objectPtr)
     if (object == nullptr) {
         return -1;
     }
+    gLiveObjects.insert(object);
 
     memset(object, 0, sizeof(Object));
 
@@ -3748,6 +3760,7 @@ static void objectDeallocate(Object** objectPtr)
         return;
     }
 
+    gLiveObjects.erase(*objectPtr);
     internal_free(*objectPtr);
 
     *objectPtr = nullptr;
