@@ -39,6 +39,8 @@
 #include "map.h" // mapGetLoadGeneration — drop latches on a map change
 #include "message.h" // messageListGetItem / MessageListItem
 #include "msg_channel.h" // kMsgChannel* — the greeting speaks on the system channel
+#include "path.h"
+#include <map>
 #include "object.h"
 #include "platform_compat.h" // compat_stricmp — account names compare case-insensitively
 #include "pres_record.h" // presRecord* — record the interaction gesture as a presentation sequence
@@ -339,6 +341,10 @@ struct PendingInteraction {
     int arg;         // skill id for kInteractSkill; item pid for
                      // kInteractUseItemOn; unused otherwise
     int beatsLeft;   // pathing backstop; hitting 0 drops with "cannot get there"
+    // Companions were asked to step out of the way (partyYieldForPath): retry the
+    // approach walk this many times, this many beats apart, before giving up.
+    int yieldRetriesLeft = 0;
+    int yieldRetryBeats = 0;
 };
 
 // ~15 s of pathing at 100 ms/beat — a generous cap so a long legitimate approach
@@ -899,6 +905,84 @@ bool serverControlRunCombatInteract(Object* actor, int verb, int targetNetId, in
 // actor already satisfies the rule (preserves slice-1 "adjacent door opens now").
 // The target was validated by the caller (netId/type/elevation/args). `actor` is
 // the v1 gDude binding (mp-actor: the executor never hardwires it beyond here).
+// ---- companions step out of the way ------------------------------------------
+//
+// Vanilla and this server both plan walks with _obj_blocking_at, and a party member
+// blocks a hex like anyone else, so a companion standing in a doorway makes every
+// walk and every approach to the door fail ("You cannot get there"). Vanilla players
+// live with it; with two companions glued to the leader in co-op it happened at
+// nearly every door. When a walk cannot start, and the only reason is party members
+// in the way, the members within three hexes walk to a free hex away from the actor
+// and the destination, and the request is retried a few beats later.
+constexpr int kYieldRetryBeats = 6;
+
+static Object* blockingIgnoringParty(Object* object, int tile, int elevation)
+{
+    Object* blocker = _obj_blocking_at(object, tile, elevation);
+    if (blocker != nullptr && !isInCombat() && PID_TYPE(blocker->pid) == OBJ_TYPE_CRITTER
+        && objectIsPartyMember(blocker) && !playerActorIs(blocker) && !critterIsDead(blocker)) {
+        return nullptr;
+    }
+    return blocker;
+}
+
+static bool partyYieldForPath(Object* actor, int tile)
+{
+    if (actor == nullptr || isInCombat() || tile == actor->tile || !hexGridTileIsValid(tile)) {
+        return false;
+    }
+    if (pathfinderFindPath(actor, actor->tile, tile, nullptr, 0, _obj_blocking_at) != 0) {
+        return false; // a path exists; whatever stopped the walk, it was not a companion
+    }
+    if (pathfinderFindPath(actor, actor->tile, tile, nullptr, 0, blockingIgnoringParty) == 0) {
+        return false; // blocked by geometry or strangers, not by the party
+    }
+    bool moved = false;
+    for (int index = 1; index < partyMemberCount(); index++) {
+        Object* member = partyMemberAt(index);
+        if (member == nullptr || member == actor || critterIsDead(member) || member->elevation != actor->elevation) {
+            continue;
+        }
+        if (tileDistanceBetween(member->tile, actor->tile) > 3) {
+            continue;
+        }
+        int best = -1;
+        int bestScore = -1;
+        for (int dist = 1; dist <= 3; dist++) {
+            for (int rot = 0; rot < ROTATION_COUNT; rot++) {
+                int candidate = tileGetTileInDirection(member->tile, rot, dist);
+                if (!hexGridTileIsValid(candidate) || _obj_blocking_at(nullptr, candidate, member->elevation) != nullptr) {
+                    continue;
+                }
+                int score = tileDistanceBetween(candidate, actor->tile) + tileDistanceBetween(candidate, tile);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = candidate;
+                }
+            }
+        }
+        if (best == -1) {
+            continue;
+        }
+        reg_anim_clear(member);
+        reg_anim_begin(ANIMATION_REQUEST_UNRESERVED);
+        animationRegisterMoveToTile(member, best, member->elevation, -1, 0);
+        reg_anim_end();
+        fprintf(stderr, "f2_server: %s steps aside %d -> %d (walk to %d blocked)\n",
+            critterGetName(member), member->tile, best, tile);
+        moved = true;
+    }
+    return moved;
+}
+
+struct MoveRetry {
+    int tile;
+    bool run;
+    int beats;
+    int retriesLeft;
+};
+static std::map<Object*, MoveRetry> gMoveRetries;
+
 static void serverControlArmInteraction(int sessionId, Object* actor, int verb, Object* target, int arg)
 {
     if (actor == nullptr) {
@@ -959,6 +1043,12 @@ static void serverControlArmInteraction(int sessionId, Object* actor, int verb, 
     pending.targetPid = target->pid;
     pending.arg = arg;
     pending.beatsLeft = kInteractionBeatsCap;
+    pending.yieldRetriesLeft = 0;
+    pending.yieldRetryBeats = 0;
+    if (!serverAnimWalkInFlightFor(actor) && partyYieldForPath(actor, target->tile)) {
+        pending.yieldRetriesLeft = 2;
+        pending.yieldRetryBeats = kYieldRetryBeats;
+    }
     fprintf(stderr, "f2_server: control interact verb=%d netId=%d armed (approach, session %d)\n",
         verb, target->netId, sessionId);
 }
@@ -982,6 +1072,30 @@ void serverControlCancelPendingForCombat()
 
 void serverControlAdvancePending()
 {
+    for (auto it = gMoveRetries.begin(); it != gMoveRetries.end();) {
+        Object* actor = it->first;
+        if (!objectIsLive(actor) || isInCombat()) {
+            it = gMoveRetries.erase(it);
+            continue;
+        }
+        if (--it->second.beats > 0) {
+            ++it;
+            continue;
+        }
+        MoveRetry retry = it->second;
+        it = gMoveRetries.erase(it);
+        reg_anim_begin(ANIMATION_REQUEST_RESERVED);
+        if (retry.run) {
+            animationRegisterRunToTile(actor, retry.tile, actor->elevation, -1, 0);
+        } else {
+            animationRegisterMoveToTile(actor, retry.tile, actor->elevation, -1, 0);
+        }
+        reg_anim_end();
+        fprintf(stderr, "f2_server: control mv tile=%d retried after a companion stepped aside\n", retry.tile);
+        if (!serverAnimWalkInFlightFor(actor) && retry.retriesLeft > 0 && partyYieldForPath(actor, retry.tile)) {
+            gMoveRetries[actor] = MoveRetry { retry.tile, retry.run, kYieldRetryBeats, retry.retriesLeft - 1 };
+        }
+    }
     // ►► MAP-GENERATION BOOKKEEPING RUNS FIRST, BEFORE THE EMPTY EARLY-RETURN.
     //
     // This used to sit below `if (empty()) return;`, which meant lastGeneration was
@@ -1104,6 +1218,27 @@ void serverControlAdvancePending()
             interactionFire(pending.verb, actor, target, pending.arg);
             continue;
         }
+        if (!serverAnimWalkInFlightFor(actor) && it->second.yieldRetriesLeft > 0) {
+            // Companions were asked to step aside: give them a few beats, then walk again.
+            if (--it->second.yieldRetryBeats > 0) {
+                continue;
+            }
+            it->second.yieldRetriesLeft--;
+            it->second.yieldRetryBeats = kYieldRetryBeats;
+            reg_anim_begin(ANIMATION_REQUEST_RESERVED);
+            if (objectGetDistanceBetween(actor, target) >= 5) {
+                animationRegisterRunToObject(actor, target, -1, 0);
+            } else {
+                animationRegisterMoveToObject(actor, target, -1, 0);
+            }
+            reg_anim_end();
+            fprintf(stderr, "f2_server: interact verb=%d netId=%d approach retried after a companion stepped aside\n",
+                pending.verb, pending.targetNetId);
+            if (!serverAnimWalkInFlightFor(actor)) {
+                partyYieldForPath(actor, target->tile);
+            }
+            continue;
+        }
         if (!serverAnimWalkInFlightFor(actor)) {
             // Walk finished (or never pathed) without reaching the target.
             //
@@ -1165,6 +1300,9 @@ static void serverControlMove(Object* actor, int tile, bool run)
         animationRegisterMoveToTile(actor, tile, actor->elevation, -1, 0);
     }
     reg_anim_end();
+    if (!serverAnimWalkInFlightFor(actor) && partyYieldForPath(actor, tile)) {
+        gMoveRetries[actor] = MoveRetry { tile, run, kYieldRetryBeats, 1 };
+    }
     fprintf(stderr, "f2_server: control mv tile=%d run=%d\n", tile, run ? 1 : 0);
 }
 
