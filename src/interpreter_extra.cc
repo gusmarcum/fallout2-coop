@@ -931,55 +931,6 @@ static void opMoveTo(Program* program)
 
 // create_object_sid
 // 0x454FA8
-static const bool kOpWorldTrace = getenv("F2_TRACE_WORLD") != nullptr; // [world-trace]
-
-// ---- Secret Blocking Hex: one per hex on the dedicated server -------------------
-//
-// pid 0x02000043 is the invisible scenery the designers use as a wall, and that map
-// scripts also create for a moment to close a hex. The Vault City gate (VIEntDor)
-// drops one on the gate's approach tile (28917) in map_enter_p_proc and destroys it
-// five ticks later from timed_event_p_proc with
-//     destroy_object(tile_contains_pid_obj(28917, 0, PID_SECRET_BLOCKING_HEX))
-// which removes ONE object per call. Whenever that timer is lost (the map is saved
-// and reloaded, or the timer queue is dropped, before the five ticks elapse) the
-// blocker survives in the map's .SAV, the next visit adds another, and the script's
-// cleanup keeps removing one while leaving the rest: the saved co-op worlds carried
-// two on the gate tile (2026-09-04) and every walk through the opened gate failed
-// with "You cannot get there." Two invisible blockers on one hex are functionally
-// one, so on the server a create onto a hex that already holds one returns the
-// standing one, and a destroy removes every one on that hex. Vanilla single player
-// and the headless goldens keep the exact engine behaviour.
-static constexpr int kPidSecretBlockingHex = 0x02000043;
-
-static Object* secretBlockingHexAt(int tile, int elevation)
-{
-    if (!hexGridTileIsValid(tile)) {
-        return nullptr;
-    }
-    Object* candidate = objectFindFirstAtLocation(elevation, tile);
-    while (candidate != nullptr) {
-        if (candidate->pid == kPidSecretBlockingHex) {
-            return candidate;
-        }
-        candidate = objectFindNextAtLocation();
-    }
-    return nullptr;
-}
-
-static void secretBlockingHexDestroyAllAt(int tile, int elevation)
-{
-    Object* extra;
-    while ((extra = secretBlockingHexAt(tile, elevation)) != nullptr) {
-        if (kOpWorldTrace) {
-            fprintf(stderr, "[world] destroy_object also removes a duplicate blocking hex at tile=%d\n", tile);
-        }
-        reg_anim_clear(extra);
-        Rect rect;
-        objectDestroy(extra, &rect);
-        presenter()->worldInvalidateRect(&rect, gElevation);
-    }
-}
-
 static void opCreateObject(Program* program)
 {
     int data[4];
@@ -1005,16 +956,6 @@ static void opCreateObject(Program* program)
         goto out;
     }
 
-    if (sid == -1 && pid == kPidSecretBlockingHex && serverLoopActive()) {
-        object = secretBlockingHexAt(tile, elevation);
-        if (object != nullptr) {
-            if (kOpWorldTrace) {
-                fprintf(stderr, "[world] create_object reuses the blocking hex already at tile=%d by %s\n", tile, program->name);
-            }
-            goto out;
-        }
-    }
-
     Proto* proto;
     if (protoGetProto(pid, &proto) != -1) {
         if (objectCreateWithFidPid(&object, proto->fid, pid) != -1) {
@@ -1025,10 +966,6 @@ static void opCreateObject(Program* program)
             Rect rect;
             if (objectSetLocation(object, tile, elevation, &rect) != -1) {
                 presenter()->worldInvalidateRect(&rect, object->elevation);
-            }
-            if (kOpWorldTrace) {
-                fprintf(stderr, "[world] create_object pid=0x%08X tile=%d elev=%d sid=%d by %s (loading=%d)\n",
-                    pid, object->tile, object->elevation, sid, program->name, _isLoadingGame() ? 1 : 0);
             }
         }
     } else {
@@ -1088,11 +1025,6 @@ static void opDestroyObject(Program* program)
 
     Object* object = static_cast<Object*>(programStackPopPointer(program));
 
-    if (kOpWorldTrace) {
-        fprintf(stderr, "[world] destroy_object %s pid=0x%08X tile=%d by %s\n",
-            object == nullptr ? "NULL" : "obj", object != nullptr ? object->pid : 0,
-            object != nullptr ? object->tile : -1, program->name);
-    }
     if (object == nullptr) {
         scriptPredefinedError(program, "destroy_object", SCRIPT_ERROR_OBJECT_IS_NULL);
         program->flags &= ~PROGRAM_FLAG_0x20;
@@ -1133,17 +1065,11 @@ static void opDestroyObject(Program* program)
             objectDestroy(object, nullptr);
         }
     } else {
-        int destroyedPid = object->pid;
-        int destroyedTile = object->tile;
-        int destroyedElevation = object->elevation;
         reg_anim_clear(object);
 
         Rect rect;
         objectDestroy(object, &rect);
         presenter()->worldInvalidateRect(&rect, gElevation);
-        if (destroyedPid == kPidSecretBlockingHex && serverLoopActive()) {
-            secretBlockingHexDestroyAllAt(destroyedTile, destroyedElevation);
-        }
     }
 
     program->flags &= ~PROGRAM_FLAG_0x20;
