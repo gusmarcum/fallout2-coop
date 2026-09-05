@@ -1858,6 +1858,13 @@ private:
             Inventory* inv = &(owner->data.inventory);
             for (int i = 0; i < inv->length; i++) {
                 if (inv->items[i].item == item) {
+                    // Named in the log: a script that briefly puts an inventory item on
+                    // the map (the scene macro's rm_obj_from_inven / add_obj_to_inven
+                    // pair on a worn armor) reaches here, and "my stuff vanished" reports
+                    // need the owner, the item and the moment.
+                    debugPrint("client_net: CONNECT unlinked pid=0x%X x%d from owner net=%d (%s)\n",
+                        item->pid, inv->items[i].quantity, owner->netId,
+                        owner == gDude ? "us" : "other");
                     itemRemove(owner, item, inv->items[i].quantity);
                     return true;
                 }
@@ -2657,8 +2664,20 @@ private:
                 gInventoryArmor = nullptr;
             }
             int origLen = inv->length;
+            // The VICTIM of an open steal session: the server has detached our worn armor
+            // and held weapons into its hidden box for the session (vanilla's own steal
+            // rule, so the thief cannot lift them), and this delta lists our pockets
+            // without them. Removing them here is what made "equipped items disappear
+            // immediately" on the victim's screen (owner-reported): the interface bar
+            // emptied, the paperdoll stripped. Keep them, flags and all, until the
+            // session closes; the reattach re-lists them under the same net ids, so they
+            // are claimed back below and nothing is duplicated.
+            bool stealVictim = clientViewerActive() && gViewerStealTargetNetId != 0
+                && obj->netId == gViewerStealTargetNetId;
+            std::vector<unsigned int> wasEquipped(origLen, 0);
             for (int i = 0; i < origLen; i++) {
                 if (inv->items[i].item != nullptr) {
+                    wasEquipped[i] = inv->items[i].item->flags & (OBJECT_IN_ANY_HAND | OBJECT_WORN);
                     inv->items[i].item->flags &= ~(OBJECT_IN_ANY_HAND | OBJECT_WORN);
                 }
             }
@@ -2729,6 +2748,13 @@ private:
                 std::vector<int> toRemoveQty;
                 for (int i = 0; i < origLen; i++) {
                     if (!claimed[i] && inv->items[i].item != nullptr) {
+                        if (stealVictim && wasEquipped[i] != 0) {
+                            // Our own gear, parked server-side for the theft: keep it on us.
+                            inv->items[i].item->flags |= wasEquipped[i];
+                            debugPrint("client_net: steal victim keeps equipped pid=0x%X for the session\n",
+                                inv->items[i].item->pid);
+                            continue;
+                        }
                         toRemove.push_back(inv->items[i].item);
                         toRemoveQty.push_back(inv->items[i].quantity);
                     }

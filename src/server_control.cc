@@ -3589,11 +3589,20 @@ void serverControlLine(int sessionId, const char* line)
                             && other->pid == held->pid
                             && (other->flags & (OBJECT_EQUIPPED | OBJECT_QUEUED)) == 0;
                     }
+                    bool merged = false;
                     if (mergeable && itemRemove(gDude, held, 1) == 0) {
+                        int before = inv->length;
                         itemAdd(gDude, held, 1);
+                        merged = inv->length == before; // itemAdd merged into the existing stack
                     }
+                    // Owner-reported: a stimpak peeled into a hand and put back sometimes
+                    // shows as 23 + 1. The server merges on this path; say so per unwield,
+                    // so the next report tells whether the split is here or on the viewer.
+                    fprintf(stderr, "f2_server: control invunwield hand=%d held net=%d pid=%d mergeable=%d merged=%d\n",
+                        hand, held->netId, held->pid, mergeable ? 1 : 0, merged ? 1 : 0);
+                } else {
+                    fprintf(stderr, "f2_server: control invunwield hand=%d (nothing held, or an equipped/nested item)\n", hand);
                 }
-                fprintf(stderr, "f2_server: control invunwield hand=%d\n", hand);
             } else if (hand == HAND_COUNT) { // 2 == armor slot (no Hand enum value)
                 Object* armor = critterGetArmor(gDude);
                 if (armor != nullptr) {
@@ -3668,10 +3677,11 @@ void serverControlLine(int sessionId, const char* line)
             Inventory* inv = &gDude->data.inventory;
             for (int i = 0; i < inv->length; i++) {
                 Object* candidate = inv->items[i].item;
-                fprintf(stderr, " [net=%d pid=%d qty=%d]",
+                fprintf(stderr, " [net=%d pid=%d qty=%d f=0x%X]",
                     candidate != nullptr ? candidate->netId : -1,
                     candidate != nullptr ? candidate->pid : -1,
-                    inv->items[i].quantity);
+                    inv->items[i].quantity,
+                    candidate != nullptr ? candidate->flags : 0u);
             }
             fprintf(stderr, "%s)\n", inv->length == 0 ? " nothing" : "");
             serverControlRefuse(sessionId, "You don't have that item.");
