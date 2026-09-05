@@ -1,422 +1,241 @@
-# Fallout 2 — Dedicated (co-op) Server & Client
+# Fallout 2 Co-op
 
-A fork of [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce) that
-adds a **dedicated server** and turns the normal game binary into a **network client /
-viewer**, so several players can share one persistent Fallout 2 world — co-op combat,
-dialog, barter, worldmap travel and per-player characters.
+Play Fallout 2 together. One PC runs a dedicated server that owns the world: scripts, combat,
+dialogue, the worldmap, saves. Every player runs a client that shows that shared world and
+sends what they do. Several people, one persistent game, each with their own character.
 
-Everything from upstream still works: this is the same faithful re-implementation of the
-original engine, with the original gameplay, bugfixes and quality-of-life improvements. The
-co-op layer is built *on top of* it — if you just want single-player, the client binary is
-still the ordinary game (see [Single-player](#single-player-original--ce)).
+Built on [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce), derived
+from [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop) v0.4, and developed
+here as its own project. No game files are included: bring your own Fallout 2 (Steam or GOG,
+US 1.02d). Licence: Sustainable Use (non-commercial), inherited from Fallout 2 Community
+Edition.
 
-> ⚠️ **AI-assisted project.** Large parts of the co-op layer — code and documentation (this
-> README included) — were written with heavy use of AI coding assistants, under human direction
-> and review. Disclosed up front so it's never a surprise: expect the rough edges that come with
-> that (see the [FAQ](#faq--troubleshooting)), read the code before you rely on it, and bug
-> reports are the best way to make it better.
+## What this project adds
 
-> You must own Fallout 2 to play. Buy a copy on
-> [GOG](https://www.gog.com/game/fallout_2),
-> [Epic Games](https://store.epicgames.com/p/fallout-2) or
-> [Steam](https://store.steampowered.com/app/38410). The engine ships no game assets — you
-> supply `master.dat`, `critter.dat`, `patch000.dat` and the `data` folder from your own copy.
+Everything below came out of real two-player sessions fixing AI mistakes from the original project, issues were manually traced to its cause in the engine,
+fixed at the cause, and verified against a 41-scenario regression suite before it shipped.
+The commit history carries the full reasoning for each one.
 
-## How it fits together
+**The world now survives a reconnect.** Co-op players reconnect a lot. Before, a rejoining
+client came back to a map where every visited town had turned unknown again, the Pip-Boy
+showed finished quests as open, and dead players stood back up. All three had the same
+shape: the server knew the truth, but a joining client was only ever sent the changes that
+happened after it arrived. Joins now carry the whole city table, the whole quest-variable
+table, and no longer rebuild a dead player's standing pose.
 
-There are two binaries:
+**Computers and terminals work.** Every talking piece of scenery in the game, the Gecko
+power plant's robot terminal among them, starts its conversation through an engine request
+that only the vanilla client loop ever serviced. The dedicated server never ran that loop, so
+each of those terminals silently did nothing in co-op. The server tick now services the
+request, and the conversation is attributed to the player who clicked, so their answers are
+accepted.
 
-- **`f2_server`** — the headless dedicated server. It owns the authoritative world (the sim,
-  the clock, every actor) and streams it to viewers. It never renders anything itself.
-- **`fallout2-ce`** — the normal game. Point it at a server with one env var and it becomes a
-  network viewer/player; leave that env var unset and it's plain single-player.
+**Companions know who they belong to.** The follow logic read the single-player "the
+player" variable, which on a server with several players resolved to whoever the last action
+left behind, usually the host. Companions beelined for the wrong person or flip-flopped
+between two. Each party member now records who recruited them and follows that player,
+falling back to the nearest one on the same floor.
 
-The world model is **"empty = freeze, player = play, never quit on its own"**: with nobody
-connected the sim is frozen (clock and NPCs paused) but the server keeps listening; the first
-player to join un-freezes it; when the last one leaves it re-freezes and waits for reconnects.
+**Companion combat orders in co-op.** Vanilla's Combat Control window runs a local loop on
+the machine that opens it and edits a local copy of the companion's settings, which the
+server never sees, so the feature was unreachable in co-op. The Combat Control button on a
+companion now opens their orders as a dialogue node served by the server: burst, run away,
+weapon preference, distance, target, chem use. Pick a line to cycle it, Done to return. Same
+settings, same labels, saved with the game.
 
-## What works today
+**Sound that tells you what is wrong.** The client's audio initialisation compared the SDL
+result with the wrong failure value, so a refused audio device passed as open and a player
+simply had no sound, with no error anywhere. The client now detects it, tries the other
+audio drivers, and prints the reason on the message line if it still cannot play. Music that
+died (a stall while another player joined, a movie that never resumed it) is restarted by a
+watchdog instead of staying dead for the session. The watchdog also remembers a track
+the client started on its own map load, so music that dies during a map change comes back
+without a rejoin.
 
-Native co-op of the original Fallout 2 — the real game, shared, not a rewrite:
+**Dialogue that works over the wire.** Stale reply options no longer draw over the new node.
+Long replies page (Down, Page Down or SPACE forward, Up or Page Up back). The Review button
+shows the conversation's history, which the client now records itself. Chat opens on `T`,
+also in combat, where Enter is the end-combat key.
 
-- **Persistent dedicated world** — server owns the authoritative sim; players come and go.
-- **Hot join / leave** — connect or drop mid-session; your character despawns and reattaches,
-  the world keeps running for everyone else.
-- **Accounts** — name-keyed identity: create a character (SPECIAL spec or vanilla's roll-a-char
-  screen) the first time a name connects, then that name always returns as the same character.
-- **Per-player characters** — each player has their own body, inventory, SPECIAL, skills, tags
-  and perks, persisted per-actor in the save (not one shared sheet).
-- **Save / load & autosave** — operator can `save`/`load` slots live; timed autosaves rotate
-  through slots 11-15. Co-op saves carry every player's own body, inventory and sheet.
-- **Quicksave / quickload** — vanilla's `F6` / `F7`, server-side: `F6` writes slot 16, `F7`
-  reloads it in place for everyone (works in combat and while dead, so a failed steal or a lost
-  fight can be retried the way single-player allows).
-- **Real-time inventory sync** — pick up, drop, wield, use, loot — mirrored to all viewers.
-- **Synced combat** — beat-spanning turn-based combat with all players, including items and
-  skills used mid-fight.
-- **Synced dialog & barter** — live conversations and trading stream to viewers.
-- **Synced cutscenes** — movies/videos project to every connected viewer in step.
-- **Free-roam on the shared map** — walking, running and general presence sync between players
-  on the same map.
-- **Worldmap travel & random encounters** — global-map travel and encounters play out for the group.
-- **Host-controlled transitions** — slot 0 (`F2_SERVER_HOST=`) is the host body and the only one
-  that drives map transitions, worldmap travel and dialog, keeping the shared world coherent.
+**Small things that mattered in play.** Two-handed weapons stopped occupying both hand slots.
+Arming one explosive from a stack arms one, not the stack. A dead player presses `R` to get
+back up instead of waiting for the operator. TAB opens the automap. Push works on companions.
+A stuck wait cursor clears itself. The operator's `save` refuses at moments when it would
+have failed silently, and a `gvar` console command exists for repairing a world's quest
+flags.
 
-See [`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md) and the design docs in [`docs/`](docs/) for launch
-details, the full env-var/verb reference, and current edges and known limitations.
+**Quicksave and quickload.** Vanilla's `F6` and `F7`, server-side. `F6` writes the server's
+slot 16; `F7` reloads it in place for every connected player, through the same rebuild each
+client already performs after a map change, and the game says who pressed it. It works in
+combat, where it ends the fight the way single-player's does, and while dead, so a failed
+steal or a lost fight can be retried. The operator's `load <n>` takes the same path while a
+world runs, so restoring a slot no longer needs a server restart.
 
-## Media
+**The server never waits on a slow client.** Every frame went out through a blocking send
+with a five-second timeout, so a client that stopped reading its socket, which every client
+does for a few seconds while it loads a new map, froze the whole world for everyone: movement
+landed seconds late, queued clicks arrived in a burst, menus lagged and the music mixer
+starved. Sends are now non-blocking with a per-client queue, and a client that takes nothing
+for a minute is dropped instead of stalling the rest. Measured with a client that stops
+reading: a 20 second freeze before, 0.2 seconds after.
 
-Two players sharing one world in Arroyo — the message log shows the co-op handshake (join,
-slot, "players online"):
+**Companions survive a map change after a load.** The map save writes party members with
+their keep-on-map flags cleared and nothing re-armed them after a load, so the first map
+change after restoring a world deleted every companion's body and the next load dropped them
+from the party. The flags are re-armed on load, and the console gained `party` (list) and
+`partyadd <pid>` (re-attach a companion standing on the current map) for worlds already hit.
 
-![Two players joining the same dedicated world](screenshots/coop-two-players.png)
+**A test harness that runs on Windows.** The engine's two golden suites, 41 headless
+scenarios that replay fixed inputs and compare the resulting world state byte for byte, only
+ran on Linux. Headless probes now run on Windows: exempt from the single-instance locks,
+deterministic (the RNG seed no longer comes from the wall clock), and blessed against a
+Windows result set. Every commit in this repository passes both suites.
 
-Two clients side by side, each its own viewpoint of the same shared map:
+## Quick start
 
-![Two clients viewing the same shared map](screenshots/coop-two-clients.png)
+**Host** (runs the server, and usually a client too)
 
-Real-time inventory / loot sync — the same container open on both clients:
+1. Copy your Fallout 2 folder somewhere new, for example `D:\Games\Fallout2Coop`. That copy
+   is the world; its `data\SAVEGAME` holds the co-op saves.
+2. Put `f2_server.exe` and `fallout2-ce.exe` from a release into that folder.
+3. Start the server from a `.cmd` file in that folder:
 
-![Shared container loot synced across two clients](screenshots/coop-shared-loot.png)
-
-Synced turn-based combat, with damage resolved for both players:
-
-![Co-op turn-based combat across two clients](screenshots/coop-combat.png)
-
-## Building
-
-```sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target f2_server fallout2-ce         # Linux/macOS
-cmake --build build-win --target f2_server                 # Windows cross (mingw, wine-verified)
+```bat
+@echo off
+cd /d "%~dp0"
+set F2_SERVER_MAP=artemple.map
+set F2_SERVER_NET=9300
+set F2_SERVER_CMD=9301
+set F2_SERVER_PACE_MS=100
+set F2_AUTOSAVE_SECS=300
+set F2_MOVIES=0
+set F2_SERVER_NAME=Our game
+f2_server.exe
+pause
 ```
 
-You need [SDL2](https://libsdl.org/download-2.0.php) for the client (`apt install libsdl2-2.0-0`
-on Debian/Ubuntu). `build/f2_server` and `build/fallout2-ce` are what the launch scripts expect.
+   To continue a saved world use `set F2_SERVER_LOAD=<slot>` instead of `F2_SERVER_MAP`.
+   Slots 1 to 10 are manual saves, 11 to 15 the rotating autosaves, 16 the quicksave.
+4. Join from the same PC:
 
-For a compact, persistent, single-service Docker Compose deployment, see
-[`DOCKER.md`](DOCKER.md). The final image contains only the static dedicated-server binary;
-you provide your licensed Fallout 2 installation as a bind mount.
-
-## Game assets
-
-All binaries must run with their working directory set to the Fallout 2 game folder — they read
-`master.dat` / `patch000.dat` relative to the CWD. Copy a Windows install's `Fallout2` folder
-anywhere, or extract it from the GoG installer:
-
-```sh
-sudo apt install innoextract
-innoextract ~/Downloads/setup_fallout2_2.1.0.18.exe -I app
-mv app Fallout2
+```bat
+@echo off
+cd /d "%~dp0"
+set F2_CLIENT_CONNECT=127.0.0.1:9300
+set F2_PLAYER_NAME=Gus
+set F2_PLAYER_CREATE=ask
+fallout2-ce.exe
 ```
 
-Depending on the distribution, the data files may be all-lowercase or all-uppercase. Either
-rename them or update `master_dat` / `critter_dat` / `master_patches` / `critter_patches` in
-`fallout2.cfg` to match. See [Configuration](#configuration) for the rest.
+**Other players**
 
----
+Put `fallout2-ce.exe` next to your own Fallout 2 files and start it with the host's address in
+`F2_CLIENT_CONNECT` (for example `10.144.94.83:9300`) and your own `F2_PLAYER_NAME`. The first
+time a name is seen you create a character; after that the same name is the same character.
+Names must differ between players and stay the same across sessions.
 
-# Running a dedicated server
+A VPN such as ZeroTier is the recommended way to play over the internet. Do not forward the
+game port to the internet: the wire has no authentication. The client reads `fallout2.cfg`
+from the folder the exe is in, so keep it next to the game files.
 
-Run `f2_server` from the game folder. The minimum useful launch is **a world source plus a wire
-port**:
+## Keys in the client
 
-```sh
-cd Fallout2
-env F2_SERVER_MAP=artemple.map F2_SERVER_NET=9200 F2_SERVER_CMD=9201 \
-    F2_SERVER_PACE_MS=100 F2_SERVER_RESUMABLE_COMBAT=1 F2_SERVER_SMOOTH_WALK=1 \
-    F2_SERVER_PRES_RECORD=1 F2_DIALOG_STREAM=1 F2_WORLDMAP_STREAM=1 \
-    ../build/f2_server
+| Key | What it does |
+|---|---|
+| `T` | open chat, also during combat (Enter still ends combat in a fight) |
+| `TAB` | automap (out of combat) |
+| `P` | Pip-Boy (holodisks, quests, automaps; refused in combat like vanilla) |
+| `R` | when dead: get back up at 1 HP where you fell |
+| `F6` / `F7` | quicksave / quickload (server slot 16). `F7` rewinds the game for everyone; works in combat and while dead; main screen only, as in vanilla |
+| `Down` / `PgDn` / `SPACE` | next page of a long dialogue reply; `Up` / `PgUp` previous page |
+| Review button | this conversation's history |
+| Combat Control button | on a companion: their combat orders |
+| hold left click on a companion | menu with Push |
+
+## Server settings
+
+Set these as environment variables before starting `f2_server.exe`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `F2_SERVER_MAP` | | boot a fresh world on this map |
+| `F2_SERVER_LOAD` | | restore save slot 1-16 (11-15 = autosaves, 16 = quicksave) |
+| `F2_SERVER_NET` | | game port for clients |
+| `F2_SERVER_CMD` | | admin console port (see below); never expose it |
+| `F2_SERVER_PACE_MS` | `0` | ms per beat; `100` is about real time |
+| `F2_SERVER_HOST` | first to join | pin slot 0 (drives worldmap travel and map changes) to a player name |
+| `F2_SERVER_NAME` | | name shown to clients |
+| `F2_AUTOSAVE_SECS` | `300` | autosave interval into slots 11-15; `0` = off |
+| `F2_SERVER_KEEPALIVE` | on if CMD set | keep running when the last player leaves |
+| `F2_GAME_DIFFICULTY` / `F2_COMBAT_DIFFICULTY` | from cfg | `0` easy, `1` normal, `2` hard |
+| `F2_MOVIES` | on | `0` skips scripted movies; use it if a joining client crashes on a cutscene |
+| `F2_TRACE_WORLD` | off | `1` prints `[world]` lines for door, container and map-state changes |
+
+## Admin console
+
+Connect to the `F2_SERVER_CMD` port with a TCP tool (telnet, nc, or a small script) and send one
+command per line. It answers once a client is connected.
+
+| Command | Meaning |
+|---|---|
+| `status` | what is running |
+| `saves` | list save slots |
+| `save <1-16> [label]` | save the world (refused during combat, dialogue, travel, map change); 16 is the quicksave |
+| `load <1-16>` | restore a slot; while a world runs it is reloaded in place for everyone (the `F7` path, by number) |
+| `new <map.map>` | boot a fresh world (lobby only) |
+| `revive <slot>` | stand a dead player up (players can also press `R`) |
+| `give <pid> <count>` | give items to the host character; `count` is stacks (boxes for ammo) |
+| `gvar <index> [value]` | read or set a global script variable (quest flags) |
+| `party` | list the party as the server sees it |
+| `partyadd <pid>` | re-attach a companion standing on the current map (89 = John Cassidy) |
+| `say <channel> <text>` | a line to every client |
+| `quit` | stop the server |
+
+The admin port has no password. Keep it bound to localhost or a VPN interface only.
+
+## Building on Windows
+
+Install [MSYS2](https://www.msys2.org/), open the MINGW64 shell and run:
+
+```bash
+pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja git diffutils procps-ng
+cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      -DCMAKE_C_FLAGS=-std=gnu17 -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
+cmake --build build-win --target f2_server fallout2-ce -j4
 ```
 
-For a proper "play it live" server you want that whole bundle of presentation flags on —
-without them combat, dialog and travel won't stream to viewers.
+The two exes in `build-win` depend only on Windows system libraries. SDL2 and zlib are fetched
+and built during configure. Linux builds follow `DEDICATED_HOWTO.md`.
 
-**Channels**
+## Testing
 
-- `F2_SERVER_NET=<port>` — the **viewer wire** (binary). Startup *blocks until the first client
-  connects*, then serves; more clients join mid-stream.
-- `F2_SERVER_CMD=<port>` — the **admin/command channel** (plain telnet/nc, one `verb arg` per
-  line). Your operator console; works with or without a wire port.
-
-**World source — pick exactly one**
-
-- `F2_SERVER_MAP=<map.map>` — boot a fresh world on that map.
-- `F2_SERVER_LOAD=<1-10>` — restore a save slot (`11` = autosave). If both are set, the load
-  wins and the map is ignored.
-- **Neither** → *lobby mode* (requires `F2_SERVER_CMD`): the server waits and you pick a world
-  at runtime with `new <map.map>` or `load <n>`.
-
-**Key server env vars** (full table below and in [`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md)):
-
-| var | default | meaning |
-|-----|---------|---------|
-| `F2_SERVER_MAP` | — | boot a fresh world on this map |
-| `F2_SERVER_LOAD` | — | restore save slot `1-10` (`11` = autosave) |
-| `F2_SERVER_NET` | — | viewer wire TCP port (blocks for the first client) |
-| `F2_SERVER_CMD` | — | admin/command TCP port (operator console) |
-| `F2_SERVER_PACE_MS` | `0` (full speed) | ms wall per beat; `100` ≈ real time |
-| `F2_SERVER_TICKS` | `0` = unlimited | serve forever; a positive value is a safety cap for headless runs |
-| `F2_SERVER_KEEPALIVE` | on if `CMD` set | persistent: don't quit when the last player leaves; `=0` = exit-on-empty |
-| `F2_SERVER_PLAYERS` | `1` | pre-spawn an N-body party on a fresh world (ignored on a co-op load) |
-| `F2_SERVER_HOST` | first-come | pin slot 0 (the host body — drives worldmap/transitions/dialog) to an account name |
-| `F2_SERVER_NAME` | — | server display name sent in the handshake |
-| `F2_SERVER_RESUMABLE_COMBAT` | off | beat-spanning combat — **required** for combat presentation |
-| `F2_SERVER_SMOOTH_WALK` | off | animate out-of-combat walks one tile per beat |
-| `F2_SERVER_PRES_RECORD` | off | presentation record/replay (discrete-action animation) |
-| `F2_DIALOG_STREAM` | off | live dialog + barter |
-| `F2_WORLDMAP_STREAM` | off | live worldmap travel |
-| `F2_AUTOSAVE_SECS` | `300` | autosave interval → slot 11; `0` = off |
-| `F2_SERVER_SEED` | — | RNG seed (reproducible worlds/encounters) |
-
-> ⚠ A server with **no `NET` and no `CMD` port** and unlimited ticks will spin a CPU core with
-> no way to stop it but a signal. Always give it at least a `CMD` port or a positive `TICKS` cap.
-
-## Operator console
-
-The command channel takes one `verb arg arg2` per line over telnet/nc:
-
-```sh
-printf 'status\n'                  | nc -q1 127.0.0.1 9201
-printf 'save 8 checkpoint\n'       | nc -q1 127.0.0.1 9201
-printf 'spawn 41 3\n'              | nc -q1 127.0.0.1 9201
-printf 'quit\n'                    | nc -q1 127.0.0.1 9201
+```bash
+export F2_GAME_DIR=/path/to/a/game/folder F2_BIN=$F2_GAME_DIR/fallout2-ce.exe
+F2_GOLDEN_DIR=$PWD/tests/golden/server-win tests/golden/run_golden_server.sh
+F2_GOLDEN_DIR=$PWD/tests/golden/legacy-win  tests/golden/run_golden.sh
 ```
 
-Common admin verbs: `saves`, `save <1-10> [label]`, `load <1-10>` (lobby), `new <map.map>`
-(lobby), `status`, `say <chan> <text>`, `movie <0-16>`, `timeskip <min>`, `spawn <pid> [n]`,
-`stress <n> [pid]`, `despawnall`, `help`, `quit`/`shutdown`. Anything not an admin verb is
-dispatched into the sim as a debug poke (movement/combat/inventory). Full vocabulary lives in
-[`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md).
+Copy the client exe into the game folder first: it reads its config from its own directory,
+and the Windows goldens were blessed on Hard difficulty. The Windows result sets live in
+`tests/golden/server-win` and `legacy-win`; the Linux sets are the checked-in default. Both
+suites pass on every commit of this repository.
 
-## Saving, loading & listing games
+## Known limits
 
-There are **16 slots**: `1-10` are manual, `11-15` are the autosave rotation, `16` is the
-quicksave (`F6` / `F7` in game). A co-op save carries the whole shared world *plus* every
-connected player's own body, inventory and character sheet, so a restored world returns each
-account to exactly where it left off.
+- No authentication on the game port; the admin port has none either. Use a VPN.
+- One client per PC (the engine's single-instance lock); headless test probes are exempt.
+- The world is one map at a time; players travel together.
+- A companion's recruiter is not stored in saves; after a load they follow the nearest player
+  until re-recruited.
+- The Restoration Project and other sfall hook-script mods are not supported: hook scripts do
+  not run in this engine. Server and every client must have identical game data.
 
-**List the slots** — `saves` reports every slot, whether it's used, and its label:
+## Credits
 
-```sh
-printf 'saves\n' | nc -q1 127.0.0.1 9201
-```
+- [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce) by Alexander Batalov
+  and contributors: the engine.
+- [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop): the dedicated server, the
+  network client and the wire protocol this project is derived from.
+- Fallout 2 is the work of Black Isle Studios and Interplay.
 
-**Save the running world** — `save <1-10> [label]`, any time, while players are connected:
-
-```sh
-printf 'save 8 before-temple\n' | nc -q1 127.0.0.1 9201
-```
-
-Autosaves rotate through slots 11-15 on the `F2_AUTOSAVE_SECS` interval (300s by default; set
-`F2_AUTOSAVE_SECS=0` to disable) and after every map change. Each autosave broadcasts which slot
-it landed in.
-
-**Quicksave / quickload** — any connected player presses `F6` to write slot 16 and `F7` to
-reload it. The reload replaces the running world in place: every viewer rebuilds from it the
-way it does after a map change, and the game announces who did it. `F7` works in combat (it
-ends the fight, as in single-player) and while dead; both keys work from the main screen only.
-
-**Load a slot** — three ways:
-
-1. **At startup**, restore instead of booting a fresh map (leave `F2_SERVER_MAP` unset):
-
-   ```sh
-   cd Fallout2
-   env F2_SERVER_LOAD=8 F2_SERVER_NET=9200 F2_SERVER_CMD=9201 \
-       F2_SERVER_RESUMABLE_COMBAT=1 F2_SERVER_SMOOTH_WALK=1 F2_SERVER_PRES_RECORD=1 \
-       F2_DIALOG_STREAM=1 F2_WORLDMAP_STREAM=1 F2_SERVER_PACE_MS=100 \
-       ../build/f2_server                       # F2_SERVER_LOAD=11 restores the autosave
-   ```
-
-2. **At runtime, from the lobby.** `new` only works when the server has no world yet —
-   i.e. it was started with neither `F2_SERVER_MAP` nor `F2_SERVER_LOAD` (lobby mode needs a
-   `F2_SERVER_CMD` port). From the console:
-
-   ```sh
-   printf 'saves\n'   | nc -q1 127.0.0.1 9201     # see what's available
-   printf 'load 8\n'  | nc -q1 127.0.0.1 9201     # restore slot 8  (11-15 = autosaves)
-   printf 'new artemple.map\n' | nc -q1 127.0.0.1 9201   # or boot a fresh world
-   ```
-
-3. **At runtime, while a world is running.** `load <n>` reloads that slot in place for every
-   connected player — the same path `F7` takes, by slot number. Players bound by account name
-   return as their saved selves; a name the loaded save does not know is disconnected and can
-   rejoin through the normal login.
-
-> To restore correctly, relaunch **without** any `CREATE*` / `F2_PLAYER_CREATE` vars — those are
-> for *creating* new characters. On a load, existing accounts return as their saved selves; a new
-> `F2_PLAYER_NAME` the save has never seen still needs a create spec to join.
-
----
-
-# Running a client / viewer
-
-The normal game binary becomes a network viewer when `F2_CLIENT_CONNECT` is set:
-
-```sh
-cd Fallout2
-env F2_CLIENT_CONNECT=127.0.0.1:9200 F2_WINDOWED=1 \
-    F2_PLAYER_NAME=Cahb F2_PLAYER_CREATE=ask ../build/fallout2-ce
-```
-
-| var | meaning |
-|-----|---------|
-| `F2_CLIENT_CONNECT=<host:port>` | connect to a server's wire port as a viewer/player |
-| `F2_PLAYER_NAME=<name>` | account name to log in as (binds you to that name's character) |
-| `F2_PLAYER_CREATE=<spec>` | first time this name is seen: `"S P E C I A L tags traits"` or `ask` to roll in the creation screen |
-| `F2_PLAYER_TOKEN=<tok>` | auth token (needed if the server sets `F2_REQUIRE_TOKEN`) |
-| `F2_WINDOWED=1` | run windowed (so multiple viewers fit side by side) |
-| `F2_JOIN_TMP_CLIENT=<path>` | scratch file for the join blob; give each concurrent viewer its own |
-
-Without `F2_CLIENT_CONNECT`, `fallout2-ce` is just the ordinary single-player game.
-
-## Accounts & characters
-
-Membership is **name-keyed**: `F2_PLAYER_NAME` is your identity. The first time the server sees
-a name it creates that character (from `F2_PLAYER_CREATE`); afterwards the same name always
-returns as the same character, with its own body, inventory and character sheet persisted in
-the save.
-
-- `F2_PLAYER_CREATE` is a SPECIAL stat spec — `"S P E C I A L tag tag tag trait trait"`
-  (10+ ints) — or the literal `ask` to roll a character in vanilla's own creation screen before
-  connecting.
-- **Slot 0 is the host body** — the only one that can drive the worldmap, map transitions and
-  dialog. Slots are first-come, so with interactive `ask` whoever finishes rolling first grabs
-  it. Pin it deterministically with `F2_SERVER_HOST=<name>` on the server.
-- `F2_REQUIRE_TOKEN=1` on the server requires each client to present a matching
-  `F2_PLAYER_TOKEN`.
-
-## All-in-one for local testing
-
-`scripts/viewer_live.sh` boots the server *and* one or more viewers on a single box and tears
-everything down when the first viewer quits. It sets the sane demo defaults for you:
-
-```sh
-# Solo viewer on the Temple map
-scripts/viewer_live.sh
-
-# Two players, each rolling their own character, host pinned so map-driving isn't a race
-HOST=Cahb NAMES="Cahb,Mennoc" CREATE0=ask CREATE1=ask VIEWERS=2 PACE=100 scripts/viewer_live.sh
-
-# Restore a save slot instead of a fresh map
-LOAD=8 scripts/viewer_live.sh
-```
-
-See [`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md) for the script's knobs, persistence-test recipes,
-the complete env-var and verb tables, and the dev/CI-only variables.
-
----
-
-# Single-player (original -ce)
-
-If you don't set `F2_CLIENT_CONNECT`, `fallout2-ce` is exactly upstream Fallout 2 Community
-Edition — a drop-in replacement for `fallout2.exe`. Copy the binary into your `Fallout2` folder
-and run it. Platform-specific asset setup (Windows / Linux / macOS / Android / iOS), controls
-and localization notes are unchanged from upstream; see the
-[Community Edition README](https://github.com/alexbatalov/fallout2-ce#readme).
-
-Popular total-conversion mods are partially supported upstream. Original Nevada and Sonora
-(those not relying on extended Sfall features) likely work; Restoration Project, Fallout Et Tu
-and Olympus 2207 are not yet supported. There is also
-[Fallout Community Edition](https://github.com/alexbatalov/fallout1-ce) (Fallout 1).
-
-## Configuration
-
-- **`fallout2.cfg`** — main config. Adjust `master_dat` / `critter_dat` / `master_patches` /
-  `critter_patches` to match your asset file names, and `music_path1` to match your `sound/music`
-  hierarchy (usually `data/sound/music/` or `sound/music/`; ACM music files are always uppercase).
-- **`f2_res.ini`** — window size and fullscreen:
-
-  ```ini
-  [MAIN]
-  SCR_WIDTH=1280
-  SCR_HEIGHT=720
-  WINDOWED=1
-  ```
-
-- **`ddraw.ini`** (part of Sfall) — engine/gameplay overrides for modders and advanced users;
-  only a subset is implemented so far.
-
----
-
-## FAQ / troubleshooting
-
-This is co-op bolted onto a 1998 engine — it works, but there are rough edges. Bug reports are
-genuinely appreciated; the more precise the repro, the faster it gets fixed.
-
-**Q: How is this different from other Fallout 2 multiplayer attempts?**
-A: The architecture. This fork cleanly splits the game in two: **the dedicated server is the only
-thing running the Fallout 2 engine.** It ticks the simulation — the clock, every actor, every
-script — and streams the resulting world out to the clients. The clients ("viewers") run *none*
-of the original game logic; they only render the assets for what the server tells them is on
-screen and send your input back. There's one authoritative world, and the server faithfully
-wires its events out to everyone watching.
-
-That design is also why co-op can occasionally feel broken. Faithfully re-broadcasting a
-23-year-old single-player engine means every script opcode, event and quirk has to be *tapped*
-and forwarded — and not all of them are yet, nor fully tested. Scripts are the hard part: they
-use opcodes inconsistently, and the engine's notion of "the player" (`gDude`) is overloaded —
-sometimes it means *the* protagonist, sometimes it means *whoever triggered this script*. Plenty
-of vanilla scripts also assume only a single player ever interacts with them. Untangling that so
-every script behaves correctly with multiple players is ongoing work, so some interactions won't
-play out perfectly for everyone. When you hit one, a precise report (below) is exactly what moves
-it forward.
-
-**Q: My screen is black / the map didn't draw when I joined.**
-A: Relog. Because you can hot-join a running world, disconnect and reconnect with the same
-`F2_PLAYER_NAME` — the server re-streams the current map to you on reattach.
-
-**Q: I can't move — we're in combat.**
-A: It's turn-based: press **Space** to end/skip your turn. In some quirky scenarios the
-"in combat" state can desync between server and viewer — if Space doesn't free you up and it
-looks stuck, that's a bug worth reporting (see below).
-
-**Q: Combat was synced at first, then went out of order.**
-A: Known soft spot — combat sync has already been through two rewrites. If you hit this, the
-single most useful thing you can tell us is **when** it diverged: what action was happening the
-moment order broke (whose turn, melee vs ranged, a thrown/AoE weapon, an NPC turn, someone
-joining/leaving mid-fight). That "when" is what pins the root cause.
-
-**Q: It crashed / softlocked after a dialog option / a script fired / some specific action.**
-A: Please **open an issue** with what you did right before it — the map, who was host, the exact
-dialog choice or action, and any server stderr. These are exactly the reports we want; the
-specific trigger is usually the whole fix.
-
-**Q: A movie/cutscene played as a black screen (or nothing).**
-A: Movies are off by default. The server needs `F2_MOVIES=1` **and** at least one viewer
-connected when the cutscene triggers.
-
-**Q: I can't travel the worldmap / do a map transition — nothing happens.**
-A: By design only the **host body (slot 0)** drives map transitions, worldmap travel and dialog.
-Set `F2_SERVER_HOST=<name>` so the host is a known player rather than first-come.
-
-**Q: My character came back different / players grabbed the wrong bodies.**
-A: Identity is the `F2_PLAYER_NAME` you log in with — reconnect with the same name. Slots are
-first-come, so pin the host with `F2_SERVER_HOST=` to avoid a race for slot 0.
-
-**Q: The server pins a CPU core / never stops.**
-A: A server with no wire (`F2_SERVER_NET`) and no command (`F2_SERVER_CMD`) port and unlimited
-ticks has no way to be told to stop. Always give it a `CMD` port (so you can `quit`) or a
-positive `F2_SERVER_TICKS` cap.
-
-## Credits & thanks
-
-- **[Interplay Productions](https://en.wikipedia.org/wiki/Interplay_Entertainment) / Black
-  Isle Studios** — the creators of Fallout 2 (1998). All game assets, art, audio and design
-  are theirs; you must own the original game to play. This project ships none of that content.
-- **[Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce)** by Alexander
-  Batalov and contributors — the faithful engine re-implementation this fork is built on top of.
-- **[Sfall](https://github.com/sfall-team/sfall)** — the extended-engine project whose fixes
-  and features Community Edition integrates.
-- Everyone in the wider Fallout modding and preservation community.
-
-## License
-
-The source code in this repository is available under the
-[Sustainable Use License](LICENSE.md), inherited from Fallout 2 Community Edition. Fallout 2
-and all related trademarks and game content are property of their respective owners
-(Interplay / Bethesda). This is a non-commercial, fan re-implementation of the engine only.
-</content>
-</invoke>
+Licence: [Sustainable Use License](LICENSE.md).
