@@ -83,6 +83,10 @@ void serverAdminDrainWorldRequests();
 // inside combat resolution, so it only latches.
 void serverAdminNotePlayerDied(Object* actor);
 
+// A player's client finished the death screen (`wipeack`, by registry slot). The
+// reload runs once every connected player has acked, or when the wait times out.
+void serverAdminNoteWipeAck(int slot);
+
 // Periodic unattended save into the dedicated autosave slot (SLOT11).
 // F2_AUTOSAVE_SECS sets the cadence (default 300; 0 disables); an extra save
 // fires on the first safe beat after each map change. Call once per MAIN-PHASE

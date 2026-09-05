@@ -121,7 +121,7 @@ static unsigned int gViewerFadeBlackSinceMs = 0;
 // waits afterwards for the server's reload to rebuild the world before fading
 // back in on its own.
 static constexpr unsigned int kViewerWipePresentationMaxMs = 4000;
-static constexpr unsigned int kViewerWipeReloadMaxMs = 12000;
+static constexpr unsigned int kViewerWipeReloadMaxMs = 30000;
 static unsigned int gViewerWipeSinceMs = 0;
 
 // 0x5194C8
@@ -824,9 +824,34 @@ static void viewerPollPendingLoot(ClientConnection& conn)
 static void viewerPlayPartyWipe(ClientConnection& conn)
 {
     debugPrint("client-viewer: party wipe — playing the death screen\n");
+
+    // ►► BLACK OUT EVERYTHING BUT THE DEATH WINDOW FIRST. Vanilla reaches showDeath
+    // with the map unloaded and the interface gone; here the world stays loaded
+    // (the server's reload replaces it), and DEATH.FRM is a 640x480 window in the
+    // middle of a screen that may be far larger. Left alone, the map and the HUD
+    // bar kept drawing around it under death.pal, which turned the rest of the
+    // screen into coloured noise (owner screenshot, 2026-09-05). The tile engine is
+    // stopped, the interface bar hidden, and the iso window filled black; the
+    // reload's mapLoad and the tail below bring all three back.
+    bool isoWasEnabled = isoDisable();
+    interfaceBarHide();
+    if (gIsoWindow != -1) {
+        unsigned char* isoBuffer = windowGetBuffer(gIsoWindow);
+        if (isoBuffer != nullptr) {
+            int isoWidth = windowGetWidth(gIsoWindow);
+            bufferFill(isoBuffer, isoWidth, windowGetHeight(gIsoWindow), isoWidth, 0);
+            windowRefresh(gIsoWindow);
+        }
+    }
+
     paletteFadeTo(gPaletteWhite);
     endgameSetupDeathEnding(ENDGAME_DEATH_ENDING_REASON_DEATH);
     showDeath(); // returns with the palette black and color.pal loaded
+
+    // The server holds the reload until every player has been through this screen
+    // (or a deadline passes), so the world is never replaced under an animation or
+    // under the screen itself. Tell it we are done, then wait for the restored world.
+    conn.sendLine("wipeack");
 
     int loadsBefore = conn.loadCount();
     unsigned int started = getTicks();
@@ -844,6 +869,10 @@ static void viewerPlayPartyWipe(ClientConnection& conn)
     debugPrint("client-viewer: party wipe — %s after %u ms\n",
         conn.loadCount() != loadsBefore ? "restored world received" : alive ? "no reload yet, fading in anyway" : "server gone",
         getTicksSince(started));
+    if (isoWasEnabled) {
+        isoEnable(); // idempotent after a mapLoad, which re-enables it itself
+    }
+    interfaceBarShow();
     tileWindowRefresh();
     paletteFadeTo(_cmap);
     conn.clearFadeBlack();
@@ -1408,6 +1437,19 @@ static int mainClientViewer(const char* connectSpec)
     _game_user_wants_to_quit = 0;
     int puppetLoadCount = conn.loadCount();
 
+    // ►► TELL THE SERVER WHICH HAND THIS BAR STARTS ON. The active hand is kept per
+    // seat on the server (the `hand` verb) and the interface bar keeps its own copy,
+    // and nothing lined the two up at join: a relaunched client comes up on the bar's
+    // default while the server still remembers the hand from the last session, so
+    // the sprite showed the weapon of one slot while the bar pointed at the other
+    // until the player toggled twice. One line at entry makes the server follow
+    // the bar the player is looking at.
+    {
+        char handCmd[16];
+        snprintf(handCmd, sizeof(handCmd), "hand %d", interfaceGetCurrentHand());
+        conn.sendLine(handCmd);
+    }
+
     // Combat presentation gate (COMBAT_CLIENT_DESIGN.md §3.c). While the viewer owes
     // combat animation — it is not our turn, an attack replay is playing/queued, or
     // we just committed an action the server hasn't answered yet — vanilla shows the
@@ -1540,7 +1582,12 @@ static int mainClientViewer(const char* connectSpec)
             static bool wasDead = false;
             bool dead = gDude != nullptr && critterIsDead(gDude);
             if (dead && !wasDead) {
-                displayMonitorAddMessage((char*)"You are dead. A teammate can revive you (Use on your body, or a healing item).");
+                // A COPY, never the literal: the message log word-wraps long lines by
+                // writing a NUL into the string it is handed, and a literal lives in
+                // read-only memory (that write was a crash the first time a player died).
+                char deadLine[128];
+                snprintf(deadLine, sizeof(deadLine), "%s", "You are dead. A teammate can revive you (Use on your body, or a healing item).");
+                displayMonitorAddMessage(deadLine);
             }
             wasDead = dead;
         }
@@ -1839,7 +1886,9 @@ static int mainClientViewer(const char* connectSpec)
             // revives you — Use on your body, or a healing item on it — and when
             // everyone is down the game goes back to the last save. The key stays
             // bound only to say so.
-            displayMonitorAddMessage((char*)"You cannot get up on your own. A teammate has to revive you.");
+            char reviveLine[96]; // a copy: the log wraps by writing into its argument
+            snprintf(reviveLine, sizeof(reviveLine), "%s", "You cannot get up on your own. A teammate has to revive you.");
+            displayMonitorAddMessage(reviveLine);
         } else if (keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P) {
             // 'P' → the pipboy. Owner-reported as a dead button: this dispatch is the
             // viewer's OWN and deliberately never calls gameHandleKey, so until now there

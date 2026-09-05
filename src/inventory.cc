@@ -607,7 +607,23 @@ void invenRederiveWeaponFid(Object* critter)
     if (!leftIsWeapon && !rightIsWeapon) {
         weaponAnimationCode = 0;
     } else if (leftIsWeapon != rightIsWeapon) {
-        weaponAnimationCode = weaponGetAnimationCode(leftIsWeapon ? leftItem : rightItem);
+        // ONE weapon held. On the dedicated server a PLAYER's sprite shows the weapon
+        // in the ACTIVE hand only (vanilla: the dude switching to an empty hand
+        // stands unarmed with the gun still in the other slot). This used to arm the
+        // sprite from whichever hand held the weapon — and objectDeltaScan calls this
+        // every beat, so a `hand` swap to the empty hand was undone one beat later:
+        // "my sprite shows a rifle out but I have my hands out" (owner, live). NPCs
+        // keep the any-hand rule; vanilla's AI only ever uses the right slot anyway.
+        bool weaponInLeft = leftIsWeapon;
+        if (serverDedicatedActive() && playerActorIs(critter)) {
+            int activeHand = serverActorActiveHand(playerActorSlotOf(critter));
+            bool weaponInActiveHand = (activeHand == HAND_LEFT) == weaponInLeft;
+            weaponAnimationCode = weaponInActiveHand
+                ? weaponGetAnimationCode(weaponInLeft ? leftItem : rightItem)
+                : 0;
+        } else {
+            weaponAnimationCode = weaponGetAnimationCode(weaponInLeft ? leftItem : rightItem);
+        }
     } else {
         int currentCode = (critter->fid & 0xF000) >> 12;
         int leftCode = weaponGetAnimationCode(leftItem);

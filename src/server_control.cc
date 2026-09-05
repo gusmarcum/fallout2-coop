@@ -2552,7 +2552,8 @@ void serverControlLine(int sessionId, const char* line)
             || strcmp(verb, "look") == 0
             || serverControlIsSheetVerb(verb) // sheet bookkeeping, no world footprint
             || strcmp(verb, "cancel") == 0 // aborting your own pending walk is not an action
-            || strcmp(verb, "selfrevive") == 0 // the one thing a dead player may do
+            || strcmp(verb, "selfrevive") == 0 // answered with a refusal, but answered
+            || strcmp(verb, "wipeack") == 0 // "my death screen is done": everyone is dead when this is sent
             || strcmp(verb, "quickload") == 0; // ...and F7, the other way back from a death
         // (`claim` needs no entry — it is answered above, before an actor is resolved.)
         if (!readOnlyVerb) {
@@ -2573,6 +2574,13 @@ void serverControlLine(int sessionId, const char* line)
         serverControlRefuse(sessionId, critterIsDead(actor)
                 ? "You cannot get up on your own. A teammate has to revive you."
                 : "You are not dead.");
+        return;
+    }
+
+    if (strcmp(verb, "wipeack") == 0) {
+        // The client finished the party-wipe death screen; the server's reload
+        // waits for every connected player's ack (server_admin.cc).
+        serverAdminNoteWipeAck(serverControlSlotForSession(sessionId));
         return;
     }
 
@@ -2606,6 +2614,7 @@ void serverControlLine(int sessionId, const char* line)
             || serverControlIsSheetVerb(verb) // costs no AP and plays no animation
             || serverControlIsStealVerb(verb) // inside a parked session the server opened
             || serverControlIsTradeVerb(verb) // a trade screen or a yes/no box, not an action
+            || strcmp(verb, "wipeack") == 0
             || strcmp(verb, "claim") == 0
             || strcmp(verb, "login") == 0
             || strcmp(verb, "quicksave") == 0 // F6/F7 latch a request; neither is an action
