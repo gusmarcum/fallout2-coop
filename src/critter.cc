@@ -1124,6 +1124,13 @@ bool critterRevive(Object* critter)
     // fid / position / flag / HP changes all stream to viewers via the object-delta +
     // actor-HP channels regardless of the (server-noop) local refresh.
     _dude_stand(critter, critter->rotation, -1);
+
+    // Brought back in the middle of a fight: give the body its turns back. A
+    // corpse's roster entry is swept out of the combatant block at round end and
+    // nothing re-admits it (vanilla never resurrects), so a mid-combat revive used to
+    // leave the player standing at 1 HP with no turn until the fight ended. No-op
+    // out of combat.
+    combatRosterRejoin(critter);
     return true;
 }
 

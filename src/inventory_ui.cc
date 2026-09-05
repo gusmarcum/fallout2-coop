@@ -5638,6 +5638,15 @@ void inventoryOpenTrade(int win, Object* barterer, Object* playerTable, Object* 
 }
 
 
+static void (*gTradeViewerRepaintHook)() = nullptr;
+static bool (*gTradeViewerCanTakeHook)() = nullptr;
+
+void inventoryTradeViewerSetHooks(void (*repaint)(), bool (*canTake)())
+{
+    gTradeViewerRepaintHook = repaint;
+    gTradeViewerCanTakeHook = canTake;
+}
+
 // Same shape as client_dialog: bypass the loop that would execute authority
 // locally, call the pure-render pieces directly.
 //
@@ -5811,6 +5820,9 @@ void inventoryOpenTradeViewer(Object* merchant, Object* playerTable, Object* mer
         _display_body(merchant->fid, INVENTORY_WINDOW_TYPE_TRADE);
         windowRefresh(_barter_back_win);
         inventoryWindowRenderInnerInventories(win, _ptable, _btable, -1);
+        if (gTradeViewerRepaintHook != nullptr) {
+            gTradeViewerRepaintHook(); // a player trade's status line, over the strip
+        }
     };
     clientBarterApplyPending(); // fold in any snapshot latched before the window opened
     repaint();
@@ -5947,7 +5959,8 @@ void inventoryOpenTradeViewer(Object* merchant, Object* playerTable, Object* mer
                 } else if (keyCode >= 2000 && keyCode <= 2000 + gInventorySlotsCount) {
                     int slotIndex = keyCode - 2000;
                     int offset = _target_stack_offset[_target_curr_stack];
-                    if (slotIndex + offset < _target_pud->length) {
+                    if (slotIndex + offset < _target_pud->length
+                        && (gTradeViewerCanTakeHook == nullptr || gTradeViewerCanTakeHook())) {
                         InventoryItem* it = &(_target_pud->items[_target_pud->length - (slotIndex + offset + 1)]);
                         _barter_move_inventory(it->item, it->quantity, slotIndex, offset, merchant, _btable, false);
                     }
@@ -5959,7 +5972,8 @@ void inventoryOpenTradeViewer(Object* merchant, Object* playerTable, Object* mer
                     }
                 } else if (keyCode >= 2400 && keyCode <= 2400 + gInventorySlotsCount) {
                     int slotIndex = keyCode - 2400;
-                    if (slotIndex + _btable_offset < _btable_pud->length) {
+                    if (slotIndex + _btable_offset < _btable_pud->length
+                        && (gTradeViewerCanTakeHook == nullptr || gTradeViewerCanTakeHook())) {
                         InventoryItem* it = &(_btable_pud->items[_btable_pud->length - (slotIndex + _btable_offset + 1)]);
                         _barter_move_from_table_inventory(it->item, it->quantity, slotIndex, merchant, _btable, false);
                     }

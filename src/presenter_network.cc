@@ -241,6 +241,12 @@ enum EventType : unsigned char {
     EVENT_STATE_AUDIT = 60, // authoritative per-object state, for mirror divergence checking
     EVENT_UI_LOCK = 61, // scripted cutscene input lock (op_game_ui_disable/_enable), addressed
     EVENT_WORLDMAP_AREAS = 62, // worldmap city table: known/visited/entrances for every area
+    EVENT_PROMPT_ASK = 63, // addressed yes/no question (id + title + body); answered by `answer <id> <0|1>`
+    EVENT_PROMPT_CLOSE = 64, // that question is moot — dismiss the box if it is still up
+    EVENT_TRADE_BEGIN = 65, // player-to-player trade opened (the two actors)
+    EVENT_TRADE_STATE = 66, // its whole visible state: both packs, both tables, values, locks
+    EVENT_TRADE_END = 67, // trade over (completed / cancelled / declined / bailed) + the line to show
+    EVENT_PARTY_WIPE = 68, // everyone is dead: play the death screen, a reload follows
 };
 
 // Event flag bits.
@@ -1140,6 +1146,94 @@ public:
         if (presenterEmissionsSuppressed()) return;
         if (eventTraceEnabled()) fprintf(stderr, "[steal] SEND end\n");
         beginEvent(EVENT_STEAL_END, 0);
+        endEvent();
+        flushFrame();
+    }
+
+    // ---- Player-to-player trade ------------------------------------------------
+    // All flushed like the barter events: the two parties sit in a blocking modal
+    // whose only feed is the wire, and a move should show the moment the server
+    // applied it rather than at the beat's tail.
+    void tradeBegin(int aNetId, int bNetId) override
+    {
+        if (presenterEmissionsSuppressed()) return;
+        if (eventTraceEnabled()) fprintf(stderr, "[trade] SEND begin a=%d b=%d\n", aNetId, bNetId);
+        beginEvent(EVENT_TRADE_BEGIN, 0);
+        putI32(aNetId);
+        putI32(bNetId);
+        endEvent();
+        flushFrame();
+    }
+
+    void tradeState(const TradeView& view) override
+    {
+        if (presenterEmissionsSuppressed()) return;
+        beginEvent(EVENT_TRADE_STATE, 0);
+        putI32(view.aNetId);
+        putI32(view.bNetId);
+        auto putList = [&](const BarterStack* rows, int count) {
+            putI32(count);
+            for (int i = 0; i < count; i++) {
+                putI32(rows[i].pid);
+                putI32(rows[i].quantity);
+            }
+        };
+        putList(view.invA, view.invACount);
+        putList(view.invB, view.invBCount);
+        putList(view.tableA, view.tableACount);
+        putList(view.tableB, view.tableBCount);
+        putI32(view.valueA);
+        putI32(view.valueB);
+        putU8(view.lockedA ? 1 : 0);
+        putU8(view.lockedB ? 1 : 0);
+        putU8(view.confirming ? 1 : 0);
+        endEvent();
+        flushFrame();
+    }
+
+    void tradeEnd(int aNetId, int bNetId, int reason, const char* text) override
+    {
+        if (presenterEmissionsSuppressed()) return;
+        if (eventTraceEnabled()) fprintf(stderr, "[trade] SEND end a=%d b=%d reason=%d\n", aNetId, bNetId, reason);
+        beginEvent(EVENT_TRADE_END, 0);
+        putI32(aNetId);
+        putI32(bNetId);
+        putI32(reason);
+        putString(text != nullptr ? text : "");
+        endEvent();
+        flushFrame();
+    }
+
+    // ---- Addressed yes/no prompt ---------------------------------------------
+    void promptAsk(int actorNetId, int promptId, const char* title, const char* body) override
+    {
+        if (presenterEmissionsSuppressed()) return;
+        beginEvent(EVENT_PROMPT_ASK, 0);
+        putI32(actorNetId);
+        putI32(promptId);
+        putString(title != nullptr ? title : "");
+        putString(body != nullptr ? body : "");
+        endEvent();
+        flushFrame();
+    }
+
+    void promptClose(int actorNetId, int promptId) override
+    {
+        if (presenterEmissionsSuppressed()) return;
+        beginEvent(EVENT_PROMPT_CLOSE, 0);
+        putI32(actorNetId);
+        putI32(promptId);
+        endEvent();
+        flushFrame();
+    }
+
+    // ---- Party wipe -----------------------------------------------------------
+    // Not suppression-gated: the reload that follows suppresses emissions while it
+    // destroys the old bodies, and this must have gone out before that starts.
+    void partyWipe() override
+    {
+        if (eventTraceEnabled()) fprintf(stderr, "[wipe] SEND party wipe\n");
+        beginEvent(EVENT_PARTY_WIPE, 0);
         endEvent();
         flushFrame();
     }

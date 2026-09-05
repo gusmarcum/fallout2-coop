@@ -83,6 +83,14 @@ bool combatSessionActive();
 // Main-phase only (server_admin.cc drives it). No-op without a session.
 void combatSessionEndForLoad();
 
+// Co-op revive (server): put a critter that was brought back MID-FIGHT back into
+// the combatant block, with a joiner's action points, so it gets turns again. A
+// corpse's roster entry is swept past the non-combatants at round end and nothing
+// ever looks there again (vanilla has no resurrection), so without this a revived
+// player stood at 1 HP with no turn until the fight ended. No-op out of combat,
+// for a critter already fighting, or for one that is not on the roster at all.
+void combatRosterRejoin(Object* critter);
+
 // Dedicated-server lifecycle hook: invoked exactly when a fresh combat begins,
 // before the combat roster/turn machine runs. The server control plane uses it
 // to cancel free-roam walk-then-act latches at the actual phase boundary.

@@ -40,6 +40,10 @@
 #include "server_players.h"
 #include "server_boot.h" // serverReloadSlot — the live load (F7 / `load` while running)
 #include "server_control.h" // serverControlPrepareForWorldReload / RebindAfterWorldReload
+#include "server_trade.h" // serverTradeActive — never save or reload around an open trade
+#include "server_loop.h" // serverDedicatedActive — the wipe rule is the dedicated server's
+#include "settings.h" // master_patches_path — where the save slots live on disk
+#include <sys/stat.h> // stat — the newest save is the most recently WRITTEN slot
 #include "rest.h" // restPerform / RestOutcome — the operator's rest verb
 #include "sheet_intent.h" // sheetEdit* — the operator's side of the sheet edit intents
 #include "perk.h" // perkOwedPickGet / PERK_CHOICE_PENDING_* — the `sheet` read-out
@@ -294,7 +298,8 @@ void serverAutosaveTick()
     // lastGeneration only advance on a successful attempt below).
     if (isInCombat() || mapTransitionPending()
         || GameMode::isInGameMode(GameMode::kDialog | GameMode::kBarter | GameMode::kWorldmap)
-        || gameDialogServerNodeActive() || gameMovieIsPlaying()) {
+        || gameDialogServerNodeActive() || gameMovieIsPlaying()
+        || serverTradeActive()) { // a player trade's tables would be missing from the save
         return;
     }
 
@@ -694,6 +699,7 @@ static void writeHelp(const std::function<void(const char* text)>& reply, bool w
     reply("  stress <n> [pid] [seed] spawn n hostiles near the players and aggro them");
     reply("  despawnall            destroy everything spawn/stress created");
     reply("  revive <slot>         revive a dead player at 1 HP (no-op if not dead)");
+    reply("  kill <slot>           kill a player (tests the revive and party-wipe rules)");
     reply("  xp <slot> <amount>    award experience to one seat (levels come with it)");
     reply("  sheet [slot]          level/xp/unspent points/owed perk/tags/traits per seat");
     reply("  rest <minutes> [slot] pass time for EVERYONE and heal every player");
@@ -1085,6 +1091,41 @@ bool serverAdminLine(const char* line,
         return true;
     }
 
+
+    if (strcmp(verb, "kill") == 0) {
+        // `kill <slot>` — the operator's test hammer for the death rules: drops a
+        // PLAYER actor through the ordinary death path (critterKill, so the corpse,
+        // the flags and the party-wipe hook all behave as a real death would).
+        if (!worldLoaded) {
+            reply("kill: no world loaded");
+            return true;
+        }
+        if (rest == nullptr) {
+            reply("usage: kill <slot>   (0 = host, 1.. = the extras)");
+            return true;
+        }
+        int slot = atoi(rest);
+        if (slot < 0 || slot >= playerActorCount()) {
+            snprintf(msg, sizeof(msg), "kill: slot %d out of range (0..%d)", slot, playerActorCount() - 1);
+            reply(msg);
+            return true;
+        }
+        Object* actor = playerActorAt(slot);
+        if (actor == nullptr) {
+            snprintf(msg, sizeof(msg), "kill: slot %d is empty", slot);
+            reply(msg);
+            return true;
+        }
+        if (critterIsDead(actor)) {
+            snprintf(msg, sizeof(msg), "kill: slot %d (%s) is already dead", slot, critterGetName(actor));
+            reply(msg);
+            return true;
+        }
+        critterKill(actor, -1, true);
+        snprintf(msg, sizeof(msg), "kill: slot %d (%s) is dead", slot, critterGetName(actor));
+        reply(msg);
+        return true;
+    }
 
     if (strcmp(verb, "revive") == 0) {
         // `revive <slot>` — bring a dead PLAYER actor back at 1 HP (owner spec
@@ -1932,7 +1973,8 @@ static std::chrono::steady_clock::time_point gQuickCooldownUntil;
 static bool worldModalLive()
 {
     return GameMode::isInGameMode(GameMode::kDialog | GameMode::kBarter | GameMode::kWorldmap)
-        || gameDialogServerNodeActive() || stealSessionActive() || gameMovieIsPlaying();
+        || gameDialogServerNodeActive() || stealSessionActive() || gameMovieIsPlaying()
+        || serverTradeActive(); // goods on the trade tables are not in anyone's pack
 }
 
 // The save routine's refusal window — the one `save` and the autosave use.
@@ -2017,7 +2059,7 @@ static void performQuickSave(int requesterSlot)
     gQuickCooldownUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
 }
 
-static void performLiveLoad(int slot, int requesterSlot)
+static void performLiveLoad(int slot, int requesterSlot, const char* announce = nullptr)
 {
     LoadSaveSlotData data;
     if (!readSlotHeader(slot, data)) {
@@ -2050,7 +2092,9 @@ static void performLiveLoad(int slot, int requesterSlot)
     gQuickCooldownUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
 
     char msg[160];
-    if (slot == kQuickSlot && requesterSlot >= 0) {
+    if (announce != nullptr) {
+        snprintf(msg, sizeof(msg), "%s", announce);
+    } else if (slot == kQuickSlot && requesterSlot >= 0) {
         snprintf(msg, sizeof(msg), "%s quick-loaded the game.", who);
     } else {
         snprintf(msg, sizeof(msg), "%s loaded slot %d (%.30s).", who, slot + 1, data.description);
@@ -2059,8 +2103,123 @@ static void performLiveLoad(int slot, int requesterSlot)
     fprintf(stderr, "f2_server: reload slot %d ok\n", slot + 1);
 }
 
+// ---- Party wipe: everyone is dead ------------------------------------------
+//
+// The death-policy seam's body (MP_PROPOSAL Ch 9.5, deferred until now). The
+// rule (owner spec 2026-09-05): a dead player waits for a living teammate to
+// revive them; when NOBODY is left standing, every client plays vanilla's death
+// screen and the world goes back to the most recent save — the way single-player
+// sends you back to your last save, except that nobody has to leave the server.
+
+static bool gWipePending = false;
+
+void serverAdminNotePlayerDied(Object* actor)
+{
+    (void)actor;
+    if (!serverDedicatedActive() || gWipePending) {
+        return;
+    }
+    // "Anyone alive" counts ONLINE bodies only (playerActorAnyAlive): a parked
+    // body of a player who left is not a survivor, the same reading combat uses.
+    if (playerActorAnyAlive()) {
+        return;
+    }
+    gWipePending = true;
+    fprintf(stderr, "f2_server: PARTY WIPE — no player left standing; the death screen and a reload follow\n");
+}
+
+// The slot whose SAVE.DAT was written most recently, any slot (manual, autosave
+// window, the quicksave), or -1 with nothing on disk. By FILE time, not the
+// header's game clock: an operator who loads an older save and plays on makes the
+// abandoned timeline's saves the ones with the biggest clock, and those are exactly
+// the ones a wipe must not go back to.
+static int newestSaveSlot()
+{
+    int best = -1;
+    time_t bestTime = 0;
+    for (int slot = 0; slot < kAdminSlotCount; slot++) {
+        LoadSaveSlotData data;
+        if (!readSlotHeader(slot, data)) {
+            continue;
+        }
+        char path[COMPAT_MAX_PATH];
+        snprintf(path, sizeof(path), "%s\\%s\\%s%.2d\\%s", settings.system.master_patches_path.c_str(),
+            "SAVEGAME", "SLOT", slot + 1, "SAVE.DAT");
+        compat_windows_path_to_native(path);
+        struct stat st;
+        if (stat(path, &st) != 0) {
+            continue;
+        }
+        if (best < 0 || st.st_mtime > bestTime) {
+            best = slot;
+            bestTime = st.st_mtime;
+        }
+    }
+    return best;
+}
+
+// No save to fall back on (a fresh world that has not autosaved yet): the party
+// gets back up where it fell, so nobody is stranded dead on a server that cannot
+// rewind. Also the guard against a loaded save that somehow has nobody alive.
+static void reviveEveryone(const char* why)
+{
+    for (int slot = 0; slot < playerActorCount(); slot++) {
+        Object* actor = playerActorAt(slot);
+        if (actor != nullptr && critterIsDead(actor)) {
+            critterRevive(actor);
+        }
+    }
+    presenter()->consoleMessageStyled(0, kMsgChannelSystem, why);
+    fprintf(stderr, "f2_server: party wipe: %s\n", why);
+}
+
+static void performPartyWipe()
+{
+    if (playerActorAnyAlive()) {
+        fprintf(stderr, "f2_server: party wipe cancelled — someone is alive again\n");
+        return;
+    }
+    int slot = newestSaveSlot();
+    presenter()->consoleMessageStyled(0, kMsgChannelSystem, "Everyone is dead.");
+    // The death screen first, the reload right behind it: each viewer plays the
+    // screen from its main loop and finds the restored world waiting when it is
+    // done. Not suppression-gated on the wire (presenter_network.cc) because the
+    // reload suppresses emissions while it destroys the old bodies.
+    presenter()->partyWipe();
+    if (slot < 0) {
+        reviveEveryone("There is no save to go back to. The party gets back up where it fell.");
+        return;
+    }
+    LoadSaveSlotData data;
+    if (!readSlotHeader(slot, data)) {
+        reviveEveryone("The last save cannot be read. The party gets back up where it fell.");
+        return;
+    }
+    char announce[200];
+    snprintf(announce, sizeof(announce), "The party is dead. Back to the last save: slot %d (%.30s).",
+        slot + 1, data.description);
+    fprintf(stderr, "f2_server: party wipe -> reload slot %d ('%.30s', the newest on disk)\n",
+        slot + 1, data.description);
+    performLiveLoad(slot, -1, announce);
+    if (!playerActorAnyAlive()) {
+        // A save with nobody alive cannot normally exist (this very rule reloads
+        // before one could be written), but a wipe that loops forever is the one
+        // outcome worse than any other, so break it here.
+        reviveEveryone("Nobody was alive in that save either. The party gets back up.");
+    }
+}
+
 void serverAdminDrainWorldRequests()
 {
+    if (gWipePending) {
+        if (mapTransitionPending()) {
+            return; // the transition lands at this beat's tail; act next beat
+        }
+        gWipePending = false;
+        performPartyWipe();
+        return; // the world was just replaced; other latched requests wait a beat
+    }
+
     if (gQuickSavePending) {
         gQuickSavePending = false;
         int requesterSlot = gQuickSaveRequester;

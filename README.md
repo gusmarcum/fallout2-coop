@@ -71,6 +71,24 @@ combat, where it ends the fight the way single-player's does, and while dead, so
 steal or a lost fight can be retried. The operator's `load <n>` takes the same path while a
 world runs, so restoring a slot no longer needs a server restart.
 
+**Trading between players.** Talking to another player used to answer "That's another
+player." It now proposes a trade: the other player gets a yes/no box, and on yes both
+open the vanilla trade screen with each other, the world still running for everyone else.
+Each side drags goods onto its own table and presses Offer to lock them; when both sides
+are locked the server asks each player, in the same box the random encounters use, whether
+they accept exactly what is on the two tables. Two yeses swap the tables, one no ends the
+trade with everything back where it came from, and nothing can change once the question is
+out, so what you read in the box is what you get. Stealing from another player is refused
+at the server; the skill still works on everyone else.
+
+**Death is a team matter.** A dead player no longer stands back up on their own: a living
+teammate revives them, free out of combat and for 4 action points on their own turn in a
+fight, by using their body, a healing item on it, or First Aid or Doctor. A player revived
+mid-fight gets their turns back. When nobody is left standing, every client plays the
+vanilla death screen and the server reloads the most recently written save, whichever slot
+that is, without anyone leaving the server. A world with no save yet stands the party back
+up where it fell instead.
+
 **The server never waits on a slow client.** Every frame went out through a blocking send
 with a five-second timeout, so a client that stopped reading its socket, which every client
 does for a few seconds while it loads a new map, froze the whole world for everyone: movement
@@ -145,7 +163,11 @@ from the folder the exe is in, so keep it next to the game files.
 | `T` | open chat, also during combat (Enter still ends combat in a fight) |
 | `TAB` | automap (out of combat) |
 | `P` | Pip-Boy (holodisks, quests, automaps; refused in combat like vanilla) |
-| `R` | when dead: get back up at 1 HP where you fell |
+| left click / hold on another player, Talk | propose a trade; they answer a yes/no box |
+| in the trade screen: `M` / Offer | lock your offer (press again to unlock); when both sides are locked the accept boxes appear |
+| in the trade screen: `T` / Talk, `Esc` | leave the trade, everything goes back |
+| left click / hold on a dead player, Use | revive them at 1 HP (free out of combat, 4 AP on your turn in a fight) |
+| `R` | when dead: reminds you that a teammate has to revive you |
 | `F6` / `F7` | quicksave / quickload (server slot 16). `F7` rewinds the game for everyone; works in combat and while dead; main screen only, as in vanilla |
 | `Down` / `PgDn` / `SPACE` | next page of a long dialogue reply; `Up` / `PgUp` previous page |
 | Review button | this conversation's history |
@@ -183,7 +205,8 @@ command per line. It answers once a client is connected.
 | `save <1-16> [label]` | save the world (refused during combat, dialogue, travel, map change); 16 is the quicksave |
 | `load <1-16>` | restore a slot; while a world runs it is reloaded in place for everyone (the `F7` path, by number) |
 | `new <map.map>` | boot a fresh world (lobby only) |
-| `revive <slot>` | stand a dead player up (players can also press `R`) |
+| `revive <slot>` | stand a dead player up |
+| `kill <slot>` | kill a player (for testing the revive and party-wipe rules) |
 | `give <pid> <count>` | give items to the host character; `count` is stacks (boxes for ammo) |
 | `gvar <index> [value]` | read or set a global script variable (quest flags) |
 | `party` | list the party as the server sees it |

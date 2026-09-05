@@ -263,6 +263,8 @@ add_library(f2_client OBJECT
     "src/client_barter.h"
     "src/client_steal.cc"
     "src/client_steal.h"
+    "src/client_trade.cc"
+    "src/client_trade.h"
     "src/client_dialog.cc"
     "src/client_dialog.h"
     "src/client_net.cc"
@@ -537,6 +539,10 @@ if(NOT ANDROID AND NOT IOS)
         "src/server_anim.cc"
         "src/server_net.cc"
         "src/server_control.cc"
+        # Player-to-player trade: a verb-driven state machine (the world keeps
+        # beating), talked to through the barter verbs so the viewer's vanilla
+        # trade screen serves it unchanged.
+        "src/server_trade.cc"
         # A1: the dedicated server's dialog ScriptRequestHandler (dialogEnter ->
         # gameDialogEnter); makes SCRIPT_REQUEST_DIALOG reach the engine below.
         "src/script_request_handler_server.cc"

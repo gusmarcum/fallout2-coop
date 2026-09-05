@@ -20,6 +20,8 @@
 #include "client_present.h"
 #include "client_dialog.h"
 #include "client_barter.h"
+#include "client_trade.h" // player-to-player trade: session windows + finalize
+#include "server_players.h" // playerActorIs — a dead player body is revived, not looted
 #include "client_steal.h" // viewer half of a server-owned steal session
 #include "client_net.h"
 #include "client_say.h"
@@ -113,6 +115,14 @@ static int _mainDeathWordWrap(char* text, int width, short* beginnings, short* c
 // normal play. It is a brick-preventer, not a pacing knob.
 static constexpr unsigned int kViewerFadeBlackMaxMs = 6000;
 static unsigned int gViewerFadeBlackSinceMs = 0;
+
+// PARTY WIPE: how long the viewer waits for the combat presentation to finish
+// showing the last hit before it plays the death screen over it, and how long it
+// waits afterwards for the server's reload to rebuild the world before fading
+// back in on its own.
+static constexpr unsigned int kViewerWipePresentationMaxMs = 4000;
+static constexpr unsigned int kViewerWipeReloadMaxMs = 12000;
+static unsigned int gViewerWipeSinceMs = 0;
 
 // 0x5194C8
 static char _mainMap[] = "artemple.map";
@@ -804,6 +814,41 @@ static void viewerPollPendingLoot(ClientConnection& conn)
 // the claim-gated verb and the authoritative result returns on the wire. Items that
 // still need streaming we don't have (use-item-on inventory, talk dialog options)
 // fall back or no-op with a note. CANCEL(0) and "menu not shown" (-1) do nothing.
+// The party is dead: vanilla's death, on a viewer. Vanilla leaves the main loop,
+// fades to white and shows DEATH.FRM with a narrated line before the main menu;
+// here the world stays loaded, because the server's reload (sent right behind the
+// wipe event) replaces it. The socket is not read while the screen is up — the
+// server buffers — and once it ends we pump until the restored world has been
+// rebuilt (bounded), then fade back in. The narration is picked locally, as
+// single-player does, from the same tables the client already loads.
+static void viewerPlayPartyWipe(ClientConnection& conn)
+{
+    debugPrint("client-viewer: party wipe — playing the death screen\n");
+    paletteFadeTo(gPaletteWhite);
+    endgameSetupDeathEnding(ENDGAME_DEATH_ENDING_REASON_DEATH);
+    showDeath(); // returns with the palette black and color.pal loaded
+
+    int loadsBefore = conn.loadCount();
+    unsigned int started = getTicks();
+    bool alive = true;
+    while (conn.loadCount() == loadsBefore && getTicksSince(started) < kViewerWipeReloadMaxMs) {
+        sharedFpsLimiter.mark();
+        if (!conn.pump()) {
+            alive = false;
+            break;
+        }
+        inputGetInput(); // keeps the window serviced; no modal is up, so nothing acts on keys
+        renderPresent();
+        sharedFpsLimiter.throttle();
+    }
+    debugPrint("client-viewer: party wipe — %s after %u ms\n",
+        conn.loadCount() != loadsBefore ? "restored world received" : alive ? "no reload yet, fading in anyway" : "server gone",
+        getTicksSince(started));
+    tileWindowRefresh();
+    paletteFadeTo(_cmap);
+    conn.clearFadeBlack();
+}
+
 static void viewerSendActionMenuVerb(ClientConnection& conn, int menuItem, Object* target)
 {
     char cmd[48];
@@ -827,9 +872,15 @@ static void viewerSendActionMenuVerb(ClientConnection& conn, int menuItem, Objec
             break;
         default:
             // Critter USE = loot a corpse (loot slice); a live critter is not lootable
-            // this way (pickpocket/steal is a separate path).
+            // this way (pickpocket/steal is a separate path). A dead PLAYER is revived
+            // instead of looted.
             if (critterIsDead(target)) {
-                viewerArmPendingLoot(conn, target->netId);
+                if (playerActorIs(target)) {
+                    snprintf(cmd, sizeof(cmd), "revive %d", target->netId);
+                    conn.sendLine(cmd);
+                } else {
+                    viewerArmPendingLoot(conn, target->netId);
+                }
             }
             break;
         }
@@ -933,8 +984,14 @@ static void viewerSendPrimaryVerb(ClientConnection& conn, Object* target)
         if (target == gDude) {
             conn.sendLine("rot");
         } else if (critterIsDead(target)) {
-            // Primary on a corpse is LOOT (loot slice).
-            viewerArmPendingLoot(conn, target->netId);
+            // Primary on a corpse is LOOT (loot slice) — unless the corpse is a
+            // PLAYER, who is revived (free out of combat, 4 AP on your turn in one).
+            if (playerActorIs(target)) {
+                snprintf(cmd, sizeof(cmd), "revive %d", target->netId);
+                conn.sendLine(cmd);
+            } else {
+                viewerArmPendingLoot(conn, target->netId);
+            }
         } else {
             // Primary on a live critter is TALK in vanilla.
             snprintf(cmd, sizeof(cmd), "talk %d", target->netId);
@@ -1387,6 +1444,9 @@ static int mainClientViewer(const char* connectSpec)
         // guesswork that made the barter<->dialog transition flicker and orphan windows.
         clientModalWindowsSync();
         clientDialogRenderPendingNode();
+        // A player-to-player trade has no conversation to build the dialog session
+        // the trade screen draws over; this builds it once when a trade opens for us.
+        clientTradeSyncWindows();
 
         // Barter streaming: the decoder opened a trade session (mirrors built from
         // EVENT_BARTER_STATE). Put the vanilla trade window up over the dialog
@@ -1399,11 +1459,13 @@ static int mainClientViewer(const char* connectSpec)
             inventoryOpenTradeViewer(clientBarterMerchant(),
                 clientBarterPlayerTable(), clientBarterMerchantTable());
         }
+        clientTradeAbortIfUnopened(); // a refused open leaves the trade instead of retrying
         // Tear down a trade the server ENDED. onBarterEnd only latches the end (it
         // is decoded from inside the trade loop, where freeing the mirrors would
         // dangle the drag gesture / quantity dial); the trade loop above has since
         // broken and returned, so this is the safe point to actually free them.
         clientBarterFinalize();
+        clientTradeFinalize(); // tears the trade's session windows down, prints its closing line
 
         // Steal streaming: the server opened a steal session. EVERY viewer puts up
         // the same screen — the thief drives it, the rest of the party watches
@@ -1478,7 +1540,7 @@ static int mainClientViewer(const char* connectSpec)
             static bool wasDead = false;
             bool dead = gDude != nullptr && critterIsDead(gDude);
             if (dead && !wasDead) {
-                displayMonitorAddMessage((char*)"You are dead. Press R to get back up.");
+                displayMonitorAddMessage((char*)"You are dead. A teammate can revive you (Use on your body, or a healing item).");
             }
             wasDead = dead;
         }
@@ -1772,8 +1834,12 @@ static int mainClientViewer(const char* connectSpec)
                 automapShow(true, false);
             }
         } else if ((keyCode == KEY_LOWERCASE_R || keyCode == KEY_UPPERCASE_R) && gDude != nullptr && critterIsDead(gDude)) {
-            // 'R' while dead → ask the server to stand us back up (selfrevive).
-            conn.sendLine("selfrevive");
+            // 'R' while dead used to stand you back up on your own (`selfrevive`).
+            // Death is a team matter now (owner spec 2026-09-05): a living teammate
+            // revives you — Use on your body, or a healing item on it — and when
+            // everyone is down the game goes back to the last save. The key stays
+            // bound only to say so.
+            displayMonitorAddMessage((char*)"You cannot get up on your own. A teammate has to revive you.");
         } else if (keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P) {
             // 'P' → the pipboy. Owner-reported as a dead button: this dispatch is the
             // viewer's OWN and deliberately never calls gameHandleKey, so until now there
@@ -2094,6 +2160,23 @@ static int mainClientViewer(const char* connectSpec)
             if (conn.takeAutomapOpen(&usingScanner)) {
                 automapShow(true, usingScanner);
                 clientViewerFlushDeferredItemFrees();
+            }
+        }
+
+        // PARTY WIPE (owner spec 2026-09-05): everyone is dead. Let the combat
+        // presentation finish showing the last hit (bounded), then play vanilla's
+        // death screen; the server has already reloaded the newest save behind the
+        // event, so the world that comes back after the screen is the restored one.
+        if (conn.wipePending()) {
+            if (gViewerWipeSinceMs == 0) {
+                gViewerWipeSinceMs = getTicks();
+                if (gViewerWipeSinceMs == 0) gViewerWipeSinceMs = 1;
+            }
+            if (!conn.combatPresentationBusy()
+                || getTicksSince(gViewerWipeSinceMs) > kViewerWipePresentationMaxMs) {
+                conn.takePartyWipe();
+                gViewerWipeSinceMs = 0;
+                viewerPlayPartyWipe(conn);
             }
         }
 

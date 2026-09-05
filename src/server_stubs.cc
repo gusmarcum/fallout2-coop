@@ -74,6 +74,7 @@
 #include "lips.h"
 #include "game_mouse.h"
 #include "game_movie.h"
+#include "server_trade.h" // serverTradeCancel - the movie barrier ends an open player trade
 #include "presenter.h" // presenter()->moviePlay — the server projects, viewers play
 #include "game_sound.h"
 #include "game_ui.h"
@@ -435,6 +436,11 @@ int gameMoviePlay(int movie, int flags)
     if (!serverFeatureEnabled("F2_MOVIES")) {
         return 0;
     }
+
+    // The barrier below parks the world; an open player trade cannot outlive it
+    // (server_trade.h). The trade tick cannot see a movie — gameMovieIsPlaying is
+    // false headless — so the cancel has to be explicit here.
+    serverTradeCancel("a cutscene started");
 
     presenter()->moviePlay(movie, flags);
     gameMovieServerBarrier();

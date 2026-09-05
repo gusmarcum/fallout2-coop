@@ -437,11 +437,21 @@ Object* scriptContextDude(Program* program)
     return nearest != nullptr ? nearest : gDude;
 }
 
+static void (*gPlayerActorDiedHook)(Object* actor) = nullptr;
+
+void playerActorSetDiedHook(void (*hook)(Object* actor))
+{
+    gPlayerActorDiedHook = hook;
+}
+
 void playerActorDied(Object* actor)
 {
-    // v1: deliberate no-op. The contract this must honor is in the header;
-    // the reasoning is MP_PROPOSAL.md Ch 9.5.
-    (void)actor;
+    // The contract this must honor is in the header; the reasoning is
+    // MP_PROPOSAL.md Ch 9.5. Policy lives behind the hook: nothing installed
+    // (single-player, the client, the golden probe) keeps the v1 no-op.
+    if (gPlayerActorDiedHook != nullptr) {
+        gPlayerActorDiedHook(actor);
+    }
 }
 
 } // namespace fallout
