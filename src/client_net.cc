@@ -4278,7 +4278,14 @@ private:
         // listening. Cleared by STOP so a retune to the same name still replays.
         // ...but only while that track is actually still playing. If it died
         // (see musicWatchdog) the re-announce is exactly what brings it back.
-        if (name == _musicTrack && backgroundSoundIsPlaying()) return;
+        // ...and only while the sound layer still holds THAT track. The viewer's own
+        // map load plays the "wind2" placeholder through backgroundSoundLoad, so after
+        // a change between two maps that share a track (Vault City courtyard and
+        // downtown, San Francisco docks and Chinatown) the name matched, something was
+        // playing, and the real track never came back: wind for the rest of the visit
+        // (2026-09-05). Vanilla reloads unconditionally, so this is the vanilla outcome.
+        const char* loaded = backgroundSoundLastName();
+        if (name == _musicTrack && backgroundSoundIsPlaying() && loaded != nullptr && name == loaded) return;
         _musicTrack = name;
         _musicRetryAtMs = 0;
         _musicFailNoticed = false;
