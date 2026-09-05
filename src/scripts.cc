@@ -851,8 +851,6 @@ int _scrQueueRemoveFixed(Object* obj, void* data)
 }
 
 // 0x4A3E60
-static const bool kScrWorldTrace = getenv("F2_TRACE_WORLD") != nullptr; // [world-trace]
-
 int scriptAddTimerEvent(int sid, int delay, int param)
 {
     ScriptEvent* scriptEvent = (ScriptEvent*)internal_malloc(sizeof(*scriptEvent));
@@ -872,10 +870,6 @@ int scriptAddTimerEvent(int sid, int delay, int param)
     if (queueAddEvent(delay, script->owner, scriptEvent, EVENT_TYPE_SCRIPT) == -1) {
         internal_free(scriptEvent);
         return -1;
-    }
-    if (kScrWorldTrace) {
-        fprintf(stderr, "[world] timer add sid=%d delay=%d param=%d owner pid=0x%08X at %u\n",
-            sid, delay, param, script->owner != nullptr ? script->owner->pid : 0, gameTimeGetTime());
     }
 
     return 0;
@@ -926,10 +920,6 @@ int scriptEventProcess(Object* obj, void* data)
     }
 
     script->fixedParam = scriptEvent->fixedParam;
-    if (kScrWorldTrace) {
-        fprintf(stderr, "[world] timer fire sid=%d param=%d owner pid=0x%08X at %u\n",
-            scriptEvent->sid, scriptEvent->fixedParam, script->owner != nullptr ? script->owner->pid : 0, gameTimeGetTime());
-    }
 
     scriptExecProc(scriptEvent->sid, SCRIPT_PROC_TIMED);
 

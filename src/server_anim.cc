@@ -681,9 +681,6 @@ static int serverAnimMoveToTileApply(Object* owner, int tile, int elevation, int
         ? _make_path_wide(owner, owner->tile, tile, rotations, 0)
         : _make_path(owner, owner->tile, tile, rotations, 0);
     if (steps == 0) {
-        if (getenv("F2_TRACE_EVENTS") != nullptr) { // [world-trace]
-            fprintf(stderr, "[walk] net=%d no path %d -> %d (elev %d)\n", owner->netId, owner->tile, tile, elevation);
-        }
         // No route. The engine registers the move and it fails silently at
         // execution; the register itself still returns success.
         return 0;

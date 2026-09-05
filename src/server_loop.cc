@@ -456,51 +456,6 @@ void serverRequestRebaseline()
     gRebaselineRequested = true;
 }
 
-// ---- The fade-in second after a map load ----------------------------------------
-//
-// Vanilla keeps the world running for about a second after a map load (the fade-in
-// and the first frames) before the player can click anything, and map scripts rely on
-// it: the Vault City gate (VIEntDor) drops a Secret Blocking Hex on the gate's approach
-// tile in map_enter_p_proc and destroys it with a FIVE-TICK timer. The dedicated
-// server's game clock counts beats, and the beat that loads a map (plus the map-change
-// autosave on the next one) takes seconds of wall time. So a viewer had loaded the new
-// map and the player had talked to the gate guard when the server clock was TWO ticks
-// past the load (live log, 2026-09-05): the guard's "come in" removed the gate's timers,
-// the five-tick cleanup among them, and the blocker stayed on the only approach tile
-// for the whole visit ("You cannot get there" while the gate stood open).
-//
-// So after every map load the dedicated server runs the background tick for
-// F2_SERVER_LOAD_SETTLE_TICKS (default 10) sim ticks before the beat goes on to the
-// delta scan and the baseline: due timers fire, critter heartbeats run, exactly what the
-// fade-in gives single player. Headless goldens (not dedicated) and the boot load are
-// untouched: the boot sim is frozen until the first client attaches, and its clock then
-// runs for real while that client is still loading.
-static void serverSettleAfterMapLoad()
-{
-    static unsigned int sSettledGeneration = mapGetLoadGeneration();
-    static const int kSettleTicks = []() {
-        const char* env = getenv("F2_SERVER_LOAD_SETTLE_TICKS");
-        return env != nullptr ? atoi(env) : 10;
-    }();
-    unsigned int generation = mapGetLoadGeneration();
-    if (generation == sSettledGeneration) {
-        return;
-    }
-    sSettledGeneration = generation;
-    if (kSettleTicks <= 0 || !serverDedicatedActive()) {
-        return;
-    }
-    unsigned int before = gameTimeGetTime();
-    for (int index = 0; index < kSettleTicks; index++) {
-        simClockAdvance(kServerTickDelta);
-        _process_bk();
-    }
-    if (getenv("F2_TRACE_WORLD") != nullptr) {
-        fprintf(stderr, "[world] settle after map load: %d ticks, game time %u -> %u (generation %u)\n",
-            kSettleTicks, before, gameTimeGetTime(), generation);
-    }
-}
-
 void serverTick(int tick, const std::function<void(int)>& intentsDrain, bool advanceSim)
 {
     if (intentsDrain) {
@@ -603,7 +558,6 @@ void serverTick(int tick, const std::function<void(int)>& intentsDrain, bool adv
     }
 
     mapHandleTransition();
-    serverSettleAfterMapLoad();
 
     // Beat resolved: emit the batched fieldwise object deltas for everything
     // that changed this tick (MP_PROTOCOL.md §6.2). Side-effect-free + no-op
