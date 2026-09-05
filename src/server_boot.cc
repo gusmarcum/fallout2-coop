@@ -22,6 +22,7 @@
 #include "platform_compat.h"
 #include "presenter.h" // presenterSetEmissionsSuppressed — a reload's teardown is silent
 #include "proto.h"
+#include "proto_instance.h" // doorArtOffsetsNormalizeAll — boot-load door sweep (bugs/010)
 #include "queue.h"
 #include "random.h"
 #include "savegame.h"
@@ -277,6 +278,19 @@ static int serverInitSubsystems(int argc, char** argv)
 // is now a sim-side decision the server puts on the wire, and mapLoadByName only
 // starts music for a map with a .SAV (mapLoadById does it for transitions). Skip
 // it and the FIRST map of a session is silent while every later one plays.
+// The boot-time map load runs BEFORE the serve loop is marked active, so mapLoad's own
+// door sweep (map.cc, gated on serverLoopActive) skips it. Every later load — a map
+// transition, a quickload — runs inside the loop and is covered there. Worlds saved by
+// servers before 2026-09-05 carry doors drifted off their frame offsets (bugs/010);
+// the boot load is the one most players' worlds come back through.
+static void serverBootSweepDoors()
+{
+    int moved = doorArtOffsetsNormalizeAll();
+    if (moved > 0) {
+        fprintf(stderr, "f2_server: %d door sprite(s) put back on their frame offsets\n", moved);
+    }
+}
+
 static int serverLoadMap(const char* mapName)
 {
     _game_user_wants_to_quit = 0;
@@ -490,6 +504,7 @@ int serverBootNewWorld(const char* mapName)
         return -1;
     }
 
+    serverBootSweepDoors();
     return 0;
 }
 
@@ -538,6 +553,7 @@ int serverBootLoadSlot(int slot)
         return -1;
     }
 
+    serverBootSweepDoors();
     return 0;
 }
 

@@ -371,7 +371,11 @@ static void elevatorCloseDoors(Object* doors)
         return;
     }
 
-    objectSetFrame(doors, 0, nullptr);
+    // Frame AND sprite offsets: the elevator doors slide by art offsets (velev*, 26,-14
+    // at the open frame), and vanilla's bare objectSetFrame left the closed door drawn
+    // where the open frame's offsets had put it. Viewers mirror this frame change from
+    // OBJECT_DELTA_FRAME, so the server's own offsets have to be right (bugs/010).
+    objectSetFrameWithArtOffsets(doors, 0, nullptr);
     objectSetLocation(doors, doors->tile, doors->elevation, nullptr);
     doors->flags &= ~OBJECT_OPEN_DOOR;
     doors->data.scenery.door.openFlags &= ~0x01;

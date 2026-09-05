@@ -160,6 +160,10 @@ int serverControlSlotForSession(int sessionId);
 // answers an offer this actor actually received: without that, the verb would be a
 // teleport-anywhere primitive any session could send at any time. -1 clears.
 void serverControlSetPendingElevator(int slot, int elevator);
+// True while `slot` holds an unanswered offer for exactly `elevator` — the spatial
+// script re-requests on every hex of the walk, and only the first request may stream
+// a panel (bugs/009).
+bool serverControlElevatorOfferPending(int slot, int elevator);
 
 // The actor this session drives, or nullptr. THE lookup the verb layer uses.
 Object* serverControlActorForSession(int sessionId);

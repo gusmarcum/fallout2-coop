@@ -2049,6 +2049,11 @@ static int mainClientViewer(const char* connectSpec)
                 int level = elevatorPickLevel(elevator, startLevel);
                 if (level >= 0) {
                     clientViewerElevatorRide(level);
+                } else {
+                    // Escaped (or the screen could not open): release the offer, or the
+                    // server's repeat-offer guard would keep the panel from coming back
+                    // when the player walks into the car again (bugs/009).
+                    clientViewerElevatorCancel();
                 }
             }
         }

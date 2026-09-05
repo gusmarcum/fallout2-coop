@@ -1702,30 +1702,21 @@ static int _check_door_state(Object* door, Object* obj2)
             return 0;
         }
 
-        CacheEntry* artHandle;
-        Art* art = artLock(door->fid, &artHandle);
-        if (art == nullptr) {
+        // Vanilla reaches this callback with the reversed animation already finished
+        // (frame 0, returned above). The headless server never animates, so THIS is
+        // where its doors close — and the loop that used to be here subtracted the
+        // offsets of frames N-1..0 where the animation subtracts N..1: nine pixels short
+        // per cycle on a vault door, saved into the map and shipped to every viewer, the
+        // drift behind bugs/010. Step the sprite back exactly as the animation would.
+        Rect dirty;
+        if (objectSetFrameWithArtOffsets(door, 0, &dirty) == -1) {
             return -1;
         }
-
-        Rect dirty;
-        Rect temp;
-
-        objectGetRect(door, &dirty);
-
-        for (int frame = door->frame - 1; frame >= 0; frame--) {
-            int x;
-            int y;
-            artGetFrameOffsets(art, frame, door->rotation, &x, &y);
-            _obj_offset(door, -x, -y, &temp);
+        if (kWorldTrace) {
+            fprintf(stderr, "[world] door netId=%d frame=%d offsets=%d,%d\n", door->netId, door->frame, door->x, door->y);
         }
 
-        objectSetFrame(door, 0, &temp);
-        rectUnion(&dirty, &temp, &dirty);
-
         presenter()->worldInvalidateRect(&dirty, gElevation);
-
-        artUnlock(artHandle);
         return 0;
     } else {
         // SFALL: Fix flags on non-door objects.
@@ -1743,31 +1734,63 @@ static int _check_door_state(Object* door, Object* obj2)
         }
 
         int frameCount = artGetFrameCount(art);
+        artUnlock(artHandle);
         if (door->frame == frameCount - 1) {
-            artUnlock(artHandle);
             return 0;
         }
 
+        // Same step as the forward animation: plus the offsets of frames N+1..last.
         Rect dirty;
-        Rect temp;
-
-        objectGetRect(door, &dirty);
-
-        for (int frame = door->frame + 1; frame < frameCount; frame++) {
-            int x;
-            int y;
-            artGetFrameOffsets(art, frame, door->rotation, &x, &y);
-            _obj_offset(door, x, y, &temp);
+        if (objectSetFrameWithArtOffsets(door, frameCount - 1, &dirty) == -1) {
+            return -1;
+        }
+        if (kWorldTrace) {
+            fprintf(stderr, "[world] door netId=%d frame=%d offsets=%d,%d\n", door->netId, door->frame, door->x, door->y);
         }
 
-        objectSetFrame(door, frameCount - 1, &temp);
-        rectUnion(&dirty, &temp, &dirty);
-
         presenter()->worldInvalidateRect(&dirty, gElevation);
-
-        artUnlock(artHandle);
         return 0;
     }
+}
+
+// Put every door's sprite where its frame says it belongs. Returns how many moved.
+//
+// A door slides by ART OFFSETS: each frame of vdoorf/vdoors moves the sprite up a few
+// pixels, 61 in all, and the engine keeps the running sum in obj->x/y. Vanilla only ever
+// changes a door's frame by animating it, so the sum is always right. The headless
+// server never animates: _check_door_state is the code that actually moves the frame,
+// and until 2026-09-05 its closing branch fell nine pixels short per cycle (see there).
+// The drift went into every map .SAV and from there into every viewer's blob load —
+// how a Navarro door came to hover a door's height above its frame (bugs/010). Shipped
+// maps store exactly the animation's cumulative offsets for doors saved open and zero
+// for closed ones (all 341 door records checked), so the frame alone determines where a
+// door rests; worlds saved by older servers get put back on that mark at load.
+int doorArtOffsetsNormalizeAll()
+{
+    int moved = 0;
+    for (int elevation = 0; elevation < ELEVATION_COUNT; elevation++) {
+        Object* obj = objectFindFirstAtElevation(elevation);
+        while (obj != nullptr) {
+            if (PID_TYPE(obj->pid) == OBJ_TYPE_SCENERY
+                && FID_TYPE(obj->fid) == OBJ_TYPE_SCENERY
+                && _obj_is_portal(obj)) {
+                int x;
+                int y;
+                if (objectArtOffsetsForFrame(obj, obj->frame, &x, &y) == 0
+                    && (obj->x != x || obj->y != y)) {
+                    if (kWorldTrace) {
+                        fprintf(stderr, "[world] door tile=%d elev=%d frame=%d offsets %d,%d -> %d,%d (normalized)\n",
+                            obj->tile, obj->elevation, obj->frame, obj->x, obj->y, x, y);
+                    }
+                    Rect temp;
+                    _obj_offset(obj, x - obj->x, y - obj->y, &temp);
+                    moved++;
+                }
+            }
+            obj = objectFindNextAtElevation();
+        }
+    }
+    return moved;
 }
 
 // Present a door/openable-scenery open/close SLIDE to viewers. Default path streams
@@ -1808,6 +1831,7 @@ int _obj_use_door(Object* user, Object* door, bool animateOnly)
     }
 
     bool scriptOverrides = false;
+    bool wasOpenBeforeScript = door->frame != 0;
     if (door->sid != -1) {
         scriptSetObjects(door->sid, user, door);
         scriptExecProc(door->sid, SCRIPT_PROC_USE);
@@ -1818,6 +1842,21 @@ int _obj_use_door(Object* user, Object* door, bool animateOnly)
         }
 
         scriptOverrides = script->scriptOverrides;
+    }
+
+    // ►► A SCRIPT THAT MOVED THE DOOR ITSELF HAS ALREADY DONE VANILLA'S WORK. Many door
+    // scripts answer use_p_proc with reg_anim_begin / obj_open (or obj_close) /
+    // reg_anim_end and no script_overrides (FSBroDor, the San Francisco Brotherhood
+    // door). In vanilla that motion is a DEFERRED animation, so the default toggle
+    // below still reads the pre-script frame and registers the same motion again; two
+    // opens merge into one open door. The headless server runs the script's motion at
+    // once, and the toggle then read the NEW frame and undid it: every use opened and
+    // closed the door in the same beat, the door "closes and opens repeatedly and won't
+    // let me in" (bugs/011). If the script flipped the door, the script's outcome is the
+    // vanilla outcome; leave it alone. Server-only: with deferred animations the frame
+    // cannot have changed here, so vanilla is byte-identical.
+    if (serverLoopActive() && (door->frame != 0) != wasOpenBeforeScript) {
+        return 0;
     }
 
     if (!scriptOverrides) {

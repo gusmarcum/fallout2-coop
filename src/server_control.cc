@@ -1366,6 +1366,10 @@ void serverControlBeginDrain(const std::function<bool(int)>& liveSession)
             // orders when it does would be acting for someone who left.
             combatIntentDropForSlot(slot);
             gInventoryOpenSlots.erase(slot); // and any screen they had paid to open
+            // An elevator panel they never answered: the offer must not outlive the
+            // session, or the repeat-offer guard (bugs/009) would deny the same
+            // elevator to whoever binds this slot next.
+            serverControlSetPendingElevator(slot, -1);
             changed = true;
 
             // Queue the BODY for despawn — parked off-map at the next safe main
@@ -1976,6 +1980,12 @@ void serverControlSetPendingElevator(int slot, int elevator)
     gPendingElevator[slot] = elevator;
 }
 
+bool serverControlElevatorOfferPending(int slot, int elevator)
+{
+    return slot >= 0 && slot < kMaxPlayerActors
+        && gHasPendingElevator[slot] && gPendingElevator[slot] == elevator;
+}
+
 // The character-sheet edit intents, as ONE list. They are exempt from both the
 // dead-actor and the busy gates, and the two bypass lists below have to agree —
 // naming them once is what keeps the next verb added from being forgotten in one
@@ -2487,6 +2497,7 @@ void serverControlLine(int sessionId, const char* line)
             || strcmp(verb, "login") == 0
             || strcmp(verb, "quicksave") == 0 // F6/F7 latch a request; neither is an action
             || strcmp(verb, "quickload") == 0
+            || strcmp(verb, "elevcancel") == 0 // releases an offer; no action, no animation
             // A read-only diagnostic must never be refused for being busy — busy is
             // exactly when you want to ask (state_audit.h).
             || strcmp(verb, "audit") == 0;
@@ -3409,6 +3420,19 @@ void serverControlLine(int sessionId, const char* line)
         }
         fprintf(stderr, "f2_server: control elev slot=%d elevator=%d level=%d -> map=%d elev=%d tile=%d\n",
             slot, elevator, arg, map, elevation, tile);
+        return;
+    }
+
+    // -- elevcancel: the panel closed without a choice (Escape) ----------------------
+    // Releases the offer. An unanswered offer is inert on its own, but the repeat-offer
+    // guard in elevatorSelect (bugs/009) keys on it: without this, a player who escaped
+    // the panel and walked into the car again would never see it a second time.
+    if (strcmp(verb, "elevcancel") == 0) {
+        int slot = serverControlSlotForSession(sessionId);
+        if (slot >= 0 && slot < kMaxPlayerActors && gHasPendingElevator[slot]) {
+            gHasPendingElevator[slot] = false;
+            fprintf(stderr, "f2_server: control elevcancel slot=%d (offer released)\n", slot);
+        }
         return;
     }
 

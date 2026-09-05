@@ -43,6 +43,14 @@ int objectSetFid(Object* obj, int fid, Rect* rect);
 int objectSetFrame(Object* obj, int frame, Rect* rect);
 int objectSetNextFrame(Object* obj, Rect* rect);
 int objectSetPrevFrame(Object* obj, Rect* rect);
+// Set `frame` AND move the sprite the way the animation would have stepping there
+// (entering a frame adds its art offset, leaving one subtracts it). For arts that
+// animate by offset — the vault-style sliding doors, the elevator doors — a bare
+// objectSetFrame draws the sprite where the OLD frame's offsets left it.
+int objectSetFrameWithArtOffsets(Object* obj, int frame, Rect* rect);
+// The sprite offsets an art frame settles at when reached by animation from frame 0
+// (the sum of the offsets of frames 1..frame). -1 if the art cannot be locked.
+int objectArtOffsetsForFrame(Object* obj, int frame, int* x, int* y);
 int objectSetRotation(Object* obj, int direction, Rect* rect);
 int objectRotateClockwise(Object* obj, Rect* rect);
 int objectRotateCounterClockwise(Object* obj, Rect* rect);
