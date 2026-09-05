@@ -42,6 +42,7 @@
 #include "server_control.h" // serverControlPrepareForWorldReload / RebindAfterWorldReload
 #include "server_trade.h" // serverTradeActive — never save or reload around an open trade
 #include "server_loop.h" // serverDedicatedActive — the wipe rule is the dedicated server's
+#include "wire_defs.h" // kNoSessionId - which slots have a client to ack the death screen
 #include "settings.h" // master_patches_path — where the save slots live on disk
 #include <sys/stat.h> // stat — the newest save is the most recently WRITTEN slot
 #include "rest.h" // restPerform / RestOutcome — the operator's rest verb
@@ -2059,6 +2060,8 @@ static void performQuickSave(int requesterSlot)
     gQuickCooldownUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
 }
 
+static bool gWipeWaiting = false; // party wipe: the death screens are up; the reload is held (see below)
+
 static void performLiveLoad(int slot, int requesterSlot, const char* announce = nullptr)
 {
     LoadSaveSlotData data;
@@ -2072,6 +2075,7 @@ static void performLiveLoad(int slot, int requesterSlot, const char* announce = 
     fprintf(stderr, "f2_server: reload slot %d ('%.30s') requested by %s (slot %d)\n",
         slot + 1, data.description, who, requesterSlot);
 
+    gWipeWaiting = false; // whatever this load is for, the world it replaces is gone
     serverControlPrepareForWorldReload();
     combatSessionEndForLoad();
     if (serverReloadSlot(slot) != 0) {
@@ -2111,7 +2115,30 @@ static void performLiveLoad(int slot, int requesterSlot, const char* announce = 
 // screen and the world goes back to the most recent save — the way single-player
 // sends you back to your last save, except that nobody has to leave the server.
 
-static bool gWipePending = false;
+static bool gWipePending = false; // the last player just died (latched mid-beat)
+static unsigned int gWipeAckMask = 0; // slots whose client finished the screen
+static std::chrono::steady_clock::time_point gWipeDeadline;
+static constexpr int kWipeAckSeconds = 25; // a crashed or absent client cannot hold the reload forever
+
+void serverAdminNoteWipeAck(int slot)
+{
+    if (!gWipeWaiting || slot < 0 || slot >= 32) {
+        return;
+    }
+    gWipeAckMask |= 1u << slot;
+    fprintf(stderr, "f2_server: party wipe: slot %d finished the death screen\n", slot);
+}
+
+// Every slot with a connected client has acked (a spectator has no slot to ack for).
+static bool wipeEveryoneAcked()
+{
+    for (int slot = 0; slot < playerActorCount() && slot < 32; slot++) {
+        if (serverControlSessionForSlot(slot) != kNoSessionId && (gWipeAckMask & (1u << slot)) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
 
 void serverAdminNotePlayerDied(Object* actor)
 {
@@ -2173,19 +2200,28 @@ static void reviveEveryone(const char* why)
     fprintf(stderr, "f2_server: party wipe: %s\n", why);
 }
 
-static void performPartyWipe()
+// The death screens go out now; the reload waits (serverAdminDrainWorldRequests)
+// until every connected player's client has finished its screen or the deadline
+// passes. Reloading in the same beat as the deaths replaced the world under the
+// death animations still playing on the clients, and under the death screen
+// itself — the world has to stand still until the screens are done with it.
+static void announcePartyWipe()
+{
+    presenter()->consoleMessageStyled(0, kMsgChannelSystem, "Everyone is dead.");
+    presenter()->partyWipe(); // not suppression-gated (presenter_network.cc)
+    gWipeWaiting = true;
+    gWipeAckMask = 0;
+    gWipeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(kWipeAckSeconds);
+    fprintf(stderr, "f2_server: party wipe announced; reload waits for the death screens (%d s cap)\n", kWipeAckSeconds);
+}
+
+static void performPartyWipeReload()
 {
     if (playerActorAnyAlive()) {
         fprintf(stderr, "f2_server: party wipe cancelled — someone is alive again\n");
         return;
     }
     int slot = newestSaveSlot();
-    presenter()->consoleMessageStyled(0, kMsgChannelSystem, "Everyone is dead.");
-    // The death screen first, the reload right behind it: each viewer plays the
-    // screen from its main loop and finds the restored world waiting when it is
-    // done. Not suppression-gated on the wire (presenter_network.cc) because the
-    // reload suppresses emissions while it destroys the old bodies.
-    presenter()->partyWipe();
     if (slot < 0) {
         reviveEveryone("There is no save to go back to. The party gets back up where it fell.");
         return;
@@ -2212,11 +2248,26 @@ static void performPartyWipe()
 void serverAdminDrainWorldRequests()
 {
     if (gWipePending) {
+        gWipePending = false;
+        if (!playerActorAnyAlive()) {
+            announcePartyWipe();
+        }
+        return;
+    }
+    if (gWipeWaiting) {
+        if (playerActorAnyAlive()) {
+            gWipeWaiting = false; // the operator revived someone: no reload
+            fprintf(stderr, "f2_server: party wipe cancelled — someone is alive again\n");
+            return;
+        }
+        if (!wipeEveryoneAcked() && std::chrono::steady_clock::now() < gWipeDeadline) {
+            return; // screens still up somewhere; the world keeps beating meanwhile
+        }
         if (mapTransitionPending()) {
             return; // the transition lands at this beat's tail; act next beat
         }
-        gWipePending = false;
-        performPartyWipe();
+        gWipeWaiting = false;
+        performPartyWipeReload();
         return; // the world was just replaced; other latched requests wait a beat
     }
 

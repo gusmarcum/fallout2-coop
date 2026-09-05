@@ -2567,10 +2567,20 @@ static void combatArmCritterFid(Object* critter)
     }
 
     // Whichever hand holds a weapon decides the body. Right hand first, matching the
-    // engine's own default hand.
-    Object* weapon = critterGetItem2(critter);
-    if (weapon == nullptr || itemGetType(weapon) != ITEM_TYPE_WEAPON) {
-        weapon = critterGetItem1(critter);
+    // engine's own default hand — for NPCs. A PLAYER's body follows the ACTIVE hand,
+    // as in vanilla: entering combat with the empty hand selected leaves the gun in
+    // the other slot holstered (the same rule invenRederiveWeaponFid applies every
+    // beat, so the two never fight over the sprite).
+    Object* weapon = nullptr;
+    if (playerActorIs(critter)) {
+        weapon = serverActorActiveHand(playerActorSlotOf(critter)) == HAND_LEFT
+            ? critterGetItem1(critter)
+            : critterGetItem2(critter);
+    } else {
+        weapon = critterGetItem2(critter);
+        if (weapon == nullptr || itemGetType(weapon) != ITEM_TYPE_WEAPON) {
+            weapon = critterGetItem1(critter);
+        }
     }
     if (weapon == nullptr || itemGetType(weapon) != ITEM_TYPE_WEAPON) {
         return; // empty-handed: an unarmed body is already correct
