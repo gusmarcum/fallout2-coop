@@ -626,24 +626,34 @@ void inventoryOpen()
     inventoryRenderSummary();
     _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_NORMAL);
     inventorySetCursor(INVENTORY_WINDOW_CURSOR_HAND);
+    // Co-op diagnostics: the viewer has no other way to say why this screen came down
+    // (2026-09-05: "I blinks and never opens" after a barter; the server had granted it).
+    int inventoryFrames = 0;
+    if (clientViewerActive()) {
+        debugPrint("inventory: screen up (window %d)\n", gInventoryWindow);
+    }
 
     for (;;) {
         sharedFpsLimiter.mark();
 
         int keyCode = inputGetInput();
+        inventoryFrames++;
 
         // SFALL: Close with 'I'.
         if (keyCode == KEY_ESCAPE || keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I) {
+            if (clientViewerActive()) debugPrint("inventory: closed by key %d after %d frames\n", keyCode, inventoryFrames);
             break;
         }
 
         if (_game_user_wants_to_quit != 0) {
+            if (clientViewerActive()) debugPrint("inventory: closed by quit flag %d after %d frames\n", _game_user_wants_to_quit, inventoryFrames);
             break;
         }
 
         _display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
 
         if (gameGetState() == GAME_STATE_5) {
+            if (clientViewerActive()) debugPrint("inventory: closed by game state 5 after %d frames\n", inventoryFrames);
             break;
         }
 
@@ -2100,6 +2110,7 @@ static void _display_body(int fid, int inventoryWindowType)
 static int inventoryCommonInit()
 {
     if (inventoryMessageListInit() == -1) {
+        debugPrint("inventory: message list load failed, screen not opened\n");
         return -1;
     }
 
@@ -2131,6 +2142,7 @@ static int inventoryCommonInit()
     }
 
     if (index != INVENTORY_WINDOW_CURSOR_COUNT) {
+        debugPrint("inventory: cursor art %d failed to lock, screen not opened\n", index);
         for (; index >= 0; index--) {
             artUnlock(gInventoryCursorData[index].frmHandle);
         }
