@@ -143,6 +143,18 @@ public:
             return -1;
         }
 
+        // ►► ONE OFFER PER ENTRY. The request comes from the elevator's SPATIAL script,
+        // which fires on every hex the walk crosses inside the trigger zone. Vanilla's
+        // panel is modal, so the first fire is the only one anyone ever sees; here the
+        // panel is remote and the walk goes on — three hexes, three offers, and the
+        // viewer's one-shot latch showed the panel a second time after the ride, whose
+        // answer then hit "no elevator offered" (bugs/009). While this player already
+        // holds an offer for THIS elevator, say nothing more; the offer is released by
+        // the ride (`elev`), by the panel closing (`elevcancel`), or with the session.
+        if (serverControlElevatorOfferPending(slot, elevator)) {
+            return -1;
+        }
+
         // The gauge's starting position is the rider's CURRENT floor, computed from
         // the map/elevation the drain handed us (including the Sierra / Military Base
         // remap math), so the panel opens showing where they are.

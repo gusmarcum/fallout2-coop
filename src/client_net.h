@@ -201,6 +201,10 @@ void clientViewerRest(int option);
 // resolves what that button means from its own table and performs the ride — the
 // level index is the only thing a client is trusted to say (elevator.h).
 void clientViewerElevatorRide(int level);
+// The panel closed without a choice (Escape, or it could not open): release the
+// server's offer, so stepping into the car again raises the panel again. The server
+// suppresses repeat offers while one is outstanding (bugs/009).
+void clientViewerElevatorCancel();
 
 // ── Character-sheet edit intents (PLAYER_SHEET_DESIGN.md §9.5) ────────────────
 // The character screen's spends. It sends these INSTEAD of mutating the local sheet:

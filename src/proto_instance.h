@@ -22,6 +22,8 @@ int _obj_use_item_on(Object* user, Object* targetObj, Object* item);
 int _check_scenery_ap_cost(Object* obj, Object* a2);
 int _obj_use(Object* user, Object* targetObj);
 int _obj_use_door(Object* user, Object* doorObj, bool animateOnly = false);
+// Put every door's sprite on the offsets its frame implies (bugs/010); returns how many moved.
+int doorArtOffsetsNormalizeAll();
 int _obj_use_container(Object* critter, Object* item);
 int _obj_use_skill_on(Object* a1, Object* a2, int skill);
 void _obj_arm_explosive(Object* explosive, int seconds);

@@ -1598,6 +1598,100 @@ int objectSetFrame(Object* obj, int frame, Rect* rect)
     return 0;
 }
 
+// Set `frame` AND move the sprite the way the animation system would have, stepping
+// there frame by frame: entering a frame adds that frame's art offset, leaving one
+// subtracts it (animation.cc _object_animate_pass, forward and reversed). objectSetFrame
+// alone changes the frame index and leaves obj->x/y where the PREVIOUS frame's
+// accumulated offsets put them. For arts that animate by offset — the vault-style
+// sliding doors (vdoorf/vdoors, 61 px of travel), the elevator doors (velev*, 26,-14)
+// — a bare frame set therefore draws the sprite in the wrong place: a closed door a
+// full door height above its frame, an open one down in the doorway (bugs/010). Every
+// frame change that does not run through an animation belongs here.
+int objectSetFrameWithArtOffsets(Object* obj, int frame, Rect* rect)
+{
+    if (obj == nullptr) {
+        return -1;
+    }
+
+    CacheEntry* cacheHandle;
+    Art* art = artLock(obj->fid, &cacheHandle);
+    if (art == nullptr) {
+        return -1;
+    }
+
+    if (frame < 0 || frame >= artGetFrameCount(art)) {
+        artUnlock(cacheHandle);
+        return -1;
+    }
+
+    int dx = 0;
+    int dy = 0;
+    int x;
+    int y;
+    for (int f = obj->frame + 1; f <= frame; f++) {
+        artGetFrameOffsets(art, f, obj->rotation, &x, &y);
+        dx += x;
+        dy += y;
+    }
+    for (int f = obj->frame; f > frame; f--) {
+        artGetFrameOffsets(art, f, obj->rotation, &x, &y);
+        dx -= x;
+        dy -= y;
+    }
+    artUnlock(cacheHandle);
+
+    Rect dirty;
+    Rect temp;
+    objectGetRect(obj, &dirty);
+    if (dx != 0 || dy != 0) {
+        _obj_offset(obj, dx, dy, &temp);
+        rectUnion(&dirty, &temp, &dirty);
+    }
+
+    int rc = objectSetFrame(obj, frame, &temp);
+    if (rc == 0) {
+        rectUnion(&dirty, &temp, &dirty);
+    }
+    if (rect != nullptr) {
+        rectCopy(rect, &dirty);
+    }
+    return rc;
+}
+
+// The sprite offsets an art frame settles at when reached by animation from frame 0:
+// the sum of the offsets of every frame entered on the way. Frame 0's own offset is
+// never applied — a fresh object starts at 0,0 and the first step enters frame 1 — and
+// that is exactly what every shipped map stores for a door saved open, so the frame
+// alone names a door's resting offsets.
+int objectArtOffsetsForFrame(Object* obj, int frame, int* x, int* y)
+{
+    if (obj == nullptr || x == nullptr || y == nullptr) {
+        return -1;
+    }
+
+    CacheEntry* cacheHandle;
+    Art* art = artLock(obj->fid, &cacheHandle);
+    if (art == nullptr) {
+        return -1;
+    }
+
+    int sumX = 0;
+    int sumY = 0;
+    int frameCount = artGetFrameCount(art);
+    for (int f = 1; f <= frame && f < frameCount; f++) {
+        int fx;
+        int fy;
+        artGetFrameOffsets(art, f, obj->rotation, &fx, &fy);
+        sumX += fx;
+        sumY += fy;
+    }
+    artUnlock(cacheHandle);
+
+    *x = sumX;
+    *y = sumY;
+    return 0;
+}
+
 // 0x48AAF0
 int objectSetNextFrame(Object* obj, Rect* dirtyRect)
 {

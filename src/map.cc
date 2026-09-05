@@ -884,6 +884,18 @@ err:
     presenter()->scrollDisable();
     presenter()->cursorSet(MOUSE_CURSOR_WAIT_PLANET);
 
+    // Co-op: a door's sprite offsets follow its frame only when the frame moves by
+    // animation, which the headless server never does. Worlds saved by servers before
+    // 2026-09-05 carry doors that drifted a few pixels per open/close cycle (bugs/010);
+    // put every door back where its frame says before this map is served or saved.
+    // Shipped maps are already consistent, so this moves nothing for them.
+    if (serverLoopActive()) {
+        int moved = doorArtOffsetsNormalizeAll();
+        if (moved > 0) {
+            debugPrint("map: %d door sprite(s) put back on their frame offsets\n", moved);
+        }
+    }
+
     if (scriptsExecStartProc() == -1) {
         debugPrint("\n   Error: scr_load_all_scripts failed!");
     }

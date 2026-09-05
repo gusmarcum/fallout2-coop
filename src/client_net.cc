@@ -2447,8 +2447,21 @@ private:
         // the frame-index-render gotcha). A critter's frame stays owned by its own local
         // animation (the fid/pose path above), so it is deliberately not forced here.
         if (hasFrame && PID_TYPE(obj->pid) != OBJ_TYPE_CRITTER && obj->frame != frame) {
+            // A DOOR's frame carries its slide: the vault-style doors move by art
+            // offsets (61 px for vdoorf), and a bare objectSetFrame leaves the sprite
+            // where the OLD frame's offsets put it. The elevator ride closes the elevator
+            // doors exactly this way (elevatorCloseDoors -> OBJECT_DELTA_FRAME), and the
+            // closed door then hovered a door's height above its frame (bugs/010). Step
+            // the sprite as the animation would have. Other scenery keeps vanilla's bare
+            // frame set — op_anim(1010) sets frames without offsets in vanilla too.
+            Proto* proto = nullptr;
+            bool isDoor = PID_TYPE(obj->pid) == OBJ_TYPE_SCENERY
+                && protoGetProto(obj->pid, &proto) != -1
+                && proto->scenery.type == SCENERY_TYPE_DOOR;
             Rect rect;
-            if (objectSetFrame(obj, frame, &rect) == 0) {
+            int rc = isDoor ? objectSetFrameWithArtOffsets(obj, frame, &rect)
+                            : objectSetFrame(obj, frame, &rect);
+            if (rc == 0) {
                 tileWindowRefreshRect(&rect, obj->elevation);
             }
         }
@@ -5755,6 +5768,14 @@ void clientViewerElevatorRide(int level)
     char cmd[32];
     snprintf(cmd, sizeof(cmd), "elev %d", level);
     gViewerConn->sendLine(cmd);
+}
+
+void clientViewerElevatorCancel()
+{
+    if (gViewerConn == nullptr) {
+        return;
+    }
+    gViewerConn->sendLine("elevcancel");
 }
 
 void clientViewerSheetOpen()
