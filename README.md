@@ -12,7 +12,7 @@ Edition.
 
 ## What this project adds
 
-Everything below came out of real two-player sessions, was traced to its cause in the engine,
+Everything below came out of real two-player sessions fixing AI mistakes from the original project, issues were manually traced to its cause in the engine,
 fixed at the cause, and verified against a 41-scenario regression suite before it shipped.
 The commit history carries the full reasoning for each one.
 
