@@ -46,8 +46,11 @@ Native co-op of the original Fallout 2 — the real game, shared, not a rewrite:
   screen) the first time a name connects, then that name always returns as the same character.
 - **Per-player characters** — each player has their own body, inventory, SPECIAL, skills, tags
   and perks, persisted per-actor in the save (not one shared sheet).
-- **Save / load & autosave** — operator can `save`/`load` slots live; timed autosaves to slot 11.
-  Co-op saves carry every player's own body, inventory and sheet.
+- **Save / load & autosave** — operator can `save`/`load` slots live; timed autosaves rotate
+  through slots 11-15. Co-op saves carry every player's own body, inventory and sheet.
+- **Quicksave / quickload** — vanilla's `F6` / `F7`, server-side: `F6` writes slot 16, `F7`
+  reloads it in place for everyone (works in combat and while dead, so a failed steal or a lost
+  fight can be retried the way single-player allows).
 - **Real-time inventory sync** — pick up, drop, wield, use, loot — mirrored to all viewers.
 - **Synced combat** — beat-spanning turn-based combat with all players, including items and
   skills used mid-fight.
@@ -189,9 +192,10 @@ dispatched into the sim as a debug poke (movement/combat/inventory). Full vocabu
 
 ## Saving, loading & listing games
 
-There are **11 slots**: `1-10` are manual, `11` is the autosave slot. A co-op save carries the
-whole shared world *plus* every connected player's own body, inventory and character sheet, so a
-restored world returns each account to exactly where it left off.
+There are **16 slots**: `1-10` are manual, `11-15` are the autosave rotation, `16` is the
+quicksave (`F6` / `F7` in game). A co-op save carries the whole shared world *plus* every
+connected player's own body, inventory and character sheet, so a restored world returns each
+account to exactly where it left off.
 
 **List the slots** — `saves` reports every slot, whether it's used, and its label:
 
@@ -205,10 +209,16 @@ printf 'saves\n' | nc -q1 127.0.0.1 9201
 printf 'save 8 before-temple\n' | nc -q1 127.0.0.1 9201
 ```
 
-Autosaves are automatic to slot 11 on the `F2_AUTOSAVE_SECS` interval (300s by default; set
-`F2_AUTOSAVE_SECS=0` to disable). Each autosave broadcasts "Game auto-saved." to viewers.
+Autosaves rotate through slots 11-15 on the `F2_AUTOSAVE_SECS` interval (300s by default; set
+`F2_AUTOSAVE_SECS=0` to disable) and after every map change. Each autosave broadcasts which slot
+it landed in.
 
-**Load a slot** — two ways:
+**Quicksave / quickload** — any connected player presses `F6` to write slot 16 and `F7` to
+reload it. The reload replaces the running world in place: every viewer rebuilds from it the
+way it does after a map change, and the game announces who did it. `F7` works in combat (it
+ends the fight, as in single-player) and while dead; both keys work from the main screen only.
+
+**Load a slot** — three ways:
 
 1. **At startup**, restore instead of booting a fresh map (leave `F2_SERVER_MAP` unset):
 
@@ -220,15 +230,20 @@ Autosaves are automatic to slot 11 on the `F2_AUTOSAVE_SECS` interval (300s by d
        ../build/f2_server                       # F2_SERVER_LOAD=11 restores the autosave
    ```
 
-2. **At runtime, from the lobby.** `load`/`new` only work when the server has no world yet —
+2. **At runtime, from the lobby.** `new` only works when the server has no world yet —
    i.e. it was started with neither `F2_SERVER_MAP` nor `F2_SERVER_LOAD` (lobby mode needs a
    `F2_SERVER_CMD` port). From the console:
 
    ```sh
    printf 'saves\n'   | nc -q1 127.0.0.1 9201     # see what's available
-   printf 'load 8\n'  | nc -q1 127.0.0.1 9201     # restore slot 8  (11 = autosave)
+   printf 'load 8\n'  | nc -q1 127.0.0.1 9201     # restore slot 8  (11-15 = autosaves)
    printf 'new artemple.map\n' | nc -q1 127.0.0.1 9201   # or boot a fresh world
    ```
+
+3. **At runtime, while a world is running.** `load <n>` reloads that slot in place for every
+   connected player — the same path `F7` takes, by slot number. Players bound by account name
+   return as their saved selves; a name the loaded save does not know is disconnected and can
+   rejoin through the normal login.
 
 > To restore correctly, relaunch **without** any `CREATE*` / `F2_PLAYER_CREATE` vars — those are
 > for *creating* new characters. On a load, existing accounts return as their saved selves; a new

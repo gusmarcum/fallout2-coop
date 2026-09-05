@@ -19,7 +19,12 @@ namespace fallout {
 // only checkpoint you had with a mid-encounter transient map and there was nothing
 // older to fall back to. The window is the fix; growing this constant is how you
 // widen it (nothing derives a loop bound from the array, it is indexed by slot).
-constexpr int kSaveSlotSpace = 15;
+//
+// The LAST index (15, directory SLOT16) is the QUICKSAVE slot (server_admin.cc
+// kQuickSlot): F6 writes it, F7 reloads it. It sits past the autosave window, so
+// the rotation never touches it, and past the manual ten, so a numbered `save`
+// cannot land on it by accident.
+constexpr int kSaveSlotSpace = 16;
 
 typedef struct LoadSaveSlotData {
     char signature[24];

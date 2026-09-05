@@ -44,6 +44,17 @@ int serverBootNewWorld(const char* mapName);
 int serverBootLoadSlot(int slot);
 int serverBootFinish(bool spawnExtras);
 
+// Replace the RUNNING world with SAVEGAME\SLOTnn, in process (F7 quickload, or
+// an admin `load` while a world is up). The live counterpart of
+// serverBootLoadSlot: the same loader, but the old extra bodies are destroyed and
+// the registry cleared first (the save's appendix re-registers everything by
+// slot), and no subsystem or dude init runs. The caller owns everything that keys
+// on the old world — session bindings, latches, the combat session
+// (server_control.cc / combat.cc) — and the tick tail re-baselines every viewer
+// off the new map generation, exactly as after a transition. Returns 0, or -1
+// after the loader has ALREADY reset the world (nothing is left to serve).
+int serverReloadSlot(int slot);
+
 // Spawn ONE extra player actor beside the host into `slot` and register it;
 // returns the slot, or -1. THE single spawn path, shared by boot and by
 // spawn-at-login so a dynamically joined player is indistinguishable from a

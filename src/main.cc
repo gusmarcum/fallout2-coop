@@ -1530,6 +1530,14 @@ static int mainClientViewer(const char* connectSpec)
             // kPreferences is in kViewerModalMask, so the wire continues pumping
             // inside this blocking vanilla dialog and combat/map changes can close it.
             doPreferences(false);
+        } else if (keyCode == KEY_F6 || keyCode == KEY_F7) {
+            // Vanilla's quicksave / quickload keys (game_ui.cc), as wire verbs: the
+            // server owns the world, so it writes the quick slot and reloads it for
+            // everyone; the answer comes back as a system line, or a refusal to this
+            // player. Same reach as vanilla: the main loop only, in and out of
+            // combat, never from inside a screen — close the screen, then press.
+            soundPlayFile("ib1p1xx1");
+            conn.sendLine(keyCode == KEY_F6 ? "quicksave" : "quickload");
         }
 
         if (!clientDialogActive()) {

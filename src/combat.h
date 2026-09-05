@@ -76,6 +76,13 @@ CombatPumpOutcome combatServerPumpIntents(int actorSlot = 0);
 // a time. combatSessionActive() is false on every gate-off/client/golden path.
 bool combatSessionActive();
 
+// A save is about to be LOADED over a running fight (F7 quickload, or an admin
+// `load` while the world runs). Ends the fight the way vanilla's F7 does —
+// _combat_over_from_load, then the teardown's load branch — and leaves the
+// session machine inactive, so the loader never runs under a live turn.
+// Main-phase only (server_admin.cc drives it). No-op without a session.
+void combatSessionEndForLoad();
+
 // Dedicated-server lifecycle hook: invoked exactly when a fresh combat begins,
 // before the combat roster/turn machine runs. The server control plane uses it
 // to cancel free-roam walk-then-act latches at the actual phase boundary.
