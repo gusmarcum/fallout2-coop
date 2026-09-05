@@ -22,7 +22,6 @@
 #include "item.h"
 #include "map.h"
 #include "object.h"
-#include "server_players.h"
 #include "party_member.h"
 #include "perk.h"
 #include "pipboy.h"
@@ -550,48 +549,6 @@ void commandDispatch(const Command& command)
                 debugPrint("headless-probe: scenery canuse=%d netId=%d pid=0x%X tile=%d sid=%d name=%s\n",
                     _obj_action_can_use(o) ? 1 : 0, o->netId, o->pid, o->tile, o->sid, objectGetName(o));
             }
-        }
-    } else if (strcmp(command.name, "spawntalk") == 0) {
-        // spawntalk:<critter pid number>:<scripts.lst line> — create the critter on a
-        // free tile beside the dude, attach the script the way the console spawn does
-        // (create_object_sid recipe), and request dialog with it, so a headless run
-        // with F2_DIALOG_TRACE=1 shows whether that script's talk proc opens a node.
-        int pid = 0x01000000 | (command.arg & 0xFFFFFF);
-        int scriptNumber = command.arg2 > 0 ? command.arg2 : 0;
-        Object* spawned = nullptr;
-        int tile = playerActorFindFreeTileNear(gDude->tile, gDude->elevation);
-        if (tile == -1) {
-            tile = gDude->tile;
-        }
-        if (objectCreateWithPid(&spawned, pid) == 0 && spawned != nullptr) {
-            Rect rect;
-            if (objectSetLocation(spawned, tile, gDude->elevation, &rect) == -1) {
-                objectDestroy(spawned, nullptr);
-                spawned = nullptr;
-            }
-        }
-        if (spawned == nullptr) {
-            debugPrint("headless-probe: spawntalk pid=%d could not be created\n", command.arg);
-        } else {
-            bool attached = scriptNumber <= 0;
-            if (scriptNumber > 0) {
-                if (spawned->sid != -1) {
-                    scriptRemove(spawned->sid);
-                    spawned->sid = -1;
-                }
-                Script* script = nullptr;
-                if (scriptAdd(&(spawned->sid), SCRIPT_TYPE_CRITTER) != -1 && scriptGetScript(spawned->sid, &script) != -1) {
-                    script->index = scriptNumber - 1;
-                    spawned->id = scriptsNewObjectId();
-                    script->ownerId = spawned->id;
-                    script->owner = spawned;
-                    _scr_find_str_run_info(scriptNumber - 1, &(script->field_50), spawned->sid);
-                    attached = true;
-                }
-            }
-            debugPrint("headless-probe: spawntalk pid=%d id=%d sid=%d script=%d attached=%d tile=%d -> requesting dialog\n",
-                command.arg, spawned->id, spawned->sid, scriptNumber, attached ? 1 : 0, spawned->tile);
-            scriptsRequestDialog(spawned);
         }
     } else if (strcmp(command.name, "partyadd") == 0) {
         // Re-attach a critter on the current map to the party by critter pid number
