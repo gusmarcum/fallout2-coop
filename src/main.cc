@@ -1718,10 +1718,18 @@ static int mainClientViewer(const char* connectSpec)
             // misclicks emptied a turn. combatBusy is exactly "the presentation has
             // not handed the turn over yet" (!myTurn || pres queue busy || an action
             // in flight || our own glide), the same latch SPACE and RETURN wait on.
-            if (conn.myTurn() && !combatBusy) {
+            // Every press is logged with the gate that decided it: "I does nothing"
+            // has been reported more than once and the screen-side diagnostics
+            // (inventory_ui.cc) only speak once the screen is asked to open.
+            bool sendOpen = conn.myTurn() && !combatBusy;
+            debugPrint("inventory key: in combat myTurn=%d busy=%d -> %s\n",
+                conn.myTurn() ? 1 : 0, combatBusy ? 1 : 0,
+                sendOpen ? "invopen sent" : "held (not our turn yet, or the presentation is busy)");
+            if (sendOpen) {
                 conn.sendLine("invopen");
             }
         } else if ((keyCode == KEY_LOWERCASE_I || keyCode == KEY_UPPERCASE_I) && !conn.inCombat()) {
+            debugPrint("inventory key: free roam -> opening the screen\n");
             // Open the vanilla inventory screen (player-UI Slice 3). Equip/drop are wired
             // (Slice 3b): each drop-resolution leaf fires a claim-gated wire verb and skips
             // the local mutation, so the server-authoritative inventory stays the source of

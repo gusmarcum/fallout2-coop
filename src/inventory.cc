@@ -108,15 +108,29 @@ void _adjust_ac(Object* critter, Object* oldArmor, Object* newArmor)
         damageThresholdStat += 1;
     }
 
-    if (objectIsPartyMember(critter)) {
+    // The armor's own perk (Powered Armor: +3 Strength and radiation resistance;
+    // the advanced suits likewise). Vanilla applies it to party members only, and
+    // the dude is party member zero — but a second PLAYER's body is not in the
+    // party list, so an extra got the armor's class and resistances above and never
+    // its perk (owner-reported: a T-51b that did not raise a friend's Strength).
+    // playerActorIs is `critter == gDude` with an empty registry, so single-player
+    // and the goldens evaluate exactly the condition they always did.
+    if (objectIsPartyMember(critter) || playerActorIs(critter)) {
+        int oldPerk = -1;
+        int newPerk = -1;
         if (oldArmor != nullptr) {
-            int perk = armorGetPerk(oldArmor);
-            perkRemoveEffect(critter, perk);
+            oldPerk = armorGetPerk(oldArmor);
+            perkRemoveEffect(critter, oldPerk);
         }
 
         if (newArmor != nullptr) {
-            int perk = armorGetPerk(newArmor);
-            perkAddEffect(critter, perk);
+            newPerk = armorGetPerk(newArmor);
+            perkAddEffect(critter, newPerk);
+        }
+
+        if (serverDedicatedActive() && playerActorIs(critter)) {
+            fprintf(stderr, "f2_server: armor perk %d -> %d for slot %d (Strength now %d)\n",
+                oldPerk, newPerk, playerActorSlotOf(critter), critterGetStat(critter, STAT_STRENGTH));
         }
     }
 }
