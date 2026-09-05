@@ -159,6 +159,11 @@ void clientCombatAnimMarkActive(Object* obj, unsigned int capMs, bool ownsMoveFr
 void clientCombatAnimArmMoveHold(Object* obj);
 bool clientCombatAnimDeferMove(Object* obj, int tile, int elev);
 bool clientCombatAnimDeferAp(Object* obj, int ap);
+// Drop every AP value still parked behind `obj`'s replaying walk (DeferAp above) without
+// touching the held positions. A TURN START is the authoritative AP baseline; a value the
+// previous turn parked would otherwise land after it and drag the bar down to last turn's
+// leftover while the server holds the full budget. Returns how many were dropped.
+int clientCombatAnimForgetAp(Object* obj);
 // The front (currently-executing) hold frame's authoritative END tile, or -1 if the mover
 // has no held position. The MOVE replay walks to THIS (where the server's walk actually
 // stopped) instead of the recorded INTENT dest, which can be the target's own occupied tile

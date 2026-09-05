@@ -3236,6 +3236,19 @@ private:
             // TURN_START's AP is the authority. OBJECT_DELTA normally converges the
             // object first, but a lost/deferred delta must not leave the input checks or
             // bar reading stale AP until the player spends one point and triggers redraw.
+            //
+            // ►► AND THE SAME AUTHORITY MUST WIN OVER A DELTA STILL PARKED BEHIND OUR OWN
+            // WALK. clientCombatAnimDeferAp stashes an AP delta in the walk's hold frame,
+            // and resolveHeld writes it to the object when that frame is reaped — which can
+            // be AFTER this turn start when our last-turn walk is still replaying while the
+            // round turns over. The stale leftover (say 4) then overwrites the fresh budget
+            // (11) on the mirror, tickApBar sees shown > authoritative and sinks the bar to
+            // 4 while the server holds 11 (owner-reported: "4 of 11 on my turn, but I still
+            // had 11"). Forget every parked AP for us here; the positions stay held.
+            int staleAp = clientCombatAnimForgetAp(gDude);
+            if (staleAp > 0) {
+                debugPrint("client_net: turn start dropped %d stale AP value(s) parked behind our walk\n", staleAp);
+            }
             gDude->data.critter.combat.ap = ap;
             // A fresh turn resets the AP baseline; any half-ticked move deferral from
             // the previous turn is void (per-hex AP).

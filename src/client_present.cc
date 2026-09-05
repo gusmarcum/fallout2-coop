@@ -1468,6 +1468,25 @@ bool clientCombatAnimDeferAp(Object* obj, int ap)
     return true;
 }
 
+int clientCombatAnimForgetAp(Object* obj)
+{
+    if (!gEnabled || obj == nullptr) {
+        return 0;
+    }
+    PresEntry* e = entryFind(obj);
+    if (e == nullptr) {
+        return 0;
+    }
+    int dropped = 0;
+    for (MoveHoldFrame& f : e->holdFrames) {
+        if (f.hasAp) {
+            f.hasAp = false;
+            dropped++;
+        }
+    }
+    return dropped;
+}
+
 bool clientCombatAnimDeferDelta(Object* obj, bool hasFid, int fid, bool hasFlags, unsigned int flags,
     bool hasRot, int rot)
 {
