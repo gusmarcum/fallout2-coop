@@ -6,6 +6,8 @@
 
 namespace fallout {
 
+struct Object;
+
 // ADMIN verbs for the dedicated server's control channel (F2_SERVER_CMD) —
 // save, load, slot listing, world selection. Distinct from the debug verbs in
 // command.cc for two concrete reasons, not as a matter of taste:
@@ -72,6 +74,14 @@ const char* serverAdminRequestQuick(bool load, int requesterSlot);
 // world is rebound and reattached in the same beat and the tick tail's
 // map-change baseline carries the finished result. No-op when nothing is latched.
 void serverAdminDrainWorldRequests();
+
+// The player-death policy body (server_players.h playerActorSetDiedHook), installed
+// by server_main. When the last living player goes down it LATCHES a party wipe;
+// serverAdminDrainWorldRequests then tells every viewer to play the death screen
+// and reloads the most recently written save (any slot, by file time). With no save
+// to load, the party is stood back up where it fell instead. May run mid-beat
+// inside combat resolution, so it only latches.
+void serverAdminNotePlayerDied(Object* actor);
 
 // Periodic unattended save into the dedicated autosave slot (SLOT11).
 // F2_AUTOSAVE_SECS sets the cadence (default 300; 0 disables); an extra save

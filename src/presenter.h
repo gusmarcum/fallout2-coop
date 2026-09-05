@@ -629,6 +629,52 @@ public:
     // The session ended (closed, caught, or a bail). Every viewer closes.
     virtual void stealEnd() {}
 
+    // -- PLAYER-TO-PLAYER TRADE (co-op, server_trade.cc) ----------------------
+    // Two players swapping goods, server-owned like a merchant trade but NOT
+    // parked: the world keeps beating, only the two parties sit in a modal. Both
+    // are real player actors (netId-addressable), so only the two OFFER tables are
+    // snapshotted the barter way; the packs ride along too because each party's
+    // screen renders from a snapshot for the same reason a merchant trade's does
+    // (the trade window draws lists, not live mirrors). A viewer that is neither
+    // party ignores every one of these.
+    struct TradeView {
+        int aNetId;
+        int bNetId;
+        const BarterStack* invA;
+        int invACount;
+        const BarterStack* invB;
+        int invBCount;
+        const BarterStack* tableA;
+        int tableACount;
+        const BarterStack* tableB;
+        int tableBCount;
+        int valueA; // raw worth of what A put up (objectGetCost), no skill involved
+        int valueB;
+        bool lockedA; // A pressed Offer: A's table is frozen
+        bool lockedB;
+        bool confirming; // both locked; the accept prompts are out
+    };
+    virtual void tradeBegin(int aNetId, int bNetId) {}
+    virtual void tradeState(const TradeView& view) {}
+    // reason: 0 completed, 1 cancelled, 2 declined at the confirm, 3 bailed (combat,
+    // a leaver, a map change, a reload). `text` is the line the parties see.
+    virtual void tradeEnd(int aNetId, int bNetId, int reason, const char* text) {}
+
+    // -- ADDRESSED YES/NO PROMPT ----------------------------------------------
+    // Ask ONE player a question in vanilla's yes/no box (the random-encounter
+    // widget). Unlike encounterPrompt the server does not park on the answer: it
+    // arrives as the `answer <promptId> <0|1>` verb whenever the player decides,
+    // and promptClose dismisses a box whose question has become moot (the asker
+    // walked away, the other party answered no, the trade ended).
+    virtual void promptAsk(int actorNetId, int promptId, const char* title, const char* body) {}
+    virtual void promptClose(int actorNetId, int promptId) {}
+
+    // -- PARTY WIPE -------------------------------------------------------------
+    // Every player is dead. Each viewer plays vanilla's death screen; the server
+    // reloads the most recent save right behind this event, so the world that
+    // follows the screen is the restored one.
+    virtual void partyWipe() {}
+
     // Who owns which player actor, re-announced after every baseline (netIds are
     // re-minted on every rebaseline, so a roster row is only valid for the
     // generation it arrived in — persistent identity is the SLOT, never the

@@ -3776,6 +3776,70 @@ void combatSessionEndForLoad()
     combatSessionAdvance(); // combatTeardown's load branch, exit kCombat, inactive
 }
 
+void combatRosterRejoin(Object* critter)
+{
+    if (critter == nullptr || !isInCombat() || _combat_list == nullptr) {
+        return;
+    }
+
+    int index = -1;
+    for (int i = 0; i < _list_total; i++) {
+        if (_combat_list[i] == critter) {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0) {
+        return; // not on this fight's roster (a body that arrived after the fight began)
+    }
+    if (index < _list_com) {
+        // Killed and revived inside one round: the sweep has not run yet, so the
+        // entry is still a combatant and its next turn comes as scheduled.
+        fprintf(stderr, "SERVER: %s revived while still on the roster (slot %d of %d)\n",
+            critterGetName(critter), index, _list_com);
+        return;
+    }
+
+    // Regions (see _combat_sequence): combatants [0, _list_com), non-combatants
+    // [_list_com, _list_com + _list_noncom), then the dead and the disengaged.
+    int firstDead = _list_com + _list_noncom;
+    if (index >= firstDead) {
+        // Dead region: bring the entry to that region's front, then swap it with the
+        // first non-combatant slot. The displaced non-combatant lands on the old
+        // region front, which the increment below turns into the LAST non-combatant
+        // slot — every entry stays inside its own region.
+        Object* t = _combat_list[firstDead];
+        _combat_list[firstDead] = _combat_list[index];
+        _combat_list[index] = t;
+        index = firstDead;
+
+        t = _combat_list[_list_com];
+        _combat_list[_list_com] = _combat_list[index];
+        _combat_list[index] = t;
+        _list_com += 1;
+    } else {
+        // Non-combatant region: exactly _combat_add_noncoms' move.
+        Object* t = _combat_list[_list_com];
+        _combat_list[_list_com] = _combat_list[index];
+        _combat_list[index] = t;
+        _list_com += 1;
+        _list_noncom -= 1;
+    }
+
+    // A joiner's first turn comes at the END of the current round (the session
+    // re-reads _list_com every beat), with a joiner's action points — the same seed
+    // _combat_add_noncoms gives a critter that decides to fight mid-round. From the
+    // next round on _combat_set_move_all refreshes it like everyone else's.
+    critter->data.critter.combat.maneuver = CRITTER_MANEUVER_NONE;
+    int actionPoints = critterGetStat(critter, STAT_MAXIMUM_ACTION_POINTS);
+    if (_gcsd != nullptr) {
+        actionPoints += _gcsd->actionPointsBonus;
+    }
+    critter->data.critter.combat.ap = actionPoints;
+    fprintf(stderr, "SERVER: %s rejoins the fight (roster slot %d, combatants %d, non-combatants %d)\n",
+        critterGetName(critter), _list_com - 1, _list_com, _list_noncom);
+}
+
 void combatSetEnterHook(void (*hook)())
 {
     gCombatEnterHook = hook;

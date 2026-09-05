@@ -55,6 +55,8 @@
 #include "server_boot.h" // serverSpawnPlayerActor / playerActorSeedSheetFromHost
 #include "server_loop.h" // serverEmitPlayerRoster / serverSetSlotSessionQuery
 #include "server_players.h" // the player-actor registry + ServerActorScope
+#include "server_trade.h" // player-to-player trade: TALK on a player proposes one
+#include "combat_ap.h" // kCombatApChargeEnabled — the in-combat revive costs AP
 #include "sheet_intent.h" // sheetEdit* — the character-sheet edit intents (§9)
 #include "perk.h" // PERK_CHOICE_PENDING_* — the Tag!/Mutate! follow-up
 #include "skill.h" // SKILL_* (skilldex allow-list) + skillGetValue for the edit trace
@@ -327,7 +329,15 @@ enum {
                         //  intent queue so the put-away/take-out runs on the
                         //  actor's own turn; serverControlRunCombatInteract handles
                         //  it before target resolution (there is no target).
+    kInteractRevive,    // co-op: stand a dead PLAYER back up at 1 HP — approach <= 1.
+                        //  Free out of combat; in combat it is queued for the
+                        //  reviver's own turn and costs kReviveApCost.
 };
+
+// What a teammate pays, on their own turn, to bring a dead player back mid-fight
+// (owner spec 2026-09-05). Out of combat the same act is free. The healing-item
+// revive charges the same, so the price of a revive never depends on the route.
+static constexpr int kReviveApCost = 4;
 
 struct PendingInteraction {
     int verb;        // kInteract*
@@ -457,6 +467,30 @@ static bool interactionSkillAllowed(int skill)
 // Total units of `pid` on `actor`'s TOP-LEVEL inventory. Summed by pid, not read
 // off one slot, precisely because a pickup can MERGE into an existing stack and
 // destroy the incoming object — the slot changes identity, the total does not.
+// The in-combat price of a revive (kReviveApCost), taken from the reviver on their
+// own turn. Out of combat — or with the interaction AP policy switched off
+// (combat_ap.h) — a revive is free. A refusal streams vanilla's "not enough action
+// points" (proto msg 700, the line every other priced interaction uses).
+static bool interactionChargeReviveAp(Object* actor)
+{
+    if (!isInCombat() || !kCombatApChargeEnabled) {
+        return true;
+    }
+    if (actor->data.critter.combat.ap < kReviveApCost) {
+        MessageListItem messageListItem;
+        messageListItem.num = 700;
+        if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
+            presenter()->consoleMessageFor(actor->netId, messageListItem.text);
+        }
+        fprintf(stderr, "f2_server: revive refused (ap=%d < %d) slot=%d\n",
+            actor->data.critter.combat.ap, kReviveApCost, playerActorSlotOf(actor));
+        return false;
+    }
+    actor->data.critter.combat.ap -= kReviveApCost;
+    presenter()->hudActionPoints(actor->data.critter.combat.ap, _combat_free_move);
+    return true;
+}
+
 static int interactionCarriedQty(Object* actor, int pid)
 {
     if (actor == nullptr) {
@@ -539,6 +573,17 @@ static void interactionFire(int verb, Object* actor, Object* target, int arg)
         // deferred outcome, so the actor is the identity that survived the walk (the
         // session could have reconnected under a new id in between), and it is also
         // the identity the driver check ultimately compares.
+        //
+        // ►► TALK ON ANOTHER PLAYER PROPOSES A TRADE. There is no conversation to
+        // have with a teammate (their DUDE script has no dialog), so the gesture that
+        // used to be refused with "That's another player." now opens the one thing
+        // two players have to say to each other in this engine: a trade. The walk
+        // up to them is the same approach every talk makes.
+        if (playerActorIs(target)) {
+            fprintf(stderr, "f2_server: interact FIRE talk -> trade proposal net=%d\n", target->netId);
+            serverTradePropose(actor, target);
+            break;
+        }
         serverControlSetPendingDialogRequester(playerActorSlotOf(actor));
         scriptsRequestDialog(target);
         break;
@@ -598,6 +643,11 @@ static void interactionFire(int verb, Object* actor, Object* target, int arg)
             // stand-up fid + un-flatten ride OBJECT_DELTA_FID / OBJECT_DELTA_FLAGS.
             if (serverDedicatedActive() && playerActorIs(target) && critterIsDead(target)
                 && itemIsHealing(item->pid)) {
+                // A revive costs the same on every route (kReviveApCost on your own
+                // turn); before this the item path was the one free act in a fight.
+                if (!interactionChargeReviveAp(actor)) {
+                    break;
+                }
                 if (critterRevive(target)) {
                     // Consume exactly one authoritative unit. itemRemove peels one object
                     // off a stack but deliberately does not destroy that detached object;
@@ -619,6 +669,32 @@ static void interactionFire(int verb, Object* actor, Object* target, int arg)
             // (actions.cc:2714) and is a plain pass-through out of combat, so
             // the out-of-combat latch that also lands here is unaffected.
             actionUseItemOnObjectWithApCost(actor, target, item);
+        }
+        break;
+    }
+    case kInteractRevive: {
+        // ►► THE TEAMMATE REVIVE (owner spec 2026-09-05). A dead player stands back
+        // up at 1 HP where they fell — exactly what the old R key did for oneself,
+        // now something only a LIVING teammate can do for you. Free out of combat;
+        // on your own turn in a fight it costs kReviveApCost, checked after the
+        // approach walk exactly like loot's 3 AP (the walk's AP is spent either
+        // way, as in vanilla). critterRevive re-admits the body to the combat
+        // roster, so a mid-fight revive gets its turns back.
+        if (!playerActorIs(target) || !critterIsDead(target)) {
+            serverControlRefuseActor(actor, "%s does not need reviving.", objectGetName(target));
+            break;
+        }
+        if (!interactionChargeReviveAp(actor)) {
+            break;
+        }
+        if (critterRevive(target)) {
+            char who[64];
+            snprintf(who, sizeof(who), "%s", critterGetName(actor));
+            char line[160];
+            snprintf(line, sizeof(line), "%s revived %s.", who, critterGetName(target));
+            presenter()->consoleMessageStyled(0, kMsgChannelSystem, line);
+            fprintf(stderr, "f2_server: interact FIRE revive net=%d by slot=%d ap=%d\n",
+                target->netId, playerActorSlotOf(actor), actor->data.critter.combat.ap);
         }
         break;
     }
@@ -666,6 +742,8 @@ static int interactionGestureAnim(int verb, Object* target)
         return (type == OBJ_TYPE_CRITTER && _critter_is_prone(target))
             ? ANIM_MAGIC_HANDS_GROUND
             : ANIM_MAGIC_HANDS_MIDDLE;
+    case kInteractRevive:
+        return ANIM_MAGIC_HANDS_GROUND; // the patient is on the floor
     default:
         return -1; // talk (no magic-hands); look/push/rot never reach here
     }
@@ -1391,6 +1469,11 @@ void serverControlBeginDrain(const std::function<bool(int)>& liveSession)
         }
     }
 
+    // The player trade's clock and bail conditions. Here because this runs every
+    // main-phase beat AND inside every modal pump, so a conversation or a cutscene
+    // that starts under an open trade ends it promptly (server_trade.h).
+    serverTradeTick();
+
     // Sweep inventory sessions that are no longer legitimate, and tell the viewer
     // to close the screen when one dies under it. Done here, once a beat, rather
     // than from a turn-end or combat-exit hook: a turn ends on several paths (the
@@ -1860,6 +1943,10 @@ static std::vector<ReloadBinding> gReloadBindings;
 
 void serverControlPrepareForWorldReload()
 {
+    // Goods on a trade table would vanish with the old world; sweep them home and
+    // close both screens before anything is replaced.
+    serverTradeCancel("the game was reloaded");
+
     gReloadBindings.clear();
     for (int slot = 0; slot < playerActorCount() && slot < kMaxPlayerActors; slot++) {
         int sessionId = gBindings[slot];
@@ -2013,6 +2100,20 @@ static bool serverControlIsStealVerb(const char* verb)
     return strcmp(verb, "stake") == 0
         || strcmp(verb, "splant") == 0
         || strcmp(verb, "sdone") == 0;
+}
+
+// The barter verbs double as the player-trade verbs (server_trade.cc), and the
+// `answer` verb closes a yes/no box. None is an action: no AP, no animation, so
+// they are exempt from the busy gate like the steal verbs.
+static bool serverControlIsTradeVerb(const char* verb)
+{
+    return strcmp(verb, "boffer") == 0
+        || strcmp(verb, "btake") == 0
+        || strcmp(verb, "bunoffer") == 0
+        || strcmp(verb, "bcommit") == 0
+        || strcmp(verb, "bdone") == 0
+        || strcmp(verb, "bcancel") == 0
+        || strcmp(verb, "answer") == 0;
 }
 
 void serverControlLine(int sessionId, const char* line)
@@ -2463,17 +2564,28 @@ void serverControlLine(int sessionId, const char* line)
     }
 
     if (strcmp(verb, "selfrevive") == 0) {
-        // Self-revive. Always the calling session's OWN actor, never a slot
-        // argument, so it cannot land on anyone else; same body as the
-        // operator's `revive` verb (server_admin.cc). Up at 1 HP where you fell.
-        if (!critterIsDead(actor)) {
-            serverControlRefuse(sessionId, "You are not dead.");
-            return;
+        // ►► NO MORE SELF-REVIVE (owner spec 2026-09-05). Death has to cost
+        // something: a downed player waits for a LIVING teammate to revive them
+        // (the `revive` verb, a healing item, First Aid or Doctor), and when the
+        // whole party is down the game reloads the last save (server_admin.cc).
+        // The verb stays recognised so an older client gets an answer instead
+        // of the generic "You are dead.".
+        serverControlRefuse(sessionId, critterIsDead(actor)
+                ? "You cannot get up on your own. A teammate has to revive you."
+                : "You are not dead.");
+        return;
+    }
+
+    if (strcmp(verb, "answer") == 0) {
+        // `answer <promptId> <0|1>` — the player's choice in an addressed yes/no
+        // box (presenter.h promptAsk). Only the trade asks questions today; a
+        // stale or foreign id is simply dropped, which is also what a second
+        // answer to the same box gets.
+        bool yes = n >= 3 && arg2 != 0;
+        if (!serverTradeAnswer(actor, arg, yes)) {
+            fprintf(stderr, "f2_server: control answer id=%d dropped (no such prompt for session %d)\n",
+                arg, sessionId);
         }
-        critterRevive(actor);
-        char line[128];
-        snprintf(line, sizeof(line), "%s got back up.", critterGetName(actor));
-        presenter()->consoleMessageStyled(0, kMsgChannelSystem, line);
         return;
     }
 
@@ -2493,6 +2605,7 @@ void serverControlLine(int sessionId, const char* line)
             || strcmp(verb, "invclose") == 0
             || serverControlIsSheetVerb(verb) // costs no AP and plays no animation
             || serverControlIsStealVerb(verb) // inside a parked session the server opened
+            || serverControlIsTradeVerb(verb) // a trade screen or a yes/no box, not an action
             || strcmp(verb, "claim") == 0
             || strcmp(verb, "login") == 0
             || strcmp(verb, "quicksave") == 0 // F6/F7 latch a request; neither is an action
@@ -2718,6 +2831,15 @@ void serverControlLine(int sessionId, const char* line)
     if (strcmp(verb, "boffer") == 0 || strcmp(verb, "btake") == 0
         || strcmp(verb, "bunoffer") == 0 || strcmp(verb, "bcommit") == 0
         || strcmp(verb, "bdone") == 0 || strcmp(verb, "bcancel") == 0) {
+        // ►► A PLAYER-TO-PLAYER TRADE SPEAKS THE SAME VERBS (server_trade.cc), which
+        // is what lets the viewer reuse vanilla's trade screen as-is. When one is
+        // open and this actor is a party to it, the trade takes the verb; the
+        // merchant barter below never sees it. A merchant barter and a player
+        // trade cannot coexist: the barter parks the world, and the trade tick
+        // cancels itself the moment a conversation claims the server.
+        if (serverTradeVerb(actor, sessionId, verb, n >= 2 ? arg : -1, n >= 3 ? arg2 : 0)) {
+            return;
+        }
         if (!serverControlMayDriveDialog(sessionId)) {
             fprintf(stderr, "f2_server: control %s dropped (not the barter driver)\n", verb);
             serverControlRefuse(sessionId, "This isn't your trade.");
@@ -2882,6 +3004,7 @@ void serverControlLine(int sessionId, const char* line)
         || strcmp(verb, "skill") == 0
         || strcmp(verb, "talk") == 0
         || strcmp(verb, "loot") == 0
+        || strcmp(verb, "revive") == 0
         || strcmp(verb, "useitemon") == 0;
     if (isInteractVerb) {
         // LOOK (examine) is free in combat — no AP, no turn, no barrier; vanilla
@@ -3076,7 +3199,35 @@ void serverControlLine(int sessionId, const char* line)
                 serverControlRefuse(sessionId, "You can't use that skill here.");
                 return;
             }
+            // ►► NO STEALING FROM ANOTHER PLAYER (owner spec 2026-09-05). Refused
+            // here, at the trust boundary, before any session opens: a steal session
+            // parks the world for everyone and strips the victim's gear on screen for
+            // its whole life (bugs/013), so "always caught" would still put every
+            // player through that for a theft that can never succeed. NPCs are
+            // untouched — the roll, the perk and the sneaking bonus are as they were.
+            if (skill == SKILL_STEAL && playerActorIs(target)) {
+                fprintf(stderr, "f2_server: control skill STEAL on player netId=%d refused\n", netId);
+                serverControlRefuse(sessionId, "You cannot steal from another player. Talk to them to trade.");
+                return;
+            }
             serverControlArmInteraction(sessionId, actor, kInteractSkill, target, skill);
+            return;
+        }
+
+        // revive <net>: a dead PLAYER body. Walk-then-act (approach <= 1); in combat
+        // queued for the reviver's turn like every other acting verb, where the fire
+        // site charges kReviveApCost. Refused for anything that is not a dead player.
+        if (strcmp(verb, "revive") == 0) {
+            if (PID_TYPE(target->pid) != OBJ_TYPE_CRITTER || !playerActorIs(target)) {
+                fprintf(stderr, "f2_server: control revive target netId=%d not a player\n", netId);
+                serverControlRefuse(sessionId, "Only a player can be revived.");
+                return;
+            }
+            if (!critterIsDead(target)) {
+                serverControlRefuse(sessionId, "%s is not dead.", objectGetName(target));
+                return;
+            }
+            serverControlArmInteraction(sessionId, actor, kInteractRevive, target, 0);
             return;
         }
 
@@ -3092,6 +3243,14 @@ void serverControlLine(int sessionId, const char* line)
                 serverControlRefuse(sessionId, "There is nothing there to loot.");
                 return;
             }
+            // A dead PLAYER is a patient, not a container: their gear comes back
+            // with them. (The viewer sends `revive` for a player body anyway; this
+            // covers an older client, and the debug port.)
+            if (isCorpse && playerActorIs(target)) {
+                fprintf(stderr, "f2_server: control loot target netId=%d is a dead player, refused\n", netId);
+                serverControlRefuse(sessionId, "%s can be revived. Use them, or a healing item on them.", objectGetName(target));
+                return;
+            }
             serverControlArmInteraction(sessionId, actor, kInteractLoot, target, 0);
             return;
         }
@@ -3105,8 +3264,21 @@ void serverControlLine(int sessionId, const char* line)
         // teammate. (mp-actor-architecture-principle: "actor I control" is, to the
         // engine, just another scripted critter — hence the guard, not a slot test.)
         if (playerActorIs(target)) {
-            fprintf(stderr, "f2_server: control talk target netId=%d is a player, refused\n", netId);
-            serverControlRefuse(sessionId, "That's another player.");
+            // ►► TALK ON A TEAMMATE = PROPOSE A TRADE (server_trade.cc). It used to
+            // be refused outright ("That's another player."); now it walks up to
+            // them and, on arrival, sends them the invitation. Everything a
+            // conversation would need (a script, a driver, the barrier) stays out
+            // of it — the fire site branches on the target being a player.
+            if (critterIsDead(target)) {
+                serverControlRefuse(sessionId, "%s is dead. Revive them instead.", objectGetName(target));
+                return;
+            }
+            if (serverTradeActive() || serverTradePending()) {
+                serverControlRefuse(sessionId, "Another trade is already in progress.");
+                return;
+            }
+            fprintf(stderr, "f2_server: control talk target netId=%d is a player -> trade approach\n", netId);
+            serverControlArmInteraction(sessionId, actor, kInteractTalk, target, 0);
             return;
         }
         // Walk-then-act (approach < 9). Verb ships; the viewer menu does not wire it

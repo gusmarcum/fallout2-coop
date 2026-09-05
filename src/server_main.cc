@@ -238,6 +238,12 @@ int main(int argc, char** argv)
         // Bridge the player-initiated combat-start latch (cstart verb) into f2_core so
         // the server loop's idle tick can enter combat on the claimant's request.
         serverSetCombatStartConsumer(serverControlConsumePendingCombatStart);
+
+        // The player-death POLICY (MP_PROPOSAL Ch 9.5, filled in 2026-09-05): a
+        // party wipe plays the death screen on every client and reloads the newest
+        // save. Installed here so the seam stays a no-op for the client and the
+        // golden probe, which never reach this.
+        playerActorSetDiedHook(serverAdminNotePlayerDied);
         combatSetEnterHook(serverControlCancelPendingForCombat);
 
         // F2_SERVER_TICKS: safety cap on the number of beats. ►► DEFAULT IS NOW

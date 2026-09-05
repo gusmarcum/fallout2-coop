@@ -218,7 +218,9 @@ The client sends its OS in the handshake, so joins are announced as
 | `G` | pick up one loose ground item from your character's current tile; press repeatedly to clear a pile. The server chooses from its authoritative tile, so no pixel-perfect click is needed |
 | `B` | swap active weapon hand (costs no AP, plays the put-away/take-out animation) |
 | `1` | toggle **sneak** (per-player: your roll, your Silent Running / Silent Death — not the host's) |
-| `3` | **Steal** — the skilldex entry, on a living critter opens the server-owned steal session |
+| `3` | **Steal** — the skilldex entry, on a living critter opens the server-owned steal session. Refused on another player |
+| Talk on a player | **propose a trade** (server_trade.cc): they get a yes/no box; on yes both sit in the vanilla trade screen while the world keeps running. Offer (`M`) locks your table, both locked = both get an accept box, two yeses swap the tables; `T`/`Esc` leaves with everything returned |
+| Use on a dead player | **revive** them at 1 HP: free out of combat, 4 AP on your own turn in a fight (a healing item, First Aid or Doctor on the body do the same). Nobody revives themself; when every player is down the server plays the death screen for all and reloads the newest save |
 | `F6` / `F7` | **quicksave / quickload**, vanilla's keys. `F6` writes the server's quick slot (16); `F7` reloads it for everyone, and the game says who did it. Any connected player may use them, a dead one may `F7`. From the main screen only, in or out of combat: close any open screen first, as in vanilla. `F6` is refused during combat, dialogue, worldmap travel or a map change; `F7` is refused while a conversation, trade, steal, movie or worldmap trip is open |
 | `P` | the **pipboy** — holodisks (including the server's own SERVER INFORMATION disk), quests, status, automaps. Refused in combat, as in vanilla; the alarm clock refuses too, because the server owns the clock |
 | `PageUp` / `PageDown`, wheel | scroll the **dialog option list** when a node has more options than fit (the reply window keeps first claim on the wheel while it is paging itself) |
@@ -299,6 +301,7 @@ printf 'stress 20 0x010000EE 42\n' | nc -q1 127.0.0.1 9201
 | `stress <n> [pid] [seed]` | spawn n hostiles near the players and aggro them (default pid `0x010000EE` = Raider; the seed is printed — reuse it to replay) |
 | `despawnall` | destroy everything `spawn`/`stress` created |
 | `revive <slot>` | bring a dead player back at 1 HP (`0` = host, `1..` = extras) |
+| `kill <slot>` | kill a player through the ordinary death path (tests the revive / party-wipe rules) |
 | `xp <slot> <amount>` | award experience to ONE seat (`0` = host, `1..` = extras). **Levels up as it goes** — a grant that crosses several thresholds levels several times, each awarding HP, skill points and (on the cadence) an owed perk. Negative amounts allowed (clamped at the floor); the reply reports the level before/after |
 | `sheet [slot]` | read a seat's sheet: level, XP, unspent skill points, whether a perk pick is owed, tagged skills, traits. All seats if no slot |
 | `rest <minutes> [slot]` | pass time for **everyone** (one clock) and heal every player, at vanilla's rate. Honours the map's own "you cannot rest here" gate; reports the clock and HP either side. The debug `rest` verb answers through `debugPrint`, which the server drops — use this one when you want to *see* the result |
@@ -342,7 +345,7 @@ login claim create  cstart cendcombat cendturn cattack cmove caim  mv rot push
 look use useitem useitemon usedoor open take takeall put get loot
 invopen invclose invwield invunwield invdrop unload reload hand skill
 talk dsay dend dbarter  boffer bunoffer btake bcommit bcancel bdone
-stake splant sdone
+stake splant sdone  answer revive
 wmenter wmmove wmesc  encaccept encdecline  movdone
 sheetopen sheetclose skillup skilldown perkpick tagpick mutpick
 rest restopt  elev  sneak  audit

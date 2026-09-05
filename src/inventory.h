@@ -62,6 +62,14 @@ void barterSetServerPump(std::function<bool()> pump);
 // is the server's; this is what it looks like. See the note at the definition.
 void inventoryOpenTradeViewer(Object* merchant, Object* playerTable, Object* merchantTable);
 
+// Hooks the PLAYER-TO-PLAYER trade (client_trade.cc) installs on the viewer trade
+// screen while one is open, both null otherwise: `repaint` runs after every repaint
+// of the screen (it draws the status line into the dialog reply area), `canTake`
+// says whether a drag may start from the OTHER side's pack (never, in a player
+// trade — they have to offer it). Function pointers rather than client_trade
+// calls, so this file, which f2_server links too, gains no client dependency.
+void inventoryTradeViewerSetHooks(void (*repaint)(), bool (*canTake)());
+
 // -- STEAL / PICKPOCKET / PLANT, server-authoritative (co-op) ---------------
 // The dedicated server owns the steal screen the way it owns a trade: it runs
 // the session, rolls the Steal skill for every transfer, and parks the tick

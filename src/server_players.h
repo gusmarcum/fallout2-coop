@@ -264,6 +264,13 @@ Object* scriptContextDude(Program* program);
 // loop tail to act on.
 void playerActorDied(Object* actor);
 
+// The policy body itself, installed by f2_server (server_admin.cc: the party-wipe
+// rule). playerActorDied calls it after the death transition described above; with
+// nothing installed (single-player, the client, the golden probe) the seam stays the
+// no-op it always was. The hook inherits every restriction listed above: it may
+// LATCH and emit, never re-enter combat, touch the roster, or block.
+void playerActorSetDiedHook(void (*hook)(Object* actor));
+
 } // namespace fallout
 
 #endif /* FALLOUT_SERVER_PLAYERS_H_ */

@@ -129,6 +129,15 @@ public:
     // One-shot: the streamed random-encounter prompt, latched out of the decoder
     // (see onEncounterPrompt — opening it inside pump() re-enters drain()).
     bool takeEncounterPrompt(std::string* title, std::string* body);
+    // One-shot: an addressed yes/no question (EVENT_PROMPT_ASK — a trade invitation or
+    // its accept box). Same latch-then-show-from-the-ticker shape as the encounter
+    // prompt, for the same re-entrancy reason. Answered with clientViewerPromptAnswer.
+    bool takePrompt(int* promptId, std::string* title, std::string* body);
+    // Everyone is dead (EVENT_PARTY_WIPE). wipePending() lets the service ticker close
+    // whatever modal is up; takePartyWipe() is the main loop's one-shot to play the
+    // death screen, after which the server's reload rebuilds the world.
+    bool takePartyWipe();
+    bool wipePending() const;
     bool takeElevatorPrompt(int* elevator, int* startLevel);
     // One-shot: the server says WE used a Motion Sensor, so open our own automap.
     bool takeAutomapOpen(bool* usingScanner);
@@ -237,6 +246,8 @@ void clientViewerUnload(Object* item);
 // ends the cutscene for the whole room by design (game_movie.h).
 void clientViewerMovieAck();
 void clientViewerEncounterAnswer(bool accept);
+// Answer an addressed yes/no box: `answer <promptId> <0|1>`.
+void clientViewerPromptAnswer(int promptId, bool yes);
 void clientViewerUseItem(int pid);
 void clientViewerUseItemOn(int targetNetId, int pid);
 void clientViewerArmExplosive(int pid, int seconds);

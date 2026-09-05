@@ -19,6 +19,7 @@
 #include "client_barter.h"
 #include "client_dialog.h" // dialog viewer render (A3 — DIALOG_STREAMING_PLAN Stage 3)
 #include "client_steal.h" // viewer half of a server-owned steal session
+#include "client_trade.h" // the player-to-player trade stream
 #include "worldmap_ui.h" // wmGenData + gWorldmapStreaming/gPendingWorldmapEnter/gWorldmapStateDirty
 #include "color.h" // _colorTable — float-text styling (COMBAT_CLIENT_DESIGN.md §3.e)
 #include "combat.h" // gCombatState mirror + COMBAT_STATE_* (§3.0)
@@ -215,6 +216,12 @@ enum : unsigned char {
     EVENT_STATE_AUDIT = 60, // authoritative object state — diff it against our mirror
     EVENT_UI_LOCK = 61, // scripted cutscene input lock, addressed (0 = everyone)
     EVENT_WORLDMAP_AREAS = 62, // worldmap city table: known/visited/entrances for every area
+    EVENT_PROMPT_ASK = 63, // addressed yes/no question — we answer `answer <id> <0|1>`
+    EVENT_PROMPT_CLOSE = 64, // that question is moot — dismiss the box if it is up
+    EVENT_TRADE_BEGIN = 65, // player-to-player trade opened (party A, party B)
+    EVENT_TRADE_STATE = 66, // both packs, both tables, values, locks
+    EVENT_TRADE_END = 67, // trade over, with the line to show
+    EVENT_PARTY_WIPE = 68, // everyone is dead: death screen, then the server's reload
 };
 
 // crc32 (IEEE, reflected) — MUST match server_loop.cc's joinBlobCrc32.
@@ -367,6 +374,10 @@ static void wmencTagEscInjection(const char* site)
 }
 
 static bool gEncounterPromptActive = false;
+// The addressed yes/no box (trade invitation / accept): the id of the one that is
+// open, and whether the server dismissed it (then ESC means "moot", not "no").
+static int gPromptActiveId = 0;
+static bool gPromptClosedByServer = false;
 
 // The decoder's live index: wire netId -> local Object*. Seeded from the loaded
 // blob's post-walk objects, maintained by SPAWN/DESTROY.
@@ -674,6 +685,28 @@ public:
         *body = _encPromptBody;
         return true;
     }
+
+    // Addressed yes/no box latch (see onPromptAsk): same shape as the encounter
+    // prompt, taken by the service ticker outside drain().
+    bool takePrompt(int* promptId, std::string* title, std::string* body)
+    {
+        if (!_promptPending) {
+            return false;
+        }
+        _promptPending = false;
+        *promptId = _promptId;
+        *title = _promptTitle;
+        *body = _promptBody;
+        return true;
+    }
+
+    bool takePartyWipe()
+    {
+        bool was = _wipePending;
+        _wipePending = false;
+        return was;
+    }
+    bool wipePending() const { return _wipePending; }
 
     // Elevator panel latch (same one-shot shape, same reason — see onElevatorPrompt).
     bool takeElevatorPrompt(int* elevator, int* startLevel)
@@ -1121,6 +1154,12 @@ public:
         case EVENT_UI_LOCK: onScreenInputLock(r); break;
         case EVENT_MUSIC_PLAY: onMusicPlay(r); break;
         case EVENT_MUSIC_STOP: onMusicStop(r); break;
+        case EVENT_PROMPT_ASK: onPromptAsk(r); break;
+        case EVENT_PROMPT_CLOSE: onPromptClose(r); break;
+        case EVENT_TRADE_BEGIN: onTradeBegin(r); break;
+        case EVENT_TRADE_STATE: onTradeState(r); break;
+        case EVENT_TRADE_END: onTradeEnd(r); break;
+        case EVENT_PARTY_WIPE: onPartyWipe(r); break;
         // SNAPSHOT_BEGIN/END are pure brackets; presentation cues are cosmetic and
         // ignored headless. All are skipped whole via the event length.
         default: break;
@@ -4107,6 +4146,107 @@ private:
         }
     }
 
+    // An addressed yes/no question (a trade invitation, a trade's accept box).
+    // LATCHED, never opened here — the exact rule onEncounterPrompt spells out: this
+    // runs inside pump() -> drain(), and a blocking box opened here re-enters drain()
+    // through its own input loop and answers itself. The service ticker takes it.
+    void onPromptAsk(Reader& r)
+    {
+        int actorNetId = r.i32();
+        int promptId = r.i32();
+        std::string title = r.str();
+        std::string body = r.str();
+        if (r.overflow() || !clientViewerActive()) return;
+        if (actorNetId != 0 && (gDude == nullptr || actorNetId != gDude->netId)) {
+            return; // somebody else's question
+        }
+        _promptPending = true;
+        _promptId = promptId;
+        _promptTitle = title;
+        _promptBody = body;
+    }
+
+    // The question is moot (the asker walked away, the other party said no, the
+    // trade ended). Drop a latched one; break out of an open one WITHOUT answering.
+    void onPromptClose(Reader& r)
+    {
+        int actorNetId = r.i32();
+        int promptId = r.i32();
+        if (r.overflow() || !clientViewerActive()) return;
+        if (actorNetId != 0 && (gDude == nullptr || actorNetId != gDude->netId)) {
+            return;
+        }
+        if (_promptPending && _promptId == promptId) {
+            _promptPending = false;
+        }
+        if (gPromptActiveId == promptId && promptId != 0) {
+            gPromptClosedByServer = true;
+            wmencTagEscInjection("onPromptClose");
+            enqueueInputEvent(KEY_ESCAPE); // lands in the box's own input loop
+        }
+    }
+
+    void onTradeBegin(Reader& r)
+    {
+        int aNetId = r.i32();
+        int bNetId = r.i32();
+        if (r.overflow() || !clientViewerActive()) return;
+        clientTradeOnBegin(aNetId, bNetId);
+    }
+
+    void onTradeState(Reader& r)
+    {
+        // Same count-prefixed row encoding as EVENT_BARTER_STATE, in the order A's
+        // pack, B's pack, A's table, B's table; then the two values and three flags.
+        constexpr int kMaxRows = 64;
+        static int pids[4][kMaxRows];
+        static int qtys[4][kMaxRows];
+        int counts[4] = { 0, 0, 0, 0 };
+        int aNetId = r.i32();
+        int bNetId = r.i32();
+        for (int list = 0; list < 4; list++) {
+            int n = r.i32();
+            if (n < 0 || n > kMaxRows || r.overflow()) return;
+            for (int i = 0; i < n; i++) {
+                pids[list][i] = r.i32();
+                qtys[list][i] = r.i32();
+            }
+            counts[list] = n;
+        }
+        int valueA = r.i32();
+        int valueB = r.i32();
+        bool lockedA = r.u8() != 0;
+        bool lockedB = r.u8() != 0;
+        bool confirming = r.u8() != 0;
+        if (r.overflow() || !clientViewerActive()) return;
+        ClientBarterList lists[4];
+        for (int i = 0; i < 4; i++) {
+            lists[i].pids = pids[i];
+            lists[i].qtys = qtys[i];
+            lists[i].count = counts[i];
+        }
+        clientTradeOnState(aNetId, bNetId, lists, valueA, valueB, lockedA, lockedB, confirming);
+    }
+
+    void onTradeEnd(Reader& r)
+    {
+        int aNetId = r.i32();
+        int bNetId = r.i32();
+        int reason = r.i32();
+        std::string text = r.str();
+        if (r.overflow() || !clientViewerActive()) return;
+        clientTradeOnEnd(aNetId, bNetId, reason, text.c_str());
+    }
+
+    // Everyone is dead. Latched: the death screen is a blocking loop of its own and
+    // the main loop plays it once the combat presentation has shown the last hit.
+    void onPartyWipe(Reader& r)
+    {
+        (void)r;
+        if (!clientViewerActive()) return;
+        _wipePending = true;
+    }
+
     void onMoviePlay(Reader& r)
     {
         int movie = r.i32();
@@ -4752,6 +4892,11 @@ private:
     bool _encPromptPending = false; // encounter prompt latched out of the decoder
     std::string _encPromptTitle;
     std::string _encPromptBody;
+    bool _promptPending = false; // addressed yes/no box latched out of the decoder
+    int _promptId = 0;
+    std::string _promptTitle;
+    std::string _promptBody;
+    bool _wipePending = false; // EVENT_PARTY_WIPE, consumed by the main loop
     bool _elevatorPending = false;
     // When the screen went black (0 = not black). The fade is applied at decode; this
     // is only the watchdog's clock.
@@ -4941,6 +5086,9 @@ public:
     bool takeInventoryGrant() { return _decoder.takeInventoryGrant(); }
     int takeLootGrant() { return _decoder.takeLootGrant(); }
     bool takeEncounterPrompt(std::string* title, std::string* body) { return _decoder.takeEncounterPrompt(title, body); }
+    bool takePrompt(int* promptId, std::string* title, std::string* body) { return _decoder.takePrompt(promptId, title, body); }
+    bool takePartyWipe() { return _decoder.takePartyWipe(); }
+    bool wipePending() const { return _decoder.wipePending(); }
     bool takeElevatorPrompt(int* elevator, int* startLevel) { return _decoder.takeElevatorPrompt(elevator, startLevel); }
     bool takeAutomapOpen(bool* usingScanner) { return _decoder.takeAutomapOpen(usingScanner); }
     bool fadeWatchdogExpired(unsigned int nowMs, unsigned int maxBlackMs) const
@@ -5232,6 +5380,21 @@ bool ClientConnection::takeEncounterPrompt(std::string* title, std::string* body
     return _impl->stream != nullptr && _impl->stream->takeEncounterPrompt(title, body);
 }
 
+bool ClientConnection::takePrompt(int* promptId, std::string* title, std::string* body)
+{
+    return _impl->stream != nullptr && _impl->stream->takePrompt(promptId, title, body);
+}
+
+bool ClientConnection::takePartyWipe()
+{
+    return _impl->stream != nullptr && _impl->stream->takePartyWipe();
+}
+
+bool ClientConnection::wipePending() const
+{
+    return _impl->stream != nullptr && _impl->stream->wipePending();
+}
+
 bool ClientConnection::takeElevatorPrompt(int* elevator, int* startLevel)
 {
     return _impl->stream != nullptr && _impl->stream->takeElevatorPrompt(elevator, startLevel);
@@ -5358,6 +5521,56 @@ static void showPendingEncounterPrompt()
     clientViewerEncounterAnswer(rc != 0);
 }
 
+// Open the latched addressed yes/no box, if one is waiting, and answer the server.
+// The encounter prompt's twin: called ONLY from viewerServiceTicker, never from the
+// decoder. Differences: the server is NOT blocked on us (so a slow answer costs the
+// asker only patience), and a box the server dismissed (onPromptClose) sends no
+// answer at all — the injected ESC means "moot", not "no".
+static void showPendingYesNoPrompt()
+{
+    if (gViewerConn == nullptr || !clientViewerActive() || gPromptActiveId != 0 || gEncounterPromptActive) {
+        return; // re-entry guard: the box's own ticker runs this again every frame
+    }
+    int promptId = 0;
+    std::string title;
+    std::string body;
+    if (!gViewerConn->takePrompt(&promptId, &title, &body)) {
+        return;
+    }
+
+    // The body carries up to four lines separated by '|'.
+    std::string lines[4];
+    const char* bodyPtrs[4];
+    int lineCount = 0;
+    size_t start = 0;
+    while (lineCount < 4) {
+        size_t bar = body.find('|', start);
+        lines[lineCount] = body.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+        bodyPtrs[lineCount] = lines[lineCount].c_str();
+        lineCount++;
+        if (bar == std::string::npos) {
+            break;
+        }
+        start = bar + 1;
+    }
+
+    gPromptActiveId = promptId;
+    gPromptClosedByServer = false;
+    keyboardReset();
+    inputEventQueueReset();
+    debugPrint("client-viewer: yes/no box %d OPEN: %s\n", promptId, title.c_str());
+    int rc = showDialogBox(title.c_str(), bodyPtrs, lineCount, 169, 116,
+        _colorTable[32328], nullptr, _colorTable[32328],
+        DIALOG_BOX_LARGE | DIALOG_BOX_YES_NO);
+    bool moot = gPromptClosedByServer;
+    gPromptActiveId = 0;
+    gPromptClosedByServer = false;
+    debugPrint("client-viewer: yes/no box %d CLOSED rc=%d%s\n", promptId, rc, moot ? " (dismissed by the server)" : "");
+    if (!moot) {
+        clientViewerPromptAnswer(promptId, rc != 0);
+    }
+}
+
 static void viewerServiceTicker()
 {
     if (gViewerConn == nullptr) {
@@ -5376,6 +5589,7 @@ static void viewerServiceTicker()
     // gated on anything that can stay false: no combat test, no claim test, no modal
     // test. showPendingEncounterPrompt guards its own re-entry.
     showPendingEncounterPrompt();
+    showPendingYesNoPrompt(); // same placement, same reason (trade invitation / accept)
     if ((GameMode::getCurrentGameMode() & kViewerModalMask) == 0) {
         return; // not in a modal — the main loop pumps the wire itself
     }
@@ -5408,6 +5622,14 @@ static void viewerServiceTicker()
         }
         wmencTagEscInjection("ticker: blobDeferred (non-worldmap modal)");
         enqueueInputEvent(KEY_ESCAPE); // mapLoad must not free gDude under an open modal
+        return;
+    }
+    if (gViewerConn->wipePending() && (GameMode::getCurrentGameMode() & GameMode::kWorldmap) == 0) {
+        // Everyone is dead: the death screen plays from the main loop, so a local
+        // modal (a dead player browsing their pack) must come down first. The
+        // worldmap is excluded for the reason the branch below gives.
+        wmencTagEscInjection("ticker: party wipe pending");
+        enqueueInputEvent(KEY_ESCAPE);
         return;
     }
     if (gPendingWorldmapEnter && (GameMode::getCurrentGameMode() & GameMode::kWorldmap) == 0) {
@@ -5582,6 +5804,16 @@ void clientViewerEncounterAnswer(bool accept)
 // split one chat line into two forged verbs on the control channel, so the client must
 // never put one on the wire even though the server also refuses it. Length is capped by
 // the caller (client_say.cc) well inside the server's line buffer.
+void clientViewerPromptAnswer(int promptId, bool yes)
+{
+    if (gViewerConn == nullptr || promptId == 0) {
+        return;
+    }
+    char cmd[48];
+    snprintf(cmd, sizeof(cmd), "answer %d %d", promptId, yes ? 1 : 0);
+    gViewerConn->sendLine(cmd);
+}
+
 void clientViewerSay(const char* text)
 {
     if (gViewerConn == nullptr || text == nullptr || text[0] == '\0') {

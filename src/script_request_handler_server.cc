@@ -12,6 +12,7 @@
 #include "script_request_handler.h"
 #include "server_control.h" // dialog DRIVE ownership — who started this conversation
 #include "server_players.h" // ServerActorScope / playerActorAt
+#include "server_trade.h" // serverTradeCancel — a parked modal ends an open player trade
 #include "server_worldmap.h"
 
 namespace fallout {
@@ -57,6 +58,10 @@ public:
 
     void dialogEnter(Object* speaker) override
     {
+        // A conversation parks the world for its whole life; a player trade that
+        // is open would sit frozen behind it with goods on the tables. Sweep it
+        // home first (the tick would catch it inside the pump, this is prompter).
+        serverTradeCancel("a conversation started");
         // ►► THE ONE PLACE A SERVER-SIDE CONVERSATION IS ENTERED, and gameDialogEnter
         // BLOCKS here for its whole life (the barrier pumps inside it). So a single
         // scope covers the entire conversation — every node proc, every `dude_obj`
@@ -119,6 +124,7 @@ public:
     // trade; see its definition in inventory_ui.cc for why the world stops.
     void stealing(Object* thief, Object* target) override
     {
+        serverTradeCancel("a steal session started"); // same reason as dialogEnter
         stealSessionRun(thief, target);
     }
 
