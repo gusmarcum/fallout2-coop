@@ -49,6 +49,7 @@
 #include "proto_instance.h" // _obj_use_door / _obj_examine (INTERACTION verbs)
 #include "scripts.h" // scriptsRequestDialog
 #include "server_accounts.h" // the account name -> slot table (login verb)
+#include "server_admin.h" // serverAdminRequestQuick — F6/F7 latch (quicksave/quickload)
 #include "server_anim.h" // serverAnimWalkInFlightFor
 #include "player_create.h" // PlayerCreateSpec / playerCreateApply — stage-2 creation
 #include "server_boot.h" // serverSpawnPlayerActor / playerActorSeedSheetFromHost
@@ -1839,6 +1840,107 @@ void serverControlDrainPresence()
     }
 }
 
+// -- World reload (server_control.h) -----------------------------------------
+// Sessions survive a reload; their SLOTS are re-derived from the loaded save's
+// account table by name, because the slot is what the save encodes (the sheet
+// pid) and the name is the durable key a player re-binds by (server_accounts.h).
+// A session that only ever sent a bare `claim` has no name; it keeps its slot
+// number if the loaded save has that slot free.
+struct ReloadBinding {
+    int sessionId;
+    int oldSlot;
+    char name[kAccountNameMaxLength];
+};
+
+static std::vector<ReloadBinding> gReloadBindings;
+
+void serverControlPrepareForWorldReload()
+{
+    gReloadBindings.clear();
+    for (int slot = 0; slot < playerActorCount() && slot < kMaxPlayerActors; slot++) {
+        int sessionId = gBindings[slot];
+        if (sessionId == kNoSessionId) {
+            continue;
+        }
+        ReloadBinding binding;
+        binding.sessionId = sessionId;
+        binding.oldSlot = slot;
+        strncpy(binding.name, accountNameForSlot(slot), sizeof(binding.name) - 1);
+        binding.name[sizeof(binding.name) - 1] = '\0';
+        gReloadBindings.push_back(binding);
+        gBindings[slot] = kNoSessionId;
+    }
+
+    // Every latch that names an object, a netId or a slot of the world about to
+    // be replaced. Same set a disconnect releases, for every session at once,
+    // plus the per-actor state that keys on Object* (move retries) or on a fight
+    // that is being ended (intents, inventory sessions, the cstart latch).
+    gPendingBySession.clear();
+    gMoveRetries.clear();
+    gInventoryOpenSlots.clear();
+    gPendingDespawns.clear(); // the bodies they name are about to be destroyed
+    gPendingCombatStartSlot = -1;
+    gPendingDialogRequesterSlot = -1;
+    for (int slot = 0; slot < kMaxPlayerActors; slot++) {
+        serverControlSetPendingElevator(slot, -1); // -1 clears the offer
+    }
+    combatIntentClear();
+    serverActorBusyClearAll();
+
+    fprintf(stderr, "f2_server: reload: %zu bound session(s) remembered, latches cleared\n",
+        gReloadBindings.size());
+}
+
+void serverControlRebindAfterWorldReload()
+{
+    std::vector<ReloadBinding> pending;
+    pending.swap(gReloadBindings);
+
+    for (const ReloadBinding& binding : pending) {
+        int slot = -1;
+        if (binding.name[0] != '\0') {
+            slot = accountSlotForName(binding.name);
+        } else if (binding.oldSlot < playerActorCount() && !accountSlotOwned(binding.oldSlot)) {
+            slot = binding.oldSlot; // nameless `claim` binding: same seat if it is still free
+        }
+
+        if (slot < 0 || slot >= playerActorCount() || gBindings[slot] != kNoSessionId) {
+            // No body for this person in the loaded world. An unbound-but-connected
+            // viewer renders a world it cannot drive (the duplicate-login note in
+            // serverControlLine), so close the socket; the client reports it and a
+            // reconnect goes through the normal login path.
+            fprintf(stderr, "f2_server: reload: session %d ('%s', was slot %d) has no character in the loaded save — kicked\n",
+                binding.sessionId, binding.name, binding.oldSlot);
+            if (gSessionKicker) {
+                gSessionKicker(binding.sessionId);
+            }
+            continue;
+        }
+
+        gBindings[slot] = binding.sessionId;
+        fprintf(stderr, "f2_server: reload: session %d ('%s') -> slot %d%s\n",
+            binding.sessionId, binding.name, slot,
+            slot != binding.oldSlot ? " (moved)" : "");
+    }
+
+    // Presence follows bindings, as at boot (serverBootFinish parks every extra
+    // and the presence drain reattaches the ones with an owner). Here the loaded
+    // save already placed each body where it was saved, so a bound player stands
+    // exactly where they quicksaved; only an owner-less body is parked, and a
+    // bound body the save had parked is reattached by the presence drain next.
+    for (int slot = 1; slot < playerActorCount(); slot++) {
+        Object* actor = playerActorAt(slot);
+        if (actor == nullptr) {
+            continue;
+        }
+        if (gBindings[slot] == kNoSessionId && playerActorOnline(slot)) {
+            _obj_disconnect(actor, nullptr);
+            playerActorSetOnline(slot, false);
+            fprintf(stderr, "f2_server: reload: slot %d body parked (no owner connected)\n", slot);
+        }
+    }
+}
+
 // The longest rest a single verb may ask for: 24 hours. The whole simulation is
 // parked inside the loop (one clock, one world), so an unbounded duration would let
 // one client freeze every other player for as long as it liked.
@@ -2339,7 +2441,8 @@ void serverControlLine(int sessionId, const char* line)
             || strcmp(verb, "look") == 0
             || serverControlIsSheetVerb(verb) // sheet bookkeeping, no world footprint
             || strcmp(verb, "cancel") == 0 // aborting your own pending walk is not an action
-            || strcmp(verb, "selfrevive") == 0; // the one thing a dead player may do
+            || strcmp(verb, "selfrevive") == 0 // the one thing a dead player may do
+            || strcmp(verb, "quickload") == 0; // ...and F7, the other way back from a death
         // (`claim` needs no entry — it is answered above, before an actor is resolved.)
         if (!readOnlyVerb) {
             fprintf(stderr, "f2_server: control %s dropped (actor is dead, session %d)\n",
@@ -2382,6 +2485,8 @@ void serverControlLine(int sessionId, const char* line)
             || serverControlIsStealVerb(verb) // inside a parked session the server opened
             || strcmp(verb, "claim") == 0
             || strcmp(verb, "login") == 0
+            || strcmp(verb, "quicksave") == 0 // F6/F7 latch a request; neither is an action
+            || strcmp(verb, "quickload") == 0
             // A read-only diagnostic must never be refused for being busy — busy is
             // exactly when you want to ask (state_audit.h).
             || strcmp(verb, "audit") == 0;
@@ -2396,6 +2501,21 @@ void serverControlLine(int sessionId, const char* line)
             }
             return;
         }
+    }
+
+    if (strcmp(verb, "quicksave") == 0 || strcmp(verb, "quickload") == 0) {
+        // F6 / F7. LATCHED here and run from the main-phase drain
+        // (serverAdminDrainWorldRequests) — never inline: this line may be being
+        // serviced from inside a modal pump, and the save writer serializes gDude,
+        // which the actor scope below would have swapped to this player's body.
+        // Handled BEFORE that scope on purpose. Answered by a system line to
+        // everyone when it lands, or a refusal to this player when it cannot.
+        const char* why = serverAdminRequestQuick(strcmp(verb, "quickload") == 0,
+            serverControlSlotForSession(sessionId));
+        if (why != nullptr) {
+            serverControlRefuse(sessionId, "%s", why);
+        }
+        return;
     }
 
     // gDude := actor for the whole verb. The handlers below still read gDude in

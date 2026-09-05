@@ -64,6 +64,13 @@ A stuck wait cursor clears itself. The operator's `save` refuses at moments when
 have failed silently, and a `gvar` console command exists for repairing a world's quest
 flags.
 
+**Quicksave and quickload.** Vanilla's `F6` and `F7`, server-side. `F6` writes the server's
+slot 16; `F7` reloads it in place for every connected player, through the same rebuild each
+client already performs after a map change, and the game says who pressed it. It works in
+combat, where it ends the fight the way single-player's does, and while dead, so a failed
+steal or a lost fight can be retried. The operator's `load <n>` takes the same path while a
+world runs, so restoring a slot no longer needs a server restart.
+
 **The server never waits on a slow client.** Every frame went out through a blocking send
 with a five-second timeout, so a client that stopped reading its socket, which every client
 does for a few seconds while it loads a new map, froze the whole world for everyone: movement
@@ -108,7 +115,7 @@ pause
 ```
 
    To continue a saved world use `set F2_SERVER_LOAD=<slot>` instead of `F2_SERVER_MAP`.
-   Slots 1 to 10 are manual saves, 11 to 15 the rotating autosaves.
+   Slots 1 to 10 are manual saves, 11 to 15 the rotating autosaves, 16 the quicksave.
 4. Join from the same PC:
 
 ```bat
@@ -139,6 +146,7 @@ from the folder the exe is in, so keep it next to the game files.
 | `TAB` | automap (out of combat) |
 | `P` | Pip-Boy (holodisks, quests, automaps; refused in combat like vanilla) |
 | `R` | when dead: get back up at 1 HP where you fell |
+| `F6` / `F7` | quicksave / quickload (server slot 16). `F7` rewinds the game for everyone; works in combat and while dead; main screen only, as in vanilla |
 | `Down` / `PgDn` / `SPACE` | next page of a long dialogue reply; `Up` / `PgUp` previous page |
 | Review button | this conversation's history |
 | Combat Control button | on a companion: their combat orders |
@@ -151,7 +159,7 @@ Set these as environment variables before starting `f2_server.exe`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `F2_SERVER_MAP` | | boot a fresh world on this map |
-| `F2_SERVER_LOAD` | | restore save slot 1-10 (11-15 = autosaves) |
+| `F2_SERVER_LOAD` | | restore save slot 1-16 (11-15 = autosaves, 16 = quicksave) |
 | `F2_SERVER_NET` | | game port for clients |
 | `F2_SERVER_CMD` | | admin console port (see below); never expose it |
 | `F2_SERVER_PACE_MS` | `0` | ms per beat; `100` is about real time |
@@ -172,8 +180,9 @@ command per line. It answers once a client is connected.
 |---|---|
 | `status` | what is running |
 | `saves` | list save slots |
-| `save <1-10> [label]` | save the world (refused during combat, dialogue, travel, map change) |
-| `load <1-15>` / `new <map.map>` | restore a slot / boot a fresh world (lobby only) |
+| `save <1-16> [label]` | save the world (refused during combat, dialogue, travel, map change); 16 is the quicksave |
+| `load <1-16>` | restore a slot; while a world runs it is reloaded in place for everyone (the `F7` path, by number) |
+| `new <map.map>` | boot a fresh world (lobby only) |
 | `revive <slot>` | stand a dead player up (players can also press `R`) |
 | `give <pid> <count>` | give items to the host character; `count` is stacks (boxes for ammo) |
 | `gvar <index> [value]` | read or set a global script variable (quest flags) |

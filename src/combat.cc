@@ -3745,6 +3745,37 @@ bool combatSessionActive()
     return gCombatSession.active;
 }
 
+// Vanilla's F7 reaches lsgLoadGameInSlot from INSIDE the dude's turn: the loader
+// calls _combat_over_from_load (which ends the fight and raises
+// _combat_end_due_to_load), the input loop breaks on that flag, and the post-loop
+// teardown takes its load branch. The resumable session spans beats, so there is
+// no turn to break out of; do the same steps explicitly, in the same order, and
+// leave the machine inactive before the loader replaces the world.
+void combatSessionEndForLoad()
+{
+    CombatSession& s = gCombatSession;
+    if (!s.active) {
+        return;
+    }
+
+    fprintf(stderr, "SERVER: resumable combat — ended by a load (state=%d, round turn index %d)\n",
+        static_cast<int>(s.state), s.round.curIndex);
+
+    _combat_over_from_load();
+
+    // The player barrier enters kPlayerTurn at turn begin and exits it in the
+    // resolve step — which a load skips. The per-beat ServerActorScope has already
+    // unwound (this runs from the main-phase drain, not from the session advance).
+    if (GameMode::isInGameMode(GameMode::kPlayerTurn)) {
+        GameMode::exitGameMode(GameMode::kPlayerTurn);
+    }
+    _gcsd = nullptr;
+    _combat_turn_obj = nullptr;
+
+    s.state = CombatSessionState::kEnding;
+    combatSessionAdvance(); // combatTeardown's load branch, exit kCombat, inactive
+}
+
 void combatSetEnterHook(void (*hook)())
 {
     gCombatEnterHook = hook;

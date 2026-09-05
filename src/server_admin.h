@@ -58,6 +58,21 @@ bool serverAdminTakeRequest(ServerAdminRequest& out);
 // the lobby can greet a connecting operator with it unprompted.
 void serverAdminWriteSlotListing(const std::function<void(const char* text)>& reply);
 
+// F6 / F7 from a wire client (server_control.cc): latch a quicksave, or a
+// quickload of the dedicated quick slot (SLOT16), for the requesting registry
+// slot. Returns nullptr when latched, else a refusal to show that player. Never
+// performs the work — see serverAdminDrainWorldRequests.
+const char* serverAdminRequestQuick(bool load, int requesterSlot);
+
+// Run the latched world requests: quicksave, quickload, a live `load <n>`.
+// MAIN-PHASE ONLY, outside any actor scope: the save writer serializes gDude, and
+// a live load replaces every object under the connected viewers — the two things
+// a verb's ServerActorScope and a modal pump cannot tolerate. Call once per beat
+// after the inbound drain and BEFORE the login/presence drains, so a reloaded
+// world is rebound and reattached in the same beat and the tick tail's
+// map-change baseline carries the finished result. No-op when nothing is latched.
+void serverAdminDrainWorldRequests();
+
 // Periodic unattended save into the dedicated autosave slot (SLOT11).
 // F2_AUTOSAVE_SECS sets the cadence (default 300; 0 disables); an extra save
 // fires on the first safe beat after each map change. Call once per MAIN-PHASE

@@ -38,6 +38,8 @@
 #include "item.h" // itemAdd
 #include "path.h" // _make_path — stress spawns must be REACHABLE, not merely unblocked
 #include "server_players.h"
+#include "server_boot.h" // serverReloadSlot — the live load (F7 / `load` while running)
+#include "server_control.h" // serverControlPrepareForWorldReload / RebindAfterWorldReload
 #include "rest.h" // restPerform / RestOutcome — the operator's rest verb
 #include "sheet_intent.h" // sheetEdit* — the operator's side of the sheet edit intents
 #include "perk.h" // perkOwedPickGet / PERK_CHOICE_PENDING_* — the `sheet` read-out
@@ -77,10 +79,25 @@ static constexpr int kSlotCount = 10;
 // The cost is that the newest autosave is not always slot 11, which is exactly why
 // the slot is named in the announcement and in the server log.
 static constexpr int kAutosaveSlot = 10;
-static constexpr int kAutosaveKeep = kSaveSlotSpace - kAutosaveSlot;
+
+// SLOT16 — the QUICKSAVE slot (F6 writes it, F7 reloads it; savegame.h). Past
+// the autosave window, so the rotation never touches it, and past the manual
+// ten, so a numbered `save` cannot land on it by accident — the operator can
+// still address it (`load 16`).
+static constexpr int kQuickSlot = kSaveSlotSpace - 1;
+static constexpr int kAutosaveKeep = kQuickSlot - kAutosaveSlot;
 static constexpr int kAdminSlotCount = kSaveSlotSpace;
 
 static ServerAdminRequest gPendingRequest;
+
+// A LIVE load latched for the main-phase drain (F7, or `load <n>` while a world
+// runs) — see the world-requests section at the end of this file.
+struct LiveLoadRequest {
+    int slot = -1; // -1 = nothing latched
+    int requesterSlot = -1; // registry slot of the player who asked; -1 = the operator
+};
+
+static LiveLoadRequest gLiveLoad;
 
 // Skip leading blanks and return the rest, or nullptr when the line is spent.
 static const char* skipBlanks(const char* p)
@@ -223,6 +240,22 @@ static int autosavePickSlot()
     return oldest;
 }
 
+// The autosave ticker's clock, at file scope so a live reload can re-arm it. A
+// reload bumps the map generation exactly like a transition does, but the world
+// it produces IS a checkpoint already: treating it as a map change would spend an
+// autosave slot per F7, and ten quickloads would fill the whole rotation with
+// copies of the quicksave and evict the checkpoints that actually matter.
+static std::chrono::steady_clock::time_point gAutosaveLastSave;
+static bool gAutosaveArmed = false;
+static unsigned int gAutosaveLastGeneration = 0;
+
+static void autosaveNoteWorldReplaced()
+{
+    gAutosaveArmed = true;
+    gAutosaveLastSave = std::chrono::steady_clock::now();
+    gAutosaveLastGeneration = mapGetLoadGeneration();
+}
+
 // Periodic unattended save into the autosave window. Called every MAIN-PHASE beat
 // (server_main's intent drain — never from a modal pump, which is what already
 // rules out saving mid-dialog/barter/worldmap/movie structurally; the mode
@@ -242,17 +275,17 @@ void serverAutosaveTick()
         return; // F2_AUTOSAVE_SECS=0 turns the feature off
     }
 
-    static std::chrono::steady_clock::time_point lastSave = std::chrono::steady_clock::now();
-    static int lastGeneration = -1;
-
-    int generation = mapGetLoadGeneration();
-    if (lastGeneration == -1) {
-        lastGeneration = generation; // boot: the world just loaded, nothing owed
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    if (!gAutosaveArmed) {
+        // boot: the world just loaded, nothing owed
+        gAutosaveArmed = true;
+        gAutosaveLastSave = now;
+        gAutosaveLastGeneration = mapGetLoadGeneration();
     }
 
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-    bool intervalDue = now - lastSave >= std::chrono::seconds(intervalSecs);
-    bool mapChanged = generation != lastGeneration;
+    unsigned int generation = mapGetLoadGeneration();
+    bool intervalDue = now - gAutosaveLastSave >= std::chrono::seconds(intervalSecs);
+    bool mapChanged = generation != gAutosaveLastGeneration;
     if (!intervalDue && !mapChanged) {
         return;
     }
@@ -299,8 +332,8 @@ void serverAutosaveTick()
         snprintf(msg, sizeof(msg), "Game auto-saved to slot %d.", slot + 1);
         presenter()->consoleMessageStyled(0, kMsgChannelSystem, msg);
     }
-    lastSave = now;
-    lastGeneration = generation;
+    gAutosaveLastSave = now;
+    gAutosaveLastGeneration = generation;
 }
 
 // ---- Stress-test spawning (`spawn` / `stress` / `despawnall`) ----
@@ -649,8 +682,8 @@ static void writeHelp(const std::function<void(const char* text)>& reply, bool w
 {
     reply("admin verbs:");
     reply("  saves                 list save slots");
-    reply("  save <1-10> [label]   save the running world into a slot");
-    reply("  load <1-10>           restore a slot          (lobby only)");
+    reply("  save <1-16> [label]   save the running world into a slot (16 = the F6 quicksave)");
+    reply("  load <1-16>           restore a slot; with a world running it is reloaded in place for everyone");
     reply("  new <map.map>         boot a fresh world      (lobby only)");
     reply("  status                what is running right now");
     reply("  say <chan> <text>     push a styled line to every message log");
@@ -1825,10 +1858,15 @@ bool serverAdminLine(const char* line,
         }
 
         if (worldLoaded) {
-            // Refused rather than half-supported: swapping the world under a
-            // live serve loop re-mints every netId beneath the connected viewers
-            // and frees objects the presenter still holds refs to.
-            reply("load: a world is already running — restart the server to load another");
+            // Live reload — the path F7 takes, by slot number. Latched here and run
+            // from the main-phase drain (serverAdminDrainWorldRequests), never in
+            // this poll callback, which the modal pumps also service. Every viewer
+            // gets the loaded world through the same rebaseline a map change sends.
+            gLiveLoad.slot = slot;
+            gLiveLoad.requesterSlot = -1;
+            snprintf(msg, sizeof(msg), "load: slot %d '%.30s' — reloading the running world for everyone",
+                slot + 1, data.description);
+            reply(msg);
             return true;
         }
 
@@ -1868,6 +1906,177 @@ bool serverAdminLine(const char* line,
     }
 
     return false; // not an admin verb — let the debug dispatch have it
+}
+
+// ---- World requests: F6 quicksave, F7 quickload, a live `load <n>` ----------
+//
+// The wire verbs (server_control.cc) and the admin verb above only LATCH here.
+// The work runs from serverAdminDrainWorldRequests in the serve loop's main-phase
+// intent drain, for two reasons a verb handler cannot satisfy: the save writer
+// serializes gDude, which a wire verb's ServerActorScope has swapped to the
+// requesting player's body; and a reload replaces every object under the
+// connected viewers, which must never happen inside a modal pump holding raw
+// pointers — the same rule the login and presence drains follow.
+// (gLiveLoad itself is defined near the top of the file: the `load` verb fills it.)
+
+static bool gQuickSavePending = false;
+static int gQuickSaveRequester = -1;
+
+// A held key repeats: one save or one reload per press, the rest are dropped
+// until this passes. Wall clock — a reload parks the sim clock for its duration.
+static std::chrono::steady_clock::time_point gQuickCooldownUntil;
+
+// A conversation, trade, steal session, movie or worldmap trip is being driven
+// through a block-and-pump barrier: the world is parked inside it, and a line
+// arriving now is being serviced by that pump, not by the main phase.
+static bool worldModalLive()
+{
+    return GameMode::isInGameMode(GameMode::kDialog | GameMode::kBarter | GameMode::kWorldmap)
+        || gameDialogServerNodeActive() || stealSessionActive() || gameMovieIsPlaying();
+}
+
+// The save routine's refusal window — the one `save` and the autosave use.
+static bool worldUnsafeToSave()
+{
+    return isInCombat() || mapTransitionPending() || worldModalLive();
+}
+
+// Answer one player on the refusal channel (what serverControlRefuse does), by
+// registry slot — the sessionId is not known on this side and is not needed.
+static void refuseSlot(int slot, const char* text)
+{
+    Object* actor = slot >= 0 ? playerActorAt(slot) : nullptr;
+    if (actor != nullptr) {
+        presenter()->consoleMessageStyled(actor->netId, kMsgChannelRefusal, text);
+    }
+}
+
+// critterGetName hands out a shared buffer that the save header writer reuses,
+// so a name that must survive a save or a load is copied out first.
+static void copyActorName(int slot, char* out, size_t size)
+{
+    Object* actor = slot >= 0 ? playerActorAt(slot) : nullptr;
+    const char* name = actor != nullptr ? critterGetName(actor) : nullptr;
+    snprintf(out, size, "%s", name != nullptr && name[0] != '\0' ? name : "The operator");
+}
+
+const char* serverAdminRequestQuick(bool load, int requesterSlot)
+{
+    if (worldModalLive()) {
+        return "Not now.";
+    }
+    if (std::chrono::steady_clock::now() < gQuickCooldownUntil) {
+        return nullptr; // key repeat: silently one per press
+    }
+    if (load) {
+        LoadSaveSlotData data;
+        if (!readSlotHeader(kQuickSlot, data)) {
+            return "There is no quicksave to load.";
+        }
+        if (gLiveLoad.slot < 0) {
+            gLiveLoad.slot = kQuickSlot;
+            gLiveLoad.requesterSlot = requesterSlot;
+        }
+        return nullptr;
+    }
+    if (!gQuickSavePending) {
+        gQuickSavePending = true;
+        gQuickSaveRequester = requesterSlot;
+    }
+    return nullptr;
+}
+
+static void performQuickSave(int requesterSlot)
+{
+    if (worldUnsafeToSave()) {
+        refuseSlot(requesterSlot,
+            "You cannot save now (combat, dialogue, worldmap travel or a map change is in progress).");
+        return;
+    }
+
+    char who[64];
+    copyActorName(requesterSlot, who, sizeof(who));
+
+    // Same discipline as the autosave: empty the slot first, so no MAPS *.SAV from
+    // an earlier quicksave survives into this one.
+    savegameRefreshPatchesPath();
+    savegameSetSlot(kQuickSlot);
+    savegameEraseSlot();
+
+    if (!adminWriteSave(kQuickSlot, "quicksave")) {
+        fprintf(stderr, "f2_server: quicksave -> slot %d FAILED (error %d)\n",
+            kQuickSlot + 1, savegameGetErrorCode());
+        refuseSlot(requesterSlot, "Quicksave failed (see the server log).");
+        return;
+    }
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "%s quick-saved the game.", who);
+    presenter()->consoleMessageStyled(0, kMsgChannelSystem, msg);
+    fprintf(stderr, "f2_server: quicksave -> slot %d ok (%s)\n", kQuickSlot + 1, who);
+    gQuickCooldownUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
+}
+
+static void performLiveLoad(int slot, int requesterSlot)
+{
+    LoadSaveSlotData data;
+    if (!readSlotHeader(slot, data)) {
+        refuseSlot(requesterSlot, "That save cannot be read.");
+        return;
+    }
+
+    char who[64];
+    copyActorName(requesterSlot, who, sizeof(who)); // before the load: the body is about to be replaced
+    fprintf(stderr, "f2_server: reload slot %d ('%.30s') requested by %s (slot %d)\n",
+        slot + 1, data.description, who, requesterSlot);
+
+    serverControlPrepareForWorldReload();
+    combatSessionEndForLoad();
+    if (serverReloadSlot(slot) != 0) {
+        // The loader resets the world on failure (gameReset): there is no map left
+        // to serve. Stop cleanly so the operator restarts from a slot that loads,
+        // rather than tick an empty world at the viewers.
+        fprintf(stderr, "f2_server: RELOAD FAILED — shutting down; restart the server from a save that loads\n");
+        _game_user_wants_to_quit = 2;
+        return;
+    }
+    serverControlRebindAfterWorldReload();
+
+    // The gvar shadow describes the old world. The baseline the tick tail emits
+    // ships the whole loaded table and re-seeds the shadow; nothing is diffed in
+    // between.
+    gvarDeltaReset();
+    autosaveNoteWorldReplaced();
+    gQuickCooldownUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+
+    char msg[160];
+    if (slot == kQuickSlot && requesterSlot >= 0) {
+        snprintf(msg, sizeof(msg), "%s quick-loaded the game.", who);
+    } else {
+        snprintf(msg, sizeof(msg), "%s loaded slot %d (%.30s).", who, slot + 1, data.description);
+    }
+    presenter()->consoleMessageStyled(0, kMsgChannelSystem, msg);
+    fprintf(stderr, "f2_server: reload slot %d ok\n", slot + 1);
+}
+
+void serverAdminDrainWorldRequests()
+{
+    if (gQuickSavePending) {
+        gQuickSavePending = false;
+        int requesterSlot = gQuickSaveRequester;
+        gQuickSaveRequester = -1;
+        performQuickSave(requesterSlot);
+    }
+
+    if (gLiveLoad.slot >= 0) {
+        if (mapTransitionPending()) {
+            return; // the transition lands at this beat's tail; reload next beat
+        }
+        int slot = gLiveLoad.slot;
+        int requesterSlot = gLiveLoad.requesterSlot;
+        gLiveLoad = LiveLoadRequest {};
+        performLiveLoad(slot, requesterSlot);
+    }
 }
 
 bool serverAdminTakeRequest(ServerAdminRequest& out)

@@ -219,6 +219,7 @@ The client sends its OS in the handshake, so joins are announced as
 | `B` | swap active weapon hand (costs no AP, plays the put-away/take-out animation) |
 | `1` | toggle **sneak** (per-player: your roll, your Silent Running / Silent Death — not the host's) |
 | `3` | **Steal** — the skilldex entry, on a living critter opens the server-owned steal session |
+| `F6` / `F7` | **quicksave / quickload**, vanilla's keys. `F6` writes the server's quick slot (16); `F7` reloads it for everyone, and the game says who did it. Any connected player may use them, a dead one may `F7`. From the main screen only, in or out of combat: close any open screen first, as in vanilla. `F6` is refused during combat, dialogue, worldmap travel or a map change; `F7` is refused while a conversation, trade, steal, movie or worldmap trip is open |
 | `P` | the **pipboy** — holodisks (including the server's own SERVER INFORMATION disk), quests, status, automaps. Refused in combat, as in vanilla; the alarm clock refuses too, because the server owns the clock |
 | `PageUp` / `PageDown`, wheel | scroll the **dialog option list** when a node has more options than fit (the reply window keeps first claim on the wheel while it is paging itself) |
 
@@ -287,8 +288,8 @@ printf 'stress 20 0x010000EE 42\n' | nc -q1 127.0.0.1 9201
 | verb | meaning |
 |------|---------|
 | `saves` | list save slots |
-| `save <1-10> [label]` | save the running world into a slot |
-| `load <1-15>` | restore a slot (**lobby only**); `11`-`15` = the autosave window |
+| `save <1-16> [label]` | save the running world into a slot (`16` = the `F6` quicksave) |
+| `load <1-16>` | restore a slot. In the lobby it boots the world; while a world runs it is reloaded **in place for everyone** (the `F7` path, by number). `11`-`15` = the autosave window, `16` = the quicksave |
 | `new <map.map>` | boot a fresh world (**lobby only**) |
 | `status` | what is running right now |
 | `say <chan> <text>` / `saydemo` | push a styled line to every viewer's log / style eyeball test |

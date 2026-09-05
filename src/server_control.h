@@ -110,6 +110,21 @@ void serverControlDrainPendingLogins();
 // returner's. Defers itself during combat / a latched map transition.
 void serverControlDrainPresence();
 
+// -- World reload (F7 quickload / a live admin `load`; server_admin.cc) --------
+// Before the loader runs: remember every bound session by ACCOUNT NAME and drop
+// every latch that names an object or a slot of the world about to be replaced
+// (approach walks, move retries, inventory sessions, combat intents, elevator
+// offers, busy windows). MAIN-PHASE ONLY, like the drains above.
+void serverControlPrepareForWorldReload();
+
+// After the loader succeeded: re-bind each remembered session to the slot its
+// account name owns in the loaded save (a name the save does not know is kicked —
+// it has no body there; a quicksave of this very world always knows everyone), and
+// park every body whose owner is not connected, exactly as boot leaves them. A
+// bound-but-parked body is reattached by the presence drain that follows in the
+// same beat.
+void serverControlRebindAfterWorldReload();
+
 // Advance the pending out-of-combat interaction (INTERACTION_UX_DESIGN.md §2.3):
 // if the claimant's walk-then-act intent has reached its target, fire the real
 // engine outcome; if the approach finished/failed short, drop it with a "cannot

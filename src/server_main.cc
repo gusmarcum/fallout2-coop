@@ -706,6 +706,13 @@ int main(int argc, char** argv)
                 // object pointers is exactly the hazard those pumps skip
                 // acceptPending() for. Placed after the inbound drain so a login that
                 // arrived this beat is served this beat.
+                //
+                // Latched WORLD requests first: F6 quicksave, F7 quickload, a live
+                // `load <n>`. Here and nowhere else — outside every verb's actor scope
+                // and never inside a modal pump — and BEFORE the login/presence
+                // drains, so a reloaded world is rebound and reattached in this same
+                // beat and the tick tail's map-change baseline carries the result.
+                serverAdminDrainWorldRequests();
                 serverControlDrainPendingLogins();
                 // Body presence follows bindings (despawn on leave / reattach on
                 // return) — same main-phase-only discipline as the login drain.

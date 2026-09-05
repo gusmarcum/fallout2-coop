@@ -20,6 +20,7 @@
 #include "party_member.h"
 #include "perk.h"
 #include "platform_compat.h"
+#include "presenter.h" // presenterSetEmissionsSuppressed — a reload's teardown is silent
 #include "proto.h"
 #include "queue.h"
 #include "random.h"
@@ -537,6 +538,60 @@ int serverBootLoadSlot(int slot)
         return -1;
     }
 
+    return 0;
+}
+
+int serverReloadSlot(int slot)
+{
+    // The old EXTRA bodies die here, explicitly. They carry OBJECT_NO_REMOVE so a
+    // map transition spares them (that is what keeps their registry Object* valid
+    // across maps) — which means mapLoad's bulk teardown would leave them behind as
+    // ghosts; and a parked body (owner offline, _obj_disconnect) is on no list at
+    // all. objectDestroy handles both the on-list and the off-list case once the
+    // flag is dropped. Emissions are suppressed: every viewer rebuilds from the
+    // blob the tick tail sends, so a DESTROY per body would only be wire noise.
+    presenterSetEmissionsSuppressed(true);
+    for (int extra = 1; extra < playerActorCount(); extra++) {
+        Object* actor = playerActorAt(extra);
+        if (actor == nullptr) {
+            continue;
+        }
+        actor->flags &= ~OBJECT_NO_REMOVE;
+        if (objectDestroy(actor, nullptr) != 0) {
+            fprintf(stderr, "f2_server: reload: could not destroy the old body in slot %d\n", extra);
+        }
+    }
+    presenterSetEmissionsSuppressed(false);
+
+    // The appendix loader registers slot 0 = gDude and then each extra IN SLOT
+    // ORDER, and refuses a body that lands out of slot — so the registry must be
+    // empty when it runs, exactly as it is at boot.
+    playerActorClear();
+
+    savegameRefreshPatchesPath();
+    savegameSetSlot(slot);
+    if (lsgLoadGameInSlot(slot) == -1) {
+        int code = savegameGetErrorCode();
+        fprintf(stderr, "f2_server: reload slot %d FAILED (ls_error_code=%d%s) — the loader reset the world\n",
+            slot + 1, code,
+            code == 1 ? " = save made by an incompatible version" : "");
+        return -1;
+    }
+
+    // A save carries a vanilla preferences block; the server's env overrides stay
+    // authoritative, as on a boot load.
+    if (!serverApplyDifficultyOverrides()) {
+        return -1;
+    }
+
+    // A legacy save with no appendix registered nobody; make slot 0 the host
+    // either way (idempotent when the appendix already did).
+    if (playerActorRegister(gDude) != 0) {
+        fprintf(stderr, "f2_server: reload: host did not take registry slot 0\n");
+        return -1;
+    }
+
+    scriptsEnable(); // as serverBootFinish does after a boot load
     return 0;
 }
 
