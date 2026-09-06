@@ -18,11 +18,18 @@ on:
       - opened
       - synchronize
 
-# A newer push to the same branch cancels the older run instead of queueing
-# behind it.
+# A newer push to the same branch supersedes the older run instead of queueing
+# behind it, but ONLY for pull requests.
+#
+# On main the run always finishes. The README badge reports the last COMPLETED
+# run on the default branch, and GitHub paints a cancelled run the same red as a
+# failed one. Two pushes a few minutes apart therefore left a green build showing
+# as "failing" on the front page until the next run happened to land. A stale
+# badge is a much smaller problem than a badge that cries wolf, and pushes to main
+# are rare enough that the wasted minutes do not matter.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
