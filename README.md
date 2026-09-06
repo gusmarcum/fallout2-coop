@@ -14,10 +14,6 @@
 
 </div>
 
-<p align="center">
-  <img src="screenshots/readme-two-clients.jpg" alt="Two clients on the same shared map, each with its own viewpoint" width="900">
-</p>
-
 One PC runs a dedicated server that owns the world: scripts, combat, dialogue, the worldmap,
 saves. Every player runs a client that shows that shared world and sends what they do.
 Several people, one persistent game, each with their own character, and the world keeps
@@ -29,12 +25,17 @@ here as its own project. No game files are included: bring your own Fallout 2 (S
 US 1.02d). Licence: Sustainable Use (non-commercial), inherited from Fallout 2 Community
 Edition.
 
-<table align="center">
-  <tr>
-    <td align="center"><img src="screenshots/readme-shared-loot.jpg" alt="The same container open on both clients" width="440"><br><sub>The same container open on both clients</sub></td>
-    <td align="center"><img src="screenshots/readme-combat.jpg" alt="Turn-based combat resolved for both players" width="440"><br><sub>Turn-based combat, resolved for both players</sub></td>
-  </tr>
-</table>
+<div align="center">
+
+| | |
+|---|---|
+| **Players** | 2 or more, one character each, all in the same persistent world |
+| **You need** | Your own Fallout 2 (Steam or GOG, US 1.02d) and Windows 10 or 11, 64-bit |
+| **Host runs** | `f2_server.exe`, a dedicated server that owns the world |
+| **Everyone runs** | `fallout2-ce.exe`, the client that joins it |
+| **Over the internet** | Through a VPN such as ZeroTier; nothing is exposed to the open internet |
+
+</div>
 
 ## Download
 
