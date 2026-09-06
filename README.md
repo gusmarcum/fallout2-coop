@@ -1,8 +1,27 @@
+<div align="center">
+
 # Fallout 2 Co-op
 
-Play Fallout 2 together. One PC runs a dedicated server that owns the world: scripts, combat,
-dialogue, the worldmap, saves. Every player runs a client that shows that shared world and
-sends what they do. Several people, one persistent game, each with their own character.
+**Play Fallout 2 together. One dedicated server owns the world; every player joins it with their own character.**
+
+[![Build](https://github.com/gusmarcum/fallout2-coop/actions/workflows/ci-build.yml/badge.svg?branch=main)](https://github.com/gusmarcum/fallout2-coop/actions/workflows/ci-build.yml)
+[![Latest release](https://img.shields.io/github/v/release/gusmarcum/fallout2-coop?label=release&color=2ea44f)](https://github.com/gusmarcum/fallout2-coop/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/gusmarcum/fallout2-coop/total?label=downloads)](https://github.com/gusmarcum/fallout2-coop/releases)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6)
+[![Licence](https://img.shields.io/badge/licence-Sustainable%20Use-blue)](LICENSE.md)
+
+[Download](#download) · [What this project adds](#what-this-project-adds) · [Quick start](#quick-start) · [Keys](#keys-in-the-client) · [Server settings](#server-settings) · [Admin console](#admin-console) · [Building](#building-on-windows) · [Changelog](CHANGELOG.md)
+
+</div>
+
+<p align="center">
+  <img src="screenshots/readme-two-clients.jpg" alt="Two clients on the same shared map, each with its own viewpoint" width="900">
+</p>
+
+One PC runs a dedicated server that owns the world: scripts, combat, dialogue, the worldmap,
+saves. Every player runs a client that shows that shared world and sends what they do.
+Several people, one persistent game, each with their own character, and the world keeps
+going while someone is away.
 
 Built on [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce), derived
 from [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop) v0.4, and developed
@@ -10,66 +29,35 @@ here as its own project. No game files are included: bring your own Fallout 2 (S
 US 1.02d). Licence: Sustainable Use (non-commercial), inherited from Fallout 2 Community
 Edition.
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="screenshots/readme-shared-loot.jpg" alt="The same container open on both clients" width="440"><br><sub>The same container open on both clients</sub></td>
+    <td align="center"><img src="screenshots/readme-combat.jpg" alt="Turn-based combat resolved for both players" width="440"><br><sub>Turn-based combat, resolved for both players</sub></td>
+  </tr>
+</table>
+
+## Download
+
+**[Latest release](https://github.com/gusmarcum/fallout2-coop/releases/latest)**: a zip with
+`f2_server.exe`, `fallout2-ce.exe`, this README, the licence and a quick-start note. The two
+exes are also attached loose for people who only need the client.
+
+- Windows 10 or 11, 64-bit. Both exes are statically linked; there is nothing else to install.
+- You need your own Fallout 2 (Steam or GOG, US 1.02d). The server and every client must have
+  identical game data, and they must all run the same release of this project.
+- Windows may warn about an unsigned executable the first time: More info, Run anyway.
+- Play over a VPN such as ZeroTier. Never forward the game port or the admin port to the
+  internet; neither has authentication.
+
 ## What this project adds
 
-Everything below came out of real two-player sessions fixing AI mistakes from the original project, issues were manually traced to its cause in the engine,
-fixed at the cause, and verified against a 41-scenario regression suite before it shipped.
-The commit history carries the full reasoning for each one.
+Everything below came out of real two-player sessions, fixing mistakes left in the original
+project's AI-written code. Each issue was traced by hand to its cause in the engine, fixed at
+the cause, and verified against a 41-scenario regression suite before it shipped. The commit
+history carries the full reasoning for each one, and the [`bugs/`](bugs) folder records the
+live-play reports with symptom, cause and fix.
 
-**The world now survives a reconnect.** Co-op players reconnect a lot. Before, a rejoining
-client came back to a map where every visited town had turned unknown again, the Pip-Boy
-showed finished quests as open, and dead players stood back up. All three had the same
-shape: the server knew the truth, but a joining client was only ever sent the changes that
-happened after it arrived. Joins now carry the whole city table, the whole quest-variable
-table, and no longer rebuild a dead player's standing pose.
-
-**Computers and terminals work.** Every talking piece of scenery in the game, the Gecko
-power plant's robot terminal among them, starts its conversation through an engine request
-that only the vanilla client loop ever serviced. The dedicated server never ran that loop, so
-each of those terminals silently did nothing in co-op. The server tick now services the
-request, and the conversation is attributed to the player who clicked, so their answers are
-accepted.
-
-**Companions know who they belong to.** The follow logic read the single-player "the
-player" variable, which on a server with several players resolved to whoever the last action
-left behind, usually the host. Companions beelined for the wrong person or flip-flopped
-between two. Each party member now records who recruited them and follows that player,
-falling back to the nearest one on the same floor.
-
-**Companion combat orders in co-op.** Vanilla's Combat Control window runs a local loop on
-the machine that opens it and edits a local copy of the companion's settings, which the
-server never sees, so the feature was unreachable in co-op. The Combat Control button on a
-companion now opens their orders as a dialogue node served by the server: burst, run away,
-weapon preference, distance, target, chem use. Pick a line to cycle it, Done to return. Same
-settings, same labels, saved with the game.
-
-**Sound that tells you what is wrong.** The client's audio initialisation compared the SDL
-result with the wrong failure value, so a refused audio device passed as open and a player
-simply had no sound, with no error anywhere. The client now detects it, tries the other
-audio drivers, and prints the reason on the message line if it still cannot play. Music that
-died (a stall while another player joined, a movie that never resumed it) is restarted by a
-watchdog instead of staying dead for the session. The watchdog also remembers a track
-the client started on its own map load, so music that dies during a map change comes back
-without a rejoin.
-
-**Dialogue that works over the wire.** Stale reply options no longer draw over the new node.
-Long replies page (Down, Page Down or SPACE forward, Up or Page Up back). The Review button
-shows the conversation's history, which the client now records itself. Chat opens on `T`,
-also in combat, where Enter is the end-combat key.
-
-**Small things that mattered in play.** Two-handed weapons stopped occupying both hand slots.
-Arming one explosive from a stack arms one, not the stack. A dead player presses `R` to get
-back up instead of waiting for the operator. TAB opens the automap. Push works on companions.
-A stuck wait cursor clears itself. The operator's `save` refuses at moments when it would
-have failed silently, and a `gvar` console command exists for repairing a world's quest
-flags.
-
-**Quicksave and quickload.** Vanilla's `F6` and `F7`, server-side. `F6` writes the server's
-slot 16; `F7` reloads it in place for every connected player, through the same rebuild each
-client already performs after a map change, and the game says who pressed it. It works in
-combat, where it ends the fight the way single-player's does, and while dead, so a failed
-steal or a lost fight can be retried. The operator's `load <n>` takes the same path while a
-world runs, so restoring a slot no longer needs a server restart.
+### Playing together
 
 **Trading between players.** Talking to another player used to answer "That's another
 player." It now proposes a trade: the other player gets a yes/no box, and on yes both
@@ -89,13 +77,29 @@ vanilla death screen and the server reloads the most recently written save, whic
 that is, without anyone leaving the server. A world with no save yet stands the party back
 up where it fell instead.
 
-**The server never waits on a slow client.** Every frame went out through a blocking send
-with a five-second timeout, so a client that stopped reading its socket, which every client
-does for a few seconds while it loads a new map, froze the whole world for everyone: movement
-landed seconds late, queued clicks arrived in a burst, menus lagged and the music mixer
-starved. Sends are now non-blocking with a per-client queue, and a client that takes nothing
-for a minute is dropped instead of stalling the rest. Measured with a client that stops
-reading: a 20 second freeze before, 0.2 seconds after.
+**Quicksave and quickload.** Vanilla's `F6` and `F7`, server-side. `F6` writes the server's
+slot 16; `F7` reloads it in place for every connected player, through the same rebuild each
+client already performs after a map change, and the game says who pressed it. It works in
+combat, where it ends the fight the way single-player's does, and while dead, so a failed
+steal or a lost fight can be retried. The operator's `load <n>` takes the same path while a
+world runs, so restoring a slot no longer needs a server restart.
+
+**Companion combat orders in co-op.** Vanilla's Combat Control window runs a local loop on
+the machine that opens it and edits a local copy of the companion's settings, which the
+server never sees, so the feature was unreachable in co-op. The Combat Control button on a
+companion now opens their orders as a dialogue node served by the server: burst, run away,
+weapon preference, distance, target, chem use. Pick a line to cycle it, Done to return. A
+Disposition line at the top cycles the five vanilla presets (Custom, Coward, Defensive,
+Aggressive, Berserk), and editing a single order switches to Custom first, as vanilla does.
+Same settings, same labels, saved with the game.
+
+**Companions know who they belong to.** The follow logic read the single-player "the
+player" variable, which on a server with several players resolved to whoever the last action
+left behind, usually the host. Companions beelined for the wrong person or flip-flopped
+between two. Each party member now records who recruited them and follows that player,
+falling back to the nearest one on the same floor. A companion standing in a doorway used to
+fail every walk through it with "You cannot get there"; when party members are the only
+thing in the way they now step aside and the walk is retried.
 
 **Companions survive a map change after a load.** The map save writes party members with
 their keep-on-map flags cleared and nothing re-armed them after a load, so the first map
@@ -103,11 +107,94 @@ change after restoring a world deleted every companion's body and the next load 
 from the party. The flags are re-armed on load, and the console gained `party` (list) and
 `partyadd <pid>` (re-attach a companion standing on the current map) for worlds already hit.
 
+### Fixed from live play
+
+**The world survives a reconnect.** Co-op players reconnect a lot. Before, a rejoining
+client came back to a map where every visited town had turned unknown again, the Pip-Boy
+showed finished quests as open, and dead players stood back up. All three had the same
+shape: the server knew the truth, but a joining client was only ever sent the changes that
+happened after it arrived. Joins now carry the whole city table, the whole quest-variable
+table, and no longer rebuild a dead player's standing pose.
+
+**Computers and terminals work.** Every talking piece of scenery in the game, the Gecko
+power plant's robot terminal among them, starts its conversation through an engine request
+that only the vanilla client loop ever serviced. The dedicated server never ran that loop, so
+each of those terminals silently did nothing in co-op. The server tick now services the
+request, and the conversation is attributed to the player who clicked, so their answers are
+accepted.
+
+**Sound that tells you what is wrong.** The client's audio initialisation compared the SDL
+result with the wrong failure value, so a refused audio device passed as open and a player
+simply had no sound, with no error anywhere. The client now detects it, tries the other
+audio drivers, and prints the reason on the message line if it still cannot play. Music that
+died (a stall while another player joined, a movie that never resumed it) is restarted by a
+watchdog instead of staying dead for the session. The watchdog also remembers a track the
+client started on its own map load, so music that dies during a map change comes back
+without a rejoin, and a change between two maps that share a track (Vault City's courtyard
+and downtown, San Francisco's docks and Chinatown) no longer leaves the track silent for the
+whole visit.
+
+**Dialogue that works over the wire.** Stale reply options no longer draw over the new node.
+Long replies page (Down, Page Down or SPACE forward, Up or Page Up back). The Review button
+shows the conversation's history, which the client now records itself. Chat opens on `T`,
+also in combat, where Enter is the end-combat key.
+
+**Doors and elevators stay where they belong.** Vault-style sliding doors and elevator doors
+move by per-frame art offsets that the animation accumulates into the object's position. The
+headless server never animates, and the code that stepped its door frames subtracted the
+wrong frames' offsets, nine pixels short per open-and-close cycle, so doors crept upward and
+the drift went into every map save and every join: a Navarro door ended up 88 pixels above
+its doorway. Frames now step exactly as the animation would, and every door is put back on
+its frame's offsets at each map load, so existing worlds heal themselves. Elevators ask for
+the floor once instead of twice, and a scripted door such as the San Francisco Brotherhood
+entrance no longer opens and closes in the same beat.
+
+**The second player gets the same game as the host.** Several things worked for the host
+character and silently not for anyone else. Armor perks (the T-51b's +3 Strength and its
+radiation resistance) sat behind a party-member check that only the host passed; they now
+apply to every player. A player being stolen from watched their worn armor and weapons
+vanish from their own screen while the server parked them; the screen keeps them. The
+action-point bar could open a turn showing last turn's leftover while the server held the
+full budget. An offline teammate's parked body could appear glued to the top-left corner of
+the screen, above the roof. And a player's sprite now follows the hand selected on the
+interface bar, as in vanilla, instead of whichever hand happened to hold a weapon.
+
+**Small things that mattered in play.** Two-handed weapons stopped occupying both hand slots.
+Arming one explosive from a stack arms one, not the stack. TAB opens the automap. Push works
+on companions. A stuck wait cursor clears itself. The operator's `save` refuses at moments
+when it would have failed silently, `gvar` reads or repairs a world's quest flags, and
+`spawn` attaches the NPC's script so a spawned companion talks. A world whose Vault City gate
+answers "You cannot get there" while standing open can be repaired with
+[`tools/repair_vault_city_gate.py`](tools/repair_vault_city_gate.py)
+([bug note 008](bugs/008-vault-city-gate-blocker.md)).
+
+### Under the hood
+
+**The server never waits on a slow client.** Every frame went out through a blocking send
+with a five-second timeout, so a client that stopped reading its socket, which every client
+does for a few seconds while it loads a new map, froze the whole world for everyone: movement
+landed seconds late, queued clicks arrived in a burst, menus lagged and the music mixer
+starved. Sends are now non-blocking with a per-client queue, and a client that takes nothing
+for a minute is dropped instead of stalling the rest. Measured with a client that stops
+reading: a 20 second freeze before, 0.2 seconds after. The server window reports a client
+that has stopped draining its stream, with how much is queued for it.
+
+**Crashes traced to their pointer.** Two heap-corruption crashes on the client had one root:
+the engine merges identical inventory stacks and frees the merged object, while the network
+mirror still remembered it and freed it again. Wire stacks are now mirrored as their own
+slots, the engine tells the mirror about every object it frees, and a registry of live
+objects turns any remaining stale pointer into a logged skip instead of a crash, with the
+object named in `debug.log`. An out-of-combat input block is capped at three seconds and
+names the stuck animation.
+
 **A test harness that runs on Windows.** The engine's two golden suites, 41 headless
 scenarios that replay fixed inputs and compare the resulting world state byte for byte, only
 ran on Linux. Headless probes now run on Windows: exempt from the single-instance locks,
 deterministic (the RNG seed no longer comes from the wall clock), and blessed against a
-Windows result set. Every commit in this repository passes both suites.
+Windows result set. Every commit in this repository passes both suites, and CI builds the two
+shipped binaries with the same MSYS2 toolchain and flags on every push. Each feature also
+ships with a headless proof script under [`tools/`](tools) that drives a sandbox server with
+fake clients: trade and death, quicksave, armor perks, the parked body, inventory.
 
 ## Quick start
 
@@ -147,10 +234,22 @@ fallout2-ce.exe
 
 **Other players**
 
-Put `fallout2-ce.exe` next to your own Fallout 2 files and start it with the host's address in
-`F2_CLIENT_CONNECT` (for example `10.144.94.83:9300`) and your own `F2_PLAYER_NAME`. The first
-time a name is seen you create a character; after that the same name is the same character.
-Names must differ between players and stay the same across sessions.
+Put `fallout2-ce.exe` next to your own Fallout 2 files and start it from a `.cmd` with the
+host's address:
+
+```bat
+@echo off
+cd /d "%~dp0"
+set F2_CLIENT_CONNECT=10.144.94.83:9300
+set F2_PLAYER_NAME=Friend
+set F2_PLAYER_CREATE=ask
+fallout2-ce.exe
+```
+
+The first time a name is seen you create a character; after that the same name is the same
+character, with the inventory, level and quest state you had when you last played. Names
+must differ between players and stay the same across sessions. While you are away your body
+is parked; when you come back it is placed next to the host, on whatever map the host is on.
 
 A VPN such as ZeroTier is the recommended way to play over the internet. Do not forward the
 game port to the internet: the wire has no authentication. The client reads `fallout2.cfg`
@@ -173,6 +272,7 @@ from the folder the exe is in, so keep it next to the game files.
 | Review button | this conversation's history |
 | Combat Control button | on a companion: their combat orders |
 | hold left click on a companion | menu with Push |
+| `Esc` on the elevator panel | close it without riding |
 
 ## Server settings
 
@@ -193,10 +293,13 @@ Set these as environment variables before starting `f2_server.exe`.
 | `F2_MOVIES` | on | `0` skips scripted movies; use it if a joining client crashes on a cutscene |
 | `F2_TRACE_WORLD` | off | `1` prints `[world]` lines for door, container and map-state changes |
 
+The full list of variables and verbs, including the diagnostic ones, is in
+[`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md).
+
 ## Admin console
 
 Connect to the `F2_SERVER_CMD` port with a TCP tool (telnet, nc, or a small script) and send one
-command per line. It answers once a client is connected.
+command per line. It answers once a client is connected; `help` lists everything.
 
 | Command | Meaning |
 |---|---|
@@ -211,6 +314,8 @@ command per line. It answers once a client is connected.
 | `gvar <index> [value]` | read or set a global script variable (quest flags) |
 | `party` | list the party as the server sees it |
 | `partyadd <pid>` | re-attach a companion standing on the current map (89 = John Cassidy) |
+| `spawn <pid> [count] [tile] [script]` | spawn an NPC; `tile` -1 = beside the host; `script` is its scripts.lst number, needed for it to talk (Vic: `spawn 0x0100003E 1 -1 50`) |
+| `despawnall` | remove every NPC spawned by this server run |
 | `say <channel> <text>` | a line to every client |
 | `quit` | stop the server |
 
@@ -228,7 +333,10 @@ cmake --build build-win --target f2_server fallout2-ce -j4
 ```
 
 The two exes in `build-win` depend only on Windows system libraries. SDL2 and zlib are fetched
-and built during configure. Linux builds follow `DEDICATED_HOWTO.md`.
+and built during configure. The same build runs in CI on every push
+([`ci-build.yml`](.github/workflows/ci-build.yml)), with the Windows and Linux binaries
+attached to each run as artifacts. Linux builds follow
+[`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md).
 
 ## Testing
 
@@ -252,6 +360,16 @@ suites pass on every commit of this repository.
   until re-recruited.
 - The Restoration Project and other sfall hook-script mods are not supported: hook scripts do
   not run in this engine. Server and every client must have identical game data.
+
+## More documentation
+
+- [`CHANGELOG.md`](CHANGELOG.md): what each release changed.
+- [`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md): the operator reference, every environment
+  variable and console verb, Linux and Docker.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/MP_PROTOCOL.md`](docs/MP_PROTOCOL.md):
+  how the server, the client and the wire fit together.
+- [`bugs/`](bugs): the live-play bug notes, one file per report.
+- [`tools/`](tools): sandbox proof scripts and repair tools.
 
 ## Credits
 
