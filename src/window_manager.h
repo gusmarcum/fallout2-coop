@@ -171,6 +171,10 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* a3);
 void windowRefreshAll(Rect* rect);
 void _win_get_mouse_buf(unsigned char* a1);
 Window* windowGetWindow(int win);
+
+// Diagnostic: print every live window (z-order, id, rect, flags) through debugPrint.
+// Used by the co-op viewer's audit to find a stray overlay nobody can account for.
+void windowDebugDump(const char* tag);
 unsigned char* windowGetBuffer(int win);
 int windowGetAtPoint(int x, int y);
 int windowGetWidth(int win);

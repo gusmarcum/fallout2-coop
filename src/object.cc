@@ -2290,6 +2290,22 @@ void _obj_remove_all()
     _obj_last_roof_x = -1;
 }
 
+void objectDebugDumpFloating(const char* tag)
+{
+    int count = 0;
+    for (ObjectListNode* node = gObjectListHead; node != nullptr; node = node->next) {
+        Object* obj = node->obj;
+        if (obj == nullptr) {
+            continue;
+        }
+        debugPrint("[floating] %s: pid=0x%X fid=0x%X netId=%d tile=%d elev=%d sx=%d sy=%d flags=0x%X outline=0x%X\n",
+            tag != nullptr ? tag : "", obj->pid, obj->fid, obj->netId, obj->tile, obj->elevation,
+            obj->sx, obj->sy, obj->flags, obj->outline);
+        count++;
+    }
+    debugPrint("[floating] %s: %d object(s) on the tile -1 list\n", tag != nullptr ? tag : "", count);
+}
+
 // 0x48B3A8
 Object* objectFindFirst()
 {
