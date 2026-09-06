@@ -367,6 +367,7 @@ suites pass on every commit of this repository.
 ## More documentation
 
 - [`CHANGELOG.md`](CHANGELOG.md): what each release changed.
+- [`AUTHORS.md`](AUTHORS.md): what in this repository is inherited and what was written here.
 - [`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md): the operator reference, every environment
   variable and console verb, Linux and Docker.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/MP_PROTOCOL.md`](docs/MP_PROTOCOL.md):
@@ -381,5 +382,8 @@ suites pass on every commit of this repository.
 - [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop): the dedicated server, the
   network client and the wire protocol this project is derived from.
 - Fallout 2 is the work of Black Isle Studios and Interplay.
+
+A precise breakdown of what is inherited and what was written here is in
+[`AUTHORS.md`](AUTHORS.md).
 
 Licence: [Sustainable Use License](LICENSE.md).
