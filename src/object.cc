@@ -1095,11 +1095,20 @@ int objectReattach(Object* obj, int tile, int elevation)
 
     ObjectListNode* node;
     ObjectListNode* previousNode;
+    int rc;
     if (objectGetListNode(obj, &node, &previousNode) != 0) {
-        return _obj_connect(obj, tile, elevation, nullptr);
+        rc = _obj_connect(obj, tile, elevation, nullptr);
+    } else {
+        rc = objectSetLocation(obj, tile, elevation, nullptr);
     }
 
-    return objectSetLocation(obj, tile, elevation, nullptr);
+    if (rc == 0) {
+        // _obj_load_player_actor hides a body it could not place (see there); a
+        // body standing on the map is never a hidden one.
+        obj->flags &= ~OBJECT_HIDDEN;
+    }
+
+    return rc;
 }
 
 // 0x489FF8
@@ -3722,6 +3731,23 @@ int _obj_load_player_actor(File* stream, Object** actorPtr)
 
     objectSetLocation(obj, tile, elevation, nullptr);
     objectSetRotation(obj, obj->rotation, nullptr);
+
+    // ►► A PARKED BODY MUST NOT BE DRAWN. An offline player's body travels in the
+    // blob at tile -1 (server_control.cc parks it with _obj_disconnect, which
+    // stamps tile -1), so the objectSetLocation above fails closed and the body
+    // stays on the FLOATING list — and that list is not invisible: the renderer's
+    // post-roof pass (_obj_render_post_roof) draws every unhidden floating object
+    // at its raw (sx, sy), which for a loaded object is (0, 0). On every viewer
+    // that meant the absent teammate's sprite glued to the top-left corner of the
+    // screen, above the roof, scroll-proof and unclickable, from the blob load
+    // until the next world rebuild (owner: "what is this character sticker at
+    // the top left", 2026-09-05, playing alone with the friend's body parked in
+    // the save). The netId map never learns a floating object (seedNetMap walks
+    // the tile buckets), so no later event could hide or move it either. Hidden
+    // here; objectReattach lifts the flag the moment the body is placed again.
+    if (obj->tile == -1) {
+        obj->flags |= OBJECT_HIDDEN;
+    }
 
     if (actorPtr != nullptr) {
         *actorPtr = obj;
