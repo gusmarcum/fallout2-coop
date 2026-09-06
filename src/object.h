@@ -85,6 +85,9 @@ Object* objectFindById(int a1);
 Object* objectFindByNetId(int netId);
 Object* objectGetOwner(Object* obj);
 void _obj_remove_all();
+// Diagnostic: print every object on the FLOATING list (tile -1, not placed) through
+// debugPrint — the list objectFindFirst never walks.
+void objectDebugDumpFloating(const char* tag);
 Object* objectFindFirst();
 Object* objectFindNext();
 Object* objectFindFirstAtElevation(int elevation);

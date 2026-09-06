@@ -1107,6 +1107,24 @@ void _refresh_all(Rect* rect, unsigned char* a2)
     }
 }
 
+void windowDebugDump(const char* tag)
+{
+    debugPrint("[windows] %s: %d window(s), bottom to top\n", tag != nullptr ? tag : "", gWindowsLength);
+    for (int index = 0; index < gWindowsLength; index++) {
+        Window* window = gWindows[index];
+        if (window == nullptr) {
+            continue;
+        }
+        debugPrint("[windows]   #%d id=%d rect=%d,%d-%d,%d size=%dx%d flags=0x%X%s%s%s buttons=%s\n",
+            index, window->id, window->rect.left, window->rect.top, window->rect.right, window->rect.bottom,
+            window->width, window->height, window->flags,
+            (window->flags & WINDOW_HIDDEN) != 0 ? " HIDDEN" : "",
+            (window->flags & WINDOW_MODAL) != 0 ? " MODAL" : "",
+            (window->flags & WINDOW_MOVE_ON_TOP) != 0 ? " ON_TOP" : "",
+            window->buttonListHead != nullptr ? "yes" : "no");
+    }
+}
+
 // 0x4D7888
 Window* windowGetWindow(int win)
 {

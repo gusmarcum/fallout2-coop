@@ -38,6 +38,7 @@
 #include "inventory_ui.h" // gInventory{Left,Right}HandItem/Armor — parked-equip detach check (Slice 3b)
 #include "item.h" // critterGetWeaponForHitMode — ATTACK_RESULT reconstruct (§3.c)
 #include "dbox.h" // showDialogBox / DIALOG_BOX_* — streamed random-encounter prompt
+#include "window_manager.h" // windowDebugDump - the audit lists every window
 #include "kb.h" // KEY_ESCAPE — force-close a viewer modal on combat/rebaseline
 #include "light.h" // lightSetAmbientIntensity — streamed global ambient-light delta
 #include "map.h"
@@ -4611,6 +4612,38 @@ private:
             return;
         }
         int divergences = stateAuditCompare(_auditRecords, stderr);
+        // ►► WHAT ELSE IS ON THIS SCREEN. The audit compares what the server has
+        // against the mirror; a stray overlay (owner: a teammate's body glued to the
+        // top-left corner, 2026-09-05) is by definition something the server does
+        // not have. List the windows, the floating (tile -1) objects, and every
+        // critter wearing a player actor's base art, with its screen position.
+        windowDebugDump("audit");
+        objectDebugDumpFloating("audit");
+        for (Object* o = objectFindFirst(); o != nullptr; o = objectFindNext()) {
+            if (PID_TYPE(o->pid) != OBJ_TYPE_CRITTER) {
+                continue;
+            }
+            bool playerArt = false;
+            int actorSlot = -1;
+            for (int slot = 0; slot < playerActorCount(); slot++) {
+                Object* actor = playerActorAt(slot);
+                if (actor == nullptr) {
+                    continue;
+                }
+                if (actor == o) {
+                    actorSlot = slot;
+                }
+                if ((actor->fid & 0xFFF) == (o->fid & 0xFFF)) {
+                    playerArt = true;
+                }
+            }
+            if (!playerArt && actorSlot < 0) {
+                continue;
+            }
+            debugPrint("[critters] audit: pid=0x%X fid=0x%X netId=%d slot=%d tile=%d elev=%d sx=%d sy=%d x=%d y=%d flags=0x%X outline=0x%X%s\n",
+                o->pid, o->fid, o->netId, actorSlot, o->tile, o->elevation, o->sx, o->sy, o->x, o->y,
+                o->flags, o->outline, o == gDude ? " (gDude)" : "");
+        }
         _auditRecords.clear();
         (void)divergences;
     }
