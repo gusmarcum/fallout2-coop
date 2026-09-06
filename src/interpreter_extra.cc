@@ -21,6 +21,7 @@
 #include "game_sound.h"
 #include "geometry.h"
 #include "interface.h"
+#include "inventory.h" // invenActiveHandFor — the active hand every hand-reading opcode asks for
 #include "item.h"
 #include "light.h"
 #include "loadsave.h"
@@ -427,20 +428,13 @@ static int _correctFidForRemovedItem(Object* a1, Object* a2, int flags)
     int newFid = -1;
 
     if ((flags & 0x03000000) != 0) {
-        if (a1 == gDude) {
-            if (interfaceGetCurrentHand()) {
-                if ((flags & 0x02000000) != 0) {
-                    v8 = 0;
-                }
-            } else {
-                if ((flags & 0x01000000) != 0) {
-                    v8 = 0;
-                }
-            }
-        } else {
-            if ((flags & 0x02000000) != 0) {
-                v8 = 0;
-            }
+        // Only a weapon in the ACTIVE hand is on the sprite, so only losing THAT one blanks
+        // the fid's weapon nibble. (0x01000000 = OBJECT_IN_LEFT_HAND, 0x02000000 = right.)
+        // Was a local-interface read, which on a dedicated server answered HAND_LEFT for
+        // every seat and so blanked, or failed to blank, the wrong player's sprite.
+        int activeHandFlag = invenActiveHandFor(a1) == HAND_LEFT ? 0x01000000 : 0x02000000;
+        if ((flags & activeHandFlag) != 0) {
+            v8 = 0;
         }
 
         if (v8 == 0) {
@@ -1819,12 +1813,11 @@ static void opWieldItem(Program* program)
         newArmor = item;
     }
 
-    // The current-hand read is the LOCAL player's interface state, so it stays the
-    // host's; an extra defaults to the right hand (irrelevant for armour, which
-    // occupies the armour slot regardless).
-    if (critter == gDude && interfaceGetCurrentHand() == HAND_LEFT) {
-        hand = HAND_LEFT;
-    }
+    // Wield into the hand this critter is actually holding up. This used to read the LOCAL
+    // interface, so on a dedicated server an extra was pinned to the host's bar (and the
+    // host's bar to the stub); irrelevant for armour, which occupies the armour slot
+    // regardless, but wrong for the weapon a script hands you.
+    hand = invenActiveHandFor(critter);
 
     if (_inven_wield(critter, item, hand) == -1) {
         scriptPredefinedError(program, "wield_obj_critter", SCRIPT_ERROR_FOLLOWS);
@@ -3151,29 +3144,46 @@ static void opCritterGetInventoryObject(Program* program)
     int type = programStackPopInteger(program);
     Object* critter = static_cast<Object*>(programStackPopPointer(program));
 
+    // ►► THE ACTIVE-HAND FILTER IS HOW "PUT YOUR WEAPON AWAY" WORKS AT ALL. Vanilla reports
+    // the hand the player is NOT holding up as EMPTY, so switching to the empty hand (the
+    // interface bar's swap, our `hand` verb / B key) is what satisfies an NCR guard, a New
+    // Reno bouncer or a Vault City gate. The weapon never leaves the slot.
+    //
+    // Vanilla applies that filter to gDude alone, and both halves of that break on a
+    // dedicated server:
+    //
+    //   * WHICH HAND. interfaceGetCurrentHand() is a stub pinned to HAND_LEFT there
+    //     (server_stubs.cc), so RIGHT_HAND always read empty and LEFT_HAND always read the
+    //     slot regardless of the swap. A gun parked in the left slot stayed visible to every
+    //     guard script forever, and no amount of holstering cleared it.
+    //
+    //   * WHOSE HAND. gDude is the ANCHORED actor (ServerActorScope), so every other player
+    //     fell to the else-branch and got no filter at all: both slots reported unconditionally,
+    //     so a client could not comply by switching hands, only by emptying the slot or
+    //     overwriting it with a non-weapon. Owner-reported: the NCR guards nagged the client
+    //     and opened fire on a holstered gun, while the host walked past armed; equipping two
+    //     non-weapons was the only thing that shut them up.
+    //
+    // A player actor is a dude, so it gets the dude's rule and the registry's answer.
+    bool activeHandFiltered = critter == gDude
+        || (serverDedicatedActive() && playerActorIs(critter));
+    int activeHand = activeHandFiltered ? invenActiveHandFor(critter) : HAND_RIGHT;
+
     if (PID_TYPE(critter->pid) == OBJ_TYPE_CRITTER) {
         switch (type) {
         case INVEN_TYPE_WORN:
             programStackPushPointer(program, critterGetArmor(critter));
             break;
         case INVEN_TYPE_RIGHT_HAND:
-            if (critter == gDude) {
-                if (interfaceGetCurrentHand() != HAND_LEFT) {
-                    programStackPushPointer(program, critterGetItem2(critter));
-                } else {
-                    programStackPushPointer(program, nullptr);
-                }
+            if (activeHandFiltered && activeHand == HAND_LEFT) {
+                programStackPushPointer(program, nullptr);
             } else {
                 programStackPushPointer(program, critterGetItem2(critter));
             }
             break;
         case INVEN_TYPE_LEFT_HAND:
-            if (critter == gDude) {
-                if (interfaceGetCurrentHand() == HAND_LEFT) {
-                    programStackPushPointer(program, critterGetItem1(critter));
-                } else {
-                    programStackPushPointer(program, nullptr);
-                }
+            if (activeHandFiltered && activeHand != HAND_LEFT) {
+                programStackPushPointer(program, nullptr);
             } else {
                 programStackPushPointer(program, critterGetItem1(critter));
             }
@@ -3185,6 +3195,25 @@ static void opCritterGetInventoryObject(Program* program)
             scriptError("script error: %s: Error in critter_inven_obj -- wrong type!", program->name);
             programStackPushInteger(program, 0);
             break;
+        }
+
+        // "The guard still thinks I am armed" is otherwise invisible: the script asks, gets
+        // an answer, and draws. Print what a PLAYER's hands actually reported, and to whom.
+        static const bool traceHands = getenv("F2_TRACE_HANDS") != nullptr; // read once, hot path
+        if (traceHands
+            && (type == INVEN_TYPE_LEFT_HAND || type == INVEN_TYPE_RIGHT_HAND)
+            && playerActorIs(critter)) {
+            ProgramValue answer;
+            Object* got = programStackPeekValue(program, 0, &answer) && answer.opcode == VALUE_TYPE_PTR
+                ? static_cast<Object*>(answer.pointerValue)
+                : nullptr;
+            Object* raw = type == INVEN_TYPE_LEFT_HAND ? critterGetItem1(critter) : critterGetItem2(critter);
+            fprintf(stderr, "[hands] %s asked %s of net=%d slot=%d: active=%s filtered=%d slotHolds=%d answered=%d\n",
+                program->name != nullptr ? program->name : "?",
+                type == INVEN_TYPE_LEFT_HAND ? "LEFT" : "RIGHT",
+                critter->netId, playerActorSlotOf(critter),
+                activeHand == HAND_LEFT ? "LEFT" : "RIGHT", activeHandFiltered ? 1 : 0,
+                raw != nullptr ? raw->pid : -1, got != nullptr ? got->pid : -1);
         }
     } else {
         scriptPredefinedError(program, "critter_inven_obj", SCRIPT_ERROR_FOLLOWS);
@@ -3403,12 +3432,7 @@ static void opMetarule(Program* program)
         if (1) {
             Object* object = static_cast<Object*>(param.pointerValue);
 
-            int hand = HAND_RIGHT;
-            if (object == gDude) {
-                if (interfaceGetCurrentHand() == HAND_LEFT) {
-                    hand = HAND_LEFT;
-                }
-            }
+            int hand = invenActiveHandFor(object);
 
             result = _invenUnwieldFunc(object, hand, 0);
 
@@ -4199,11 +4223,12 @@ static void _op_inven_unwield(Program* program)
     int v1;
 
     obj = scriptGetSelf(program);
-    v1 = 1;
 
-    if (obj == gDude && !interfaceGetCurrentHand()) {
-        v1 = 0;
-    }
+    // The hand a script puts away is the one the critter is HOLDING UP. Same three-branch
+    // answer as everywhere else (invenActiveHandFor); asking the server's stubbed interface
+    // here emptied the left hand of a player whose gun was in the right, so a guard script
+    // that disarms you left you armed and then shot you for it.
+    v1 = invenActiveHandFor(obj);
 
     _inven_unwield(obj, v1);
 }

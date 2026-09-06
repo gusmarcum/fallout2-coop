@@ -34,6 +34,12 @@ Object* _inven_index_ptr(Object* obj, int index);
 int _inven_wield(Object* critter, Object* item, int hand);
 // Same as inven_wield but allows to wield item without animation.
 int _invenWieldFunc(Object* critter, Object* item, int hand, bool animate);
+// Which hand this critter is holding up (HAND_LEFT / HAND_RIGHT). A player actor on a
+// dedicated server answers from the per-seat registry (`hand` verb), gDude from its own
+// interface bar, everyone else from vanilla's NPCs-use-the-right-slot rule. Use this
+// anywhere the old code reached for interfaceGetCurrentHand(), which is stubbed to
+// HAND_LEFT on the server and therefore wrong for every seat.
+int invenActiveHandFor(Object* critter);
 // Makes critter unequip an item in a given hand slot with an animation.
 int _inven_unwield(Object* critter, int hand);
 // Same as inven_unwield but allows to unwield item without animation.
