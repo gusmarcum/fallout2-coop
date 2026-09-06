@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.png" alt="Fallout 2 Co-op" width="480">
+
 # Fallout 2 Co-op
 
 **Play Fallout 2 together. One dedicated server owns the world; every player joins it with their own character.**
