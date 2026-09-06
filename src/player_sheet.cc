@@ -2,6 +2,7 @@
 
 #include <stdio.h> // TEMP [psht]: stderr trace of the sheet-delta emit
 #include <stdlib.h> // getenv — sheet-delta temp-file path
+#include <vector> // std::vector<unsigned char> below; MinGW pulls it in transitively, libc++ (Android/macOS) does not
 
 #include "critter.h"
 #include "db.h"

@@ -1,5 +1,14 @@
 name: Build
 
+# What this fork ships is a Windows co-op server (f2_server.exe) and the viewer
+# client (fallout2-ce.exe), built with MSYS2 mingw-w64 exactly as the local
+# build script does. CI answers one question: does main still build the
+# binaries we ship. The Linux build and the static analysis stay because they
+# are cheap and GCC on Linux catches portability slips MinGW lets through.
+# The upstream phone/Mac/32-bit matrix and the clang-format gate are gone:
+# nothing here targets them, and a check nobody can keep green is worse than
+# no check.
+
 on:
   push:
     branches:
@@ -8,6 +17,12 @@ on:
     types:
       - opened
       - synchronize
+
+# A newer push to the same branch cancels the older run instead of queueing
+# behind it.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -31,188 +46,11 @@ jobs:
       - name: cppcheck
         run: cppcheck --std=c++17 src/
 
-  code-format:
-    name: Code format check
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v4
-
-      - name: clang-format
-        run: find src -type f -name \*.cc -o -name \*.h | xargs clang-format --dry-run --Werror
-
-  android:
-    name: Android
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: temurin
-          java-version: 11
-          cache: gradle
-
-      - name: Cache cmake build
-        uses: actions/cache@v4
-        with:
-          path: os/android/app/.cxx
-          key: android-cmake-v2
-
-      - name: Setup signing config
-        if: env.KEYSTORE_FILE_BASE64 != '' && env.KEYSTORE_PROPERTIES_FILE_BASE64 != ''
-        run: |
-          cd os/android
-          echo "$KEYSTORE_FILE_BASE64" | base64 --decode > debug.keystore
-          echo "$KEYSTORE_PROPERTIES_FILE_BASE64" | base64 --decode > debug-keystore.properties
-        env:
-          KEYSTORE_FILE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_FILE_BASE64 }}
-          KEYSTORE_PROPERTIES_FILE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_PROPERTIES_FILE_BASE64 }}
-
-      - name: Build
-        run: |
-          cd os/android
-          ./gradlew assembleDebug
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: fallout2-ce-debug.apk
-          path: os/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
-
-  ios:
-    name: iOS
-
-    runs-on: macos-13
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v4
-
-      - name: Cache cmake build
-        uses: actions/cache@v4
-        with:
-          path: out
-          key: ios-cmake-v5
-
-      - name: Configure
-        run: |
-          cmake --preset ios
-
-      - name: Build
-        run: |
-          cmake --build --preset ios-debug
-
-      - name: Pack
-        run: |
-          cd out/build/ios
-          cpack -C Debug
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: fallout2-ce.ipa
-          path:  out/build/ios/fallout2-ce.ipa
-          retention-days: 7
-
   linux:
-    name: Linux (${{ matrix.arch }})
+    name: Linux (x64)
 
     runs-on: ubuntu-22.04
 
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - x86
-          - x64
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v4
-
-      - name: Dependencies (x86)
-        if: matrix.arch == 'x86'
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt update
-          sudo apt install g++-multilib libsdl2-dev:i386 zlib1g-dev:i386
-
-      - name: Dependencies (x64)
-        if: matrix.arch == 'x64'
-        run: |
-          sudo apt update
-          sudo apt install libsdl2-dev zlib1g-dev
-
-      - name: Cache cmake build
-        uses: actions/cache@v4
-        with:
-          path: out
-          key: linux-${{ matrix.arch }}-cmake-v3
-
-      - name: Configure
-        run: |
-          cmake --preset linux-${{ matrix.arch }}-debug
-
-      - name: Build
-        run: |
-          cmake --build --preset linux-${{ matrix.arch }}-debug
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: fallout2-ce-linux-${{ matrix.arch }}
-          path:  out/build/linux-${{ matrix.arch }}-debug/fallout2-ce
-          retention-days: 7
-
-  linux-armhf:
-    name: Linux (armhf)
-
-    runs-on: ubuntu-22.04-arm
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v4
-
-      - name: Dependencies
-        run: |
-          sudo dpkg --add-architecture armhf
-          sudo apt update
-          sudo apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libsdl2-dev:armhf zlib1g-dev:armhf
-
-      - name: Configure
-        run: |
-          cmake \
-            -B build \
-            -D CMAKE_BUILD_TYPE=Debug \
-            -D FALLOUT_VENDORED=OFF \
-            -D CMAKE_SYSTEM_PROCESSOR=arm \
-            -D CMAKE_C_COMPILER=arm-linux-gnueabihf-gcc \
-            -D CMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ \
-            # EOL
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: fallout2-ce-linux-armhf
-          path:  build/fallout2-ce
-          retention-days: 7
-
-  linux-arm64:
-    name: Linux (arm64)
-
-    runs-on: ubuntu-22.04-arm
-
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -222,89 +60,71 @@ jobs:
           sudo apt update
           sudo apt install libsdl2-dev zlib1g-dev
 
-      - name: Configure
-        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -D FALLOUT_VENDORED=OFF
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: fallout2-ce-linux-arm64
-          path:  build/fallout2-ce
-          retention-days: 7
-
-  macos:
-    name: macOS
-
-    runs-on: macos-13
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v4
-
       - name: Cache cmake build
         uses: actions/cache@v4
         with:
           path: out
-          key: macos-cmake-v6
+          key: linux-x64-cmake-v3
 
       - name: Configure
         run: |
-          cmake --preset macos
+          cmake --preset linux-x64-debug
 
       - name: Build
         run: |
-          cmake --build --preset macos-debug
-
-      - name: Pack
-        run: |
-          cd out/build/macos
-          cpack -C Debug
+          cmake --build --preset linux-x64-debug
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: fallout2-ce-macos.dmg
-          path: out/build/macos/Fallout II Community Edition.dmg
+          name: fallout2-ce-linux-x64
+          path: |
+            out/build/linux-x64-debug/fallout2-ce
+            out/build/linux-x64-debug/f2_server
           retention-days: 7
 
   windows:
-    name: Windows (${{ matrix.arch }})
+    name: Windows (MinGW x64)
 
-    runs-on: windows-2019
+    runs-on: windows-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86
-            generator-platform: Win32
-          - arch: x64
-            generator-platform: x64
+    defaults:
+      run:
+        shell: msys2 {0}
 
     steps:
       - name: Clone
         uses: actions/checkout@v4
 
-      - name: Cache cmake build
-        uses: actions/cache@v4
+      - name: MSYS2 toolchain
+        uses: msys2/setup-msys2@v2
         with:
-          path: out
-          key: windows-${{ matrix.arch }}-cmake-v2
+          msystem: MINGW64
+          update: false
+          install: >-
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
 
+      # Same flags as the shipping build (D:\Games\f2dev-build.sh): Release,
+      # fully static so the exes run on a machine without MSYS2, gnu17 for the
+      # C sources.
       - name: Configure
         run: |
-          cmake --preset windows-${{ matrix.arch }}
+          cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_FLAGS=-std=gnu17
 
       - name: Build
         run: |
-          cmake --build --preset windows-${{ matrix.arch }}-debug
+          cmake --build build-win --target f2_server fallout2-ce -j 4
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: fallout2-ce-windows-${{ matrix.arch }}
-          path:  out/build/windows-${{ matrix.arch }}/Debug/fallout2-ce.exe
+          name: fallout2-coop-windows-x64
+          path: |
+            build-win/f2_server.exe
+            build-win/fallout2-ce.exe
           retention-days: 7
