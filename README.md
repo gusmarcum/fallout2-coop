@@ -411,6 +411,12 @@ suites pass on every commit of this repository.
 - [`bugs/`](bugs): the live-play bug notes, one file per report.
 - [`tools/`](tools): sandbox proof scripts and repair tools.
 
+## Contributors
+
+- **[@adainstarks](https://github.com/adainstarks)** (William Starks), for help with this
+  project. Most of what is fixed here was found by two people actually playing it, and
+  every bug note in [`bugs/`](bugs) started as something someone hit in a live session.
+
 ## Credits
 
 - [Fallout 2 Community Edition](https://github.com/alexbatalov/fallout2-ce) by Alexander Batalov
