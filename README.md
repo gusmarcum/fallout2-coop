@@ -15,6 +15,10 @@
 
 [Download](#download) · [What this project adds](#what-this-project-adds) · [Quick start](#quick-start) · [Keys](#keys-in-the-client) · [Server settings](#server-settings) · [Admin console](#admin-console) · [Building](#building-on-windows) · [Changelog](CHANGELOG.md)
 
+<img src="docs/shots/horrigan.jpg" alt="Two players standing over Frank Horrigan's body on the Enclave emblem" width="611">
+
+<sub>Two players, one world, Frank Horrigan down. The whole game, co-op.</sub>
+
 </div>
 
 One PC runs a dedicated server that owns the world: scripts, combat, dialogue, the worldmap,
@@ -27,6 +31,13 @@ from [Cahb/fallout2-ce-coop](https://github.com/Cahb/fallout2-ce-coop) v0.4, and
 here as its own project. No game files are included: bring your own Fallout 2 (Steam or GOG,
 US 1.02d). Licence: Sustainable Use (non-commercial), inherited from Fallout 2 Community
 Edition.
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/shots/five-players.jpg" alt="Five player characters together on the San Francisco docks" width="430"><br><sub>Five players in one world, San Francisco</sub></td>
+    <td align="center"><img src="docs/shots/navarro.jpg" alt="Two players in a cleared Navarro" width="430"><br><sub>Navarro, cleared</sub></td>
+  </tr>
+</table>
 
 <div align="center">
 
@@ -276,6 +287,12 @@ game port to the internet: the wire has no authentication. The client reads `fal
 from the folder the exe is in, so keep it next to the game files.
 
 ## Keys in the client
+
+<p align="center">
+  <img src="docs/shots/chat.jpg" alt="In-game chat between players shown in the message log" width="760"><br>
+  <sub><code>T</code> opens chat, in combat too</sub>
+</p>
+
 
 | Key | What it does |
 |---|---|
