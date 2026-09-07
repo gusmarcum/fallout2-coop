@@ -37,6 +37,7 @@
 #include "random.h"
 #include "reaction.h"
 #include "scripts.h"
+#include "client_net.h" // clientViewerActive — a viewer must never self-quit from a script
 #include "server_loop.h"
 #include "server_players.h"
 #include "settings.h"
@@ -3373,11 +3374,24 @@ static void opMetarule(Program* program)
     switch (rule) {
     case METARULE_SIGNAL_END_GAME:
         result = 0;
-        if (serverDedicatedActive()) {
+        if (serverDedicatedActive() || clientViewerActive()) {
             // Server survival (MP_PROPOSAL.md Ch 9.2-S3): any script can signal
             // the endgame, and quit=2 stops the serve loop for everyone. A
             // dedicated server outlives the story it is hosting — suppress+log.
-            debugPrint("server: METARULE_SIGNAL_END_GAME from a script — endgame suppressed\n");
+            //
+            // ►► AND THE SAME FOR A VIEWER, which was missed and is worse. A viewer
+            // runs map scripts locally while loading the map for rendering, so a
+            // script that signals the endgame on map entry quit the CLIENT: the
+            // player saw the map for a fraction of a second and the window closed,
+            // every single time they loaded, with no crash dump because it is a
+            // clean exit. Reported on the Enclave oil rig after Horrigan was killed,
+            // where the post-fight state makes the map's entry script signal it.
+            //
+            // A viewer is not the authority on whether the game is over. The server
+            // decides, and says so with EVENT_ENDGAME; until then the viewer keeps
+            // rendering whatever world it is given.
+            debugPrint("%s: METARULE_SIGNAL_END_GAME from a script — endgame suppressed\n",
+                serverDedicatedActive() ? "server" : "client-viewer");
         } else {
             _game_user_wants_to_quit = 2;
         }
@@ -4831,7 +4845,28 @@ static void opMoveObjectInventoryToObject(Program* program)
 static void opEndgameMovie(Program* program)
 {
     program->flags |= PROGRAM_FLAG_0x20;
-    endgamePlayMovie();
+    if (serverDedicatedActive() || clientViewerActive()) {
+        // Server survival, the same rule as METARULE_SIGNAL_END_GAME above and for
+        // the same reason, and the same viewer case with it: a viewer running this
+        // opcode from a locally-executed map script reaches
+        // endgameEndingHandleContinuePlaying and quits the player out of a live
+        // session. A viewer plays the ending when the SERVER says so
+        // (EVENT_ENDGAME), never off its own script execution.
+        //
+        // Unlike op_endgame_slideshow this opcode does NOT go
+        // through the script request queue: it calls endgamePlayMovie() directly,
+        // whose headless branch sets _game_user_wants_to_quit = 2. On a dedicated
+        // server that stops the serve loop for everyone, so the oil rig script would
+        // have shut the world down in the middle of the ending the players were
+        // watching, moments after the slideshow request went out to them.
+        //
+        // The credits are already covered: the slideshow request became an
+        // EVENT_ENDGAME (script_request_handler_server.cc) and each viewer plays the
+        // whole sequence, slides then credits, locally. Nothing is owed here.
+        debugPrint("server: op_endgame_movie from a script — suppressed (the viewers play it)\n");
+    } else {
+        endgamePlayMovie();
+    }
     program->flags &= ~PROGRAM_FLAG_0x20;
 }
 

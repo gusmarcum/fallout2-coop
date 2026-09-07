@@ -247,6 +247,7 @@ enum EventType : unsigned char {
     EVENT_TRADE_STATE = 66, // its whole visible state: both packs, both tables, values, locks
     EVENT_TRADE_END = 67, // trade over (completed / cancelled / declined / bailed) + the line to show
     EVENT_PARTY_WIPE = 68, // everyone is dead: play the death screen, a reload follows
+    EVENT_ENDGAME = 69, // the game is won: play the ending slides + credits, no reload
 };
 
 // Event flag bits.
@@ -1234,6 +1235,18 @@ public:
     {
         if (eventTraceEnabled()) fprintf(stderr, "[wipe] SEND party wipe\n");
         beginEvent(EVENT_PARTY_WIPE, 0);
+        endEvent();
+        flushFrame();
+    }
+
+    // ---- Endgame --------------------------------------------------------------
+    // Same shape as partyWipe and for the same reason: it must reach the viewers
+    // whatever else the tick is doing. No reload follows this one, so there is
+    // nothing behind it to race with.
+    void endgame() override
+    {
+        if (eventTraceEnabled()) fprintf(stderr, "[endgame] SEND endgame\n");
+        beginEvent(EVENT_ENDGAME, 0);
         endEvent();
         flushFrame();
     }

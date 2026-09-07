@@ -223,6 +223,7 @@ enum : unsigned char {
     EVENT_TRADE_STATE = 66, // both packs, both tables, values, locks
     EVENT_TRADE_END = 67, // trade over, with the line to show
     EVENT_PARTY_WIPE = 68, // everyone is dead: death screen, then the server's reload
+    EVENT_ENDGAME = 69, // the game is won: ending slides + credits, no reload follows
 };
 
 // crc32 (IEEE, reflected) — MUST match server_loop.cc's joinBlobCrc32.
@@ -709,6 +710,14 @@ public:
     }
     bool wipePending() const { return _wipePending; }
 
+    bool takeEndgame()
+    {
+        bool was = _endgamePending;
+        _endgamePending = false;
+        return was;
+    }
+    bool endgamePending() const { return _endgamePending; }
+
     // Elevator panel latch (same one-shot shape, same reason — see onElevatorPrompt).
     bool takeElevatorPrompt(int* elevator, int* startLevel)
     {
@@ -1161,6 +1170,7 @@ public:
         case EVENT_TRADE_STATE: onTradeState(r); break;
         case EVENT_TRADE_END: onTradeEnd(r); break;
         case EVENT_PARTY_WIPE: onPartyWipe(r); break;
+        case EVENT_ENDGAME: onEndgame(r); break;
         // SNAPSHOT_BEGIN/END are pure brackets; presentation cues are cosmetic and
         // ignored headless. All are skipped whole via the event length.
         default: break;
@@ -4248,6 +4258,16 @@ private:
         _wipePending = true;
     }
 
+    // The game is won. Latched exactly like the wipe: the ending is a blocking
+    // sequence (slide show, then the credits loop) and the main loop plays it once
+    // the combat presentation has finished showing whatever killed Horrigan.
+    void onEndgame(Reader& r)
+    {
+        (void)r;
+        if (!clientViewerActive()) return;
+        _endgamePending = true;
+    }
+
     void onMoviePlay(Reader& r)
     {
         int movie = r.i32();
@@ -4930,6 +4950,7 @@ private:
     std::string _promptTitle;
     std::string _promptBody;
     bool _wipePending = false; // EVENT_PARTY_WIPE, consumed by the main loop
+    bool _endgamePending = false; // EVENT_ENDGAME, consumed by the main loop
     bool _elevatorPending = false;
     // When the screen went black (0 = not black). The fade is applied at decode; this
     // is only the watchdog's clock.
@@ -5122,6 +5143,8 @@ public:
     bool takePrompt(int* promptId, std::string* title, std::string* body) { return _decoder.takePrompt(promptId, title, body); }
     bool takePartyWipe() { return _decoder.takePartyWipe(); }
     bool wipePending() const { return _decoder.wipePending(); }
+    bool takeEndgame() { return _decoder.takeEndgame(); }
+    bool endgamePending() const { return _decoder.endgamePending(); }
     bool takeElevatorPrompt(int* elevator, int* startLevel) { return _decoder.takeElevatorPrompt(elevator, startLevel); }
     bool takeAutomapOpen(bool* usingScanner) { return _decoder.takeAutomapOpen(usingScanner); }
     bool fadeWatchdogExpired(unsigned int nowMs, unsigned int maxBlackMs) const
@@ -5426,6 +5449,16 @@ bool ClientConnection::takePartyWipe()
 bool ClientConnection::wipePending() const
 {
     return _impl->stream != nullptr && _impl->stream->wipePending();
+}
+
+bool ClientConnection::takeEndgame()
+{
+    return _impl->stream != nullptr && _impl->stream->takeEndgame();
+}
+
+bool ClientConnection::endgamePending() const
+{
+    return _impl->stream != nullptr && _impl->stream->endgamePending();
 }
 
 bool ClientConnection::takeElevatorPrompt(int* elevator, int* startLevel)

@@ -675,6 +675,14 @@ public:
     // follows the screen is the restored one.
     virtual void partyWipe() {}
 
+    // -- ENDGAME ----------------------------------------------------------------
+    // The game is won. Each viewer plays vanilla's ending: the slide show, whose
+    // slides are chosen by reading global variables (endgame.txt maps gvar+value
+    // to a slide), then the credits. Nothing on the server renders it, and unlike
+    // the party wipe NO reload follows — the world is left standing so the players
+    // can keep going, which is also what vanilla's "keep playing?" prompt offers.
+    virtual void endgame() {}
+
     // Who owns which player actor, re-announced after every baseline (netIds are
     // re-minted on every rebaseline, so a roster row is only valid for the
     // generation it arrived in — persistent identity is the SLOT, never the

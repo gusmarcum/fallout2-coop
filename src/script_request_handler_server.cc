@@ -110,6 +110,28 @@ public:
         serverControlEndDialogDrive();
     }
 
+    // ENDGAME. The script that ends the game (leaving the oil rig) asks for the
+    // slide show and the credits. Both are client-side presentation, so this used
+    // to be one of the silently dropped requests the header warns about: escaping
+    // the rig in co-op ended with nothing happening at all.
+    //
+    // The server cannot render it and must not try. endgamePlaySlideshow and
+    // endgamePlayMovie both early-return under serverLoopActive(), and the movie's
+    // headless branch additionally sets the terminal quit flag, so calling them
+    // here would kill the server instead of showing anybody an ending.
+    //
+    // Instead the request becomes a wire event, and each viewer plays the real
+    // sequence locally. It needs nothing sent with it: the slides are chosen by
+    // reading globals against endgame.txt, and every client already holds the whole
+    // gvar table from its last baseline, so each one computes the same ending this
+    // world earned. No reload and no shutdown follows: the world keeps standing and
+    // the players decide when to stop.
+    void endgame() override
+    {
+        fprintf(stderr, "f2_server: script requested the endgame — sending it to every viewer\n");
+        presenter()->endgame();
+    }
+
     void worldMap() override
     {
         worldmapServerDriver();
