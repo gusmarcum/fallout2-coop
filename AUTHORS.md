@@ -51,6 +51,17 @@ A test harness that runs on Windows: the engine's 41 golden scenarios made headl
 deterministic and blessed against a Windows result set, so every commit here is gated, plus
 the per-feature sandbox proof scripts under [`tools/`](tools).
 
+## Contributors
+
+**[@adainstarks](https://github.com/adainstarks)** (William Starks), for help with this
+project.
+
+Worth stating plainly alongside the commit counts above: this project is fixed by being
+played. Almost every entry in [`bugs/`](bugs) began as a symptom someone reported from a
+live two-player session, not as something spotted by reading the code. The commit history
+records who wrote the patch; it does not record who found the fault, and those are not
+always the same person.
+
 ## Licence
 
 [Sustainable Use License](LICENSE.md), inherited from Fallout 2 Community Edition and
