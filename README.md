@@ -11,6 +11,7 @@
 [![Downloads](https://img.shields.io/github/downloads/gusmarcum/fallout2-coop/total?label=downloads)](https://github.com/gusmarcum/fallout2-coop/releases)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6)
 [![Licence](https://img.shields.io/badge/licence-Sustainable%20Use-blue)](LICENSE.md)
+![Enclave Approved](https://img.shields.io/badge/Enclave-approved-004d1a)
 
 [Download](#download) · [What this project adds](#what-this-project-adds) · [Quick start](#quick-start) · [Keys](#keys-in-the-client) · [Server settings](#server-settings) · [Admin console](#admin-console) · [Building](#building-on-windows) · [Changelog](CHANGELOG.md)
 
