@@ -652,32 +652,43 @@ void invenRederiveWeaponFid(Object* critter)
     objectSetFrame(critter, 0, nullptr);
 }
 
+// WHICH HAND IS THIS CRITTER ACTUALLY HOLDING UP? Three answers, in authority order.
+//
+// ►► A PLAYER ACTOR ON A DEDICATED SERVER: the per-seat registry value (`hand` verb).
+// interfaceGetCurrentHand() is a STUB there (`return HAND_LEFT`, server_stubs.cc, and
+// already noted as a banked gap in that file), so asking it pins every seat to the left
+// hand forever. That made every RIGHT-hand unwield fail `activeHand == hand` and skip the
+// fid re-derive below. Owner-reported symptom: "no weapon equipped, but my character is
+// still holding some kind of rifle." It is a shared-path defect, not a co-op one; a caller
+// working around it (destroying a weapon and then re-deriving the fid itself) would just
+// fork this function.
+//
+// gDude ON A CLIENT keeps its own interface, so single-player and the goldens are
+// untouched; anyone else keeps vanilla's NPCs-only-use-the-right-slot assumption.
+//
+// Extracted from _invenUnwieldFunc so the SCRIPT-facing readers of the active hand
+// (interpreter_extra.cc: critter_inven_obj, inven_unwield, wield_obj_critter,
+// METARULE_INVEN_UNWIELD_WHO) answer the same question the same way. They were all still
+// calling the stub directly, which is what let an NCR guard keep seeing a holstered gun.
+int invenActiveHandFor(Object* critter)
+{
+    if (serverDedicatedActive() && playerActorIs(critter)) {
+        return serverActorActiveHand(playerActorSlotOf(critter));
+    }
+    if (critter == gDude) {
+        return interfaceGetCurrentHand();
+    }
+    return HAND_RIGHT; // NPC's only ever use right slot
+}
+
 int _invenUnwieldFunc(Object* critter, int hand, bool animate)
 {
-    int activeHand;
     Object* item;
     int fid;
 
-    // The ACTIVE hand decides whether this unwield touches the fid at all — only the active
-    // hand's weapon is on the SPRITE (fid bits 0xF000). Three answers, in authority order:
-    //
-    // ►► A PLAYER ACTOR ON A DEDICATED SERVER: the per-seat registry value (`hand` verb).
-    // interfaceGetCurrentHand() is a STUB there — `return HAND_LEFT`, server_stubs.cc, and
-    // already noted as a banked gap in that file — so asking it made every RIGHT-hand
-    // unwield fail `activeHand == hand` and skip the fid re-derive below. Owner-reported
-    // symptom: "no weapon equipped, but my character is still holding some kind of rifle."
-    // It is a shared-path defect, not a co-op one; a caller working around it (destroying a
-    // weapon and then re-deriving the fid itself) would just fork this function.
-    //
-    // gDude ON A CLIENT keeps its own interface, so single-player and the goldens are
-    // untouched; anyone else keeps vanilla's NPCs-only-use-the-right-slot assumption.
-    if (serverDedicatedActive() && playerActorIs(critter)) {
-        activeHand = serverActorActiveHand(playerActorSlotOf(critter));
-    } else if (critter == gDude) {
-        activeHand = interfaceGetCurrentHand();
-    } else {
-        activeHand = HAND_RIGHT; // NPC's only ever use right slot
-    }
+    // The ACTIVE hand decides whether this unwield touches the fid at all: only the active
+    // hand's weapon is on the SPRITE (fid bits 0xF000).
+    int activeHand = invenActiveHandFor(critter);
 
     if (hand) {
         item = critterGetItem2(critter);

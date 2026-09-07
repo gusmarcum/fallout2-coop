@@ -4,6 +4,52 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.0.0 (2026-09-07)
+
+**Fallout 2 has been played from start to finish in co-op.** That is what the version
+number is for. It is not a claim that nothing is left to fix; it means two people can
+begin at the Temple of Trials, play the whole game together, and beat Frank Horrigan,
+which is the bar this project was built to clear.
+
+### New
+
+- **The server owns the ending.** Winning already showed the slides, because a viewer
+  runs map scripts locally and each client played the sequence off its own script
+  execution. That worked, and play continued afterwards, but nothing coordinated it: the
+  dedicated server drops the request, so it depended on each client happening to run a
+  script the server had discarded. It is a wire event now, announced by the server, with
+  the slides still chosen from the globals that world earned. No reload and no shutdown
+  follows, and the closing "keep playing?" prompt cannot quit anyone out of a live
+  session.
+- **`ending`** on the operator console replays it on demand.
+- **`stat <slot> [stat] [value]`** reads or repairs a seat's base SPECIAL. It prints base
+  and current side by side, so an armour or drug bonus shows as the difference. Nothing
+  could reach the seven base stats before, which made repairing a character a SAVE.DAT
+  edit with the server down.
+
+### Fixed
+
+- **NCR shot the second player for a weapon he had already put away.** Holstering in
+  vanilla means switching to your empty hand, not dropping anything, and a script reads
+  the hand you are holding up. On a dedicated server the opcode asked a stub pinned to
+  the left hand, so swapping was invisible, and the filter was applied only to the
+  anchored player, so everyone else reported both hands unconditionally. The second
+  player could never comply. Now every script-facing hand reader resolves the real
+  active hand, for every player.
+- **A client closed itself on the oil rig, instantly, every load.** Post-Horrigan the
+  map's entry script signals the end of the game, and a viewer runs map scripts locally
+  while loading a map to render it. The dedicated server was guarded against that; the
+  client never was, so it set the terminal quit and exited. The map appeared for a
+  fraction of a second and the window shut, with no crash dump because it was a clean
+  exit. A viewer never self-quits from a script now.
+- **Winning the game shut the server down.** `op_endgame_movie` bypasses the script
+  request queue and calls straight into the headless branch that sets the terminal quit,
+  so the world would have stopped mid-ending, moments after the players started watching.
+- **A silent server death now names itself.** The terminal quit ended the serve loop with
+  no log line, indistinguishable from a clean shutdown, so the clients being dropped a
+  second later looked like the broken half. All five sources report themselves and the
+  loop prints the tick it saw one on.
+
 ## v0.6.0 (2026-09-06)
 
 ### New

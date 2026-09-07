@@ -123,6 +123,9 @@ static unsigned int gViewerFadeBlackSinceMs = 0;
 static constexpr unsigned int kViewerWipePresentationMaxMs = 4000;
 static constexpr unsigned int kViewerWipeReloadMaxMs = 30000;
 static unsigned int gViewerWipeSinceMs = 0;
+// Same grace period, for the ending: let the blow that won the game finish drawing
+// before the slide show takes the screen.
+static unsigned int gViewerEndgameSinceMs = 0;
 
 // 0x5194C8
 static char _mainMap[] = "artemple.map";
@@ -821,6 +824,62 @@ static void viewerPollPendingLoot(ClientConnection& conn)
 // server buffers — and once it ends we pump until the restored world has been
 // rebuilt (bounded), then fade back in. The narration is picked locally, as
 // single-player does, from the same tables the client already loads.
+// The game is won: play vanilla's ending on this viewer.
+//
+// Everything the slide show needs is already here. It picks its slides by reading
+// global variables against endgame.txt (gvar + value -> art + narration), and the
+// server streams the whole gvar table on every baseline, so this client's globals
+// are the server's. endgameEndingInit() loads the table itself on first use.
+//
+// The screen is blacked out the same way and for the same reason as the death
+// screen: the ending windows are 640x480 and the world behind them would otherwise
+// keep drawing around the edges under the ending's own palette.
+//
+// UNLIKE the wipe, no reload follows, so the world is still standing underneath
+// when the credits end. That also means vanilla's closing "keep playing?" prompt
+// must not be allowed to quit this client out from under a live session: the quit
+// flag is saved across the sequence and restored, so answering either way returns
+// to the game. Leaving the server is the player's own decision, not the ending's.
+static void viewerPlayEndgame(ClientConnection& conn)
+{
+    debugPrint("client-viewer: endgame — playing the ending\n");
+
+    bool isoWasEnabled = isoDisable();
+    interfaceBarHide();
+    if (gIsoWindow != -1) {
+        unsigned char* isoBuffer = windowGetBuffer(gIsoWindow);
+        if (isoBuffer != nullptr) {
+            int isoWidth = windowGetWidth(gIsoWindow);
+            bufferFill(isoBuffer, isoWidth, windowGetHeight(gIsoWindow), isoWidth, 0);
+            windowRefresh(gIsoWindow);
+        }
+    }
+
+    int quitBefore = _game_user_wants_to_quit;
+
+    paletteFadeTo(gPaletteBlack);
+    endgamePlaySlideshow();
+    endgamePlayMovie();
+
+    // endgamePlayMovie ends on endgameEndingHandleContinuePlaying, which sets the
+    // terminal quit on "No". We are a client in a running world; honour neither
+    // answer as a quit.
+    if (_game_user_wants_to_quit != quitBefore) {
+        debugPrint("client-viewer: endgame — ignoring the ending's quit request (%d -> %d)\n",
+            quitBefore, _game_user_wants_to_quit);
+        _game_user_wants_to_quit = quitBefore;
+    }
+
+    if (isoWasEnabled) {
+        isoEnable();
+    }
+    interfaceBarShow();
+    tileWindowRefresh();
+    paletteFadeTo(_cmap);
+    conn.clearFadeBlack();
+    debugPrint("client-viewer: endgame — done, world still standing\n");
+}
+
 static void viewerPlayPartyWipe(ClientConnection& conn)
 {
     debugPrint("client-viewer: party wipe — playing the death screen\n");
@@ -2226,6 +2285,21 @@ static int mainClientViewer(const char* connectSpec)
                 conn.takePartyWipe();
                 gViewerWipeSinceMs = 0;
                 viewerPlayPartyWipe(conn);
+            }
+        }
+
+        // The ending, on the same terms as the wipe above: wait for the combat
+        // presentation to finish showing the last blow before taking the screen.
+        if (conn.endgamePending()) {
+            if (gViewerEndgameSinceMs == 0) {
+                gViewerEndgameSinceMs = getTicks();
+                if (gViewerEndgameSinceMs == 0) gViewerEndgameSinceMs = 1;
+            }
+            if (!conn.combatPresentationBusy()
+                || getTicksSince(gViewerEndgameSinceMs) > kViewerWipePresentationMaxMs) {
+                conn.takeEndgame();
+                gViewerEndgameSinceMs = 0;
+                viewerPlayEndgame(conn);
             }
         }
 

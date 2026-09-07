@@ -704,6 +704,8 @@ static void writeHelp(const std::function<void(const char* text)>& reply, bool w
     reply("  xp <slot> <amount>    award experience to one seat (levels come with it)");
     reply("  sheet [slot]          level/xp/unspent points/owed perk/tags/traits per seat");
     reply("  rest <minutes> [slot] pass time for EVERYONE and heal every player");
+    reply("  ending                play the ending slides + credits on every client");
+    reply("  stat <slot> [s] [v]   read or set a seat's BASE SPECIAL (st pe en ch in ag lk)");
     reply("  sp <slot> <points>    set a seat's UNSPENT skill points (the level-up currency)");
     reply("  skillup <slot> <skil> spend ONE point in one skill, exactly as a client asks");
     reply("  skilldown <slot> <sk> take that point back (only to where the sheet opened)");
@@ -1391,6 +1393,138 @@ bool serverAdminLine(const char* line,
         }
         reply(msg);
         fprintf(stderr, "f2_server: admin %s armed slot=%d severity=%d\n", verb, slot, severity);
+        return true;
+    }
+
+    if (strcmp(verb, "ending") == 0) {
+        // `ending` — play vanilla's ending on every connected client: the slide show
+        // (whose slides are chosen from the globals this world already holds) and
+        // then the credits.
+        //
+        // Deliberately NOT the `endgame` debug verb, which routes through
+        // op_endgame_slideshow's deferred path and, on a dedicated server, is a
+        // terminal quit: endgamePlayMovie's headless branch sets
+        // _game_user_wants_to_quit = 2 and renders nothing to anybody. That kills
+        // the server and shows the players their ending never.
+        //
+        // This is the presentation only. No world state is touched, nothing is
+        // reloaded and nobody is disconnected, so the players keep the world they
+        // won and can carry on in it — the same offer vanilla's closing prompt
+        // makes. Winning the game is a story event here, not a server shutdown.
+        if (!worldLoaded) {
+            reply("ending: no world loaded");
+            return true;
+        }
+        presenter()->endgame();
+        reply("ending: playing the ending slides and credits on every connected client");
+        fprintf(stderr, "f2_server: admin ending — endgame presentation sent to all viewers\n");
+        return true;
+    }
+
+    if (strcmp(verb, "stat") == 0) {
+        // `stat <slot> [name|id] [value]` — read or set a seat's BASE SPECIAL.
+        //
+        // The sheet verbs above cover the level-up currency and its spends, which is
+        // everything a client can ask for. Nothing could touch the seven base stats,
+        // so correcting a character meant editing SAVE.DAT by hand with the server
+        // down. critterSetBaseStat is the right seam and needs no scope: it resolves
+        // the proto from critter->pid, which for a player actor is that seat's own
+        // sheet row rather than gDudeProto, subtracts the trait modifier, refuses a
+        // value outside the stat's own range, re-derives the dependent stats and
+        // marks the row dirty so connected viewers see it without a rejoin.
+        //
+        // A cheat, like `sp`, and deliberately so: it exists to repair a seat.
+        if (!worldLoaded) {
+            reply("stat: no world loaded");
+            return true;
+        }
+
+        static const char* kStatNames[] = { "st", "pe", "en", "ch", "in", "ag", "lk" };
+        const int kSpecialCount = (int)(sizeof(kStatNames) / sizeof(kStatNames[0]));
+
+        char slotText[32];
+        const char* argText = splitVerb(rest != nullptr ? rest : "", slotText, sizeof(slotText));
+        if (slotText[0] == '\0') {
+            reply("usage: stat <slot> [st|pe|en|ch|in|ag|lk] [value]   (no stat = read all seven)");
+            return true;
+        }
+
+        int slot = atoi(slotText);
+        if (slot < 0 || slot >= playerActorCount()) {
+            snprintf(msg, sizeof(msg), "stat: slot %d out of range (0..%d)", slot, playerActorCount() - 1);
+            reply(msg);
+            return true;
+        }
+        Object* actor = playerActorAt(slot);
+        if (actor == nullptr) {
+            snprintf(msg, sizeof(msg), "stat: slot %d is empty", slot);
+            reply(msg);
+            return true;
+        }
+
+        // No stat named: read the row out. Base first, then the value in play, so an
+        // armour or drug bonus is visible as the difference instead of a surprise.
+        if (argText == nullptr || argText[0] == '\0') {
+            snprintf(msg, sizeof(msg), "stat: slot %d (%s) base/current:", slot, critterGetName(actor));
+            reply(msg);
+            for (int s = 0; s < kSpecialCount; s++) {
+                snprintf(msg, sizeof(msg), "  %s  base %d, current %d",
+                    kStatNames[s], critterGetBaseStat(actor, STAT_STRENGTH + s),
+                    critterGetStat(actor, STAT_STRENGTH + s));
+                reply(msg);
+            }
+            return true;
+        }
+
+        char statText[32];
+        const char* valueText = splitVerb(argText, statText, sizeof(statText));
+
+        int stat = -1;
+        for (int s = 0; s < kSpecialCount; s++) {
+            if (compat_stricmp(statText, kStatNames[s]) == 0) {
+                stat = STAT_STRENGTH + s;
+                break;
+            }
+        }
+        if (stat < 0 && statText[0] >= '0' && statText[0] <= '9') {
+            int id = atoi(statText);
+            if (id >= 0 && id < kSpecialCount) {
+                stat = STAT_STRENGTH + id;
+            }
+        }
+        if (stat < 0) {
+            snprintf(msg, sizeof(msg), "stat: '%s' is not a SPECIAL stat (st pe en ch in ag lk, or 0..6)", statText);
+            reply(msg);
+            return true;
+        }
+
+        if (valueText == nullptr || valueText[0] == '\0') {
+            snprintf(msg, sizeof(msg), "stat: slot %d (%s) %s base %d, current %d",
+                slot, critterGetName(actor), kStatNames[stat - STAT_STRENGTH],
+                critterGetBaseStat(actor, stat), critterGetStat(actor, stat));
+            reply(msg);
+            return true;
+        }
+
+        int before = critterGetBaseStat(actor, stat);
+        int value = (int)strtol(valueText, nullptr, 0);
+        int rc = critterSetBaseStat(actor, stat, value);
+        if (rc != 0) {
+            // -2/-3 are the stat's own min/max, which is the whole point of routing
+            // through the engine's setter rather than poking the proto.
+            snprintf(msg, sizeof(msg), "stat: %d rejected for %s (rc %d: %s)",
+                value, kStatNames[stat - STAT_STRENGTH], rc,
+                rc == -2 ? "below the stat minimum" : (rc == -3 ? "above the stat maximum" : "not settable"));
+            reply(msg);
+            return true;
+        }
+
+        snprintf(msg, sizeof(msg), "stat: slot %d (%s) %s %d -> base %d, current %d",
+            slot, critterGetName(actor), kStatNames[stat - STAT_STRENGTH], before,
+            critterGetBaseStat(actor, stat), critterGetStat(actor, stat));
+        reply(msg);
+        fprintf(stderr, "f2_server: admin stat slot=%d %s %d -> %d\n",
+            slot, kStatNames[stat - STAT_STRENGTH], before, critterGetBaseStat(actor, stat));
         return true;
     }
 

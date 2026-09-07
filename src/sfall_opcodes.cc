@@ -12,6 +12,7 @@
 #include "input.h"
 #include "interface.h"
 #include "interpreter.h"
+#include "inventory.h" // invenActiveHandFor
 #include "item.h"
 #include "memory.h"
 #include "message.h"
@@ -27,6 +28,7 @@
 #include "sfall_kb_helpers.h"
 #include "sfall_lists.h"
 #include "sfall_metarules.h"
+#include "server_players.h" // scriptContextDude
 #include "stat.h"
 #include "svga.h"
 #include "tile.h"
@@ -169,7 +171,10 @@ static void op_set_world_map_pos(Program* program)
 // active_hand
 static void opGetCurrentHand(Program* program)
 {
-    programStackPushInteger(program, interfaceGetCurrentHand());
+    // Ambient "the player's hand", so it resolves through the same context dude every other
+    // bare-opcode player read uses; the raw interface read is stubbed to HAND_LEFT on a
+    // dedicated server and would answer for the wrong seat anyway.
+    programStackPushInteger(program, invenActiveHandFor(scriptContextDude(program)));
 }
 
 // set_global_script_type

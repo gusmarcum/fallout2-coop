@@ -138,6 +138,11 @@ public:
     // death screen, after which the server's reload rebuilds the world.
     bool takePartyWipe();
     bool wipePending() const;
+    // The game is won (EVENT_ENDGAME). Same latch shape as the wipe: endgamePending()
+    // lets the ticker clear a modal out of the way, takeEndgame() is the main loop's
+    // one-shot to play the ending slides and the credits. No reload follows.
+    bool takeEndgame();
+    bool endgamePending() const;
     bool takeElevatorPrompt(int* elevator, int* startLevel);
     // One-shot: the server says WE used a Motion Sensor, so open our own automap.
     bool takeAutomapOpen(bool* usingScanner);

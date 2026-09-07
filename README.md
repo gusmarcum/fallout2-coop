@@ -62,6 +62,13 @@ live-play reports with symptom, cause and fix.
 
 ### Playing together
 
+**The whole game, start to finish.** Fallout 2 has been played from the Temple of Trials
+through Frank Horrigan in co-op, ending slides and all, and the world is still there
+afterwards if you want to keep going. That is what the version number means. The ending
+is server-driven now rather than each client running it off its own local script
+execution: the server announces it, every player sees the same sequence, and the slides
+are chosen from the globals that world actually earned.
+
 **Trading between players.** Talking to another player used to answer "That's another
 player." It now proposes a trade: the other player gets a yes/no box, and on yes both
 open the vanilla trade screen with each other, the world still running for everyone else.
@@ -161,6 +168,15 @@ action-point bar could open a turn showing last turn's leftover while the server
 full budget. An offline teammate's parked body could appear glued to the top-left corner of
 the screen, above the roof. And a player's sprite now follows the hand selected on the
 interface bar, as in vanilla, instead of whichever hand happened to hold a weapon.
+
+**Guards stopped shooting the second player for a holstered gun.** Putting your weapon
+away in NCR, New Reno or at the Vault City gate does not mean dropping it: you switch to
+your empty hand, and a script reads the hand you are holding up. Two things broke that on
+a dedicated server. The opcode asked an interface stub pinned to one hand, so swapping was
+invisible to every script in the game, and the filter was applied only to the anchored
+player, so everyone else reported both hands unconditionally. The second player could
+comply perfectly and still get shot. Every script-facing hand reader now resolves the real
+active hand, for every player.
 
 **Small things that mattered in play.** Two-handed weapons stopped occupying both hand slots.
 Arming one explosive from a stack arms one, not the stack. TAB opens the automap. Push works
@@ -319,6 +335,8 @@ command per line. It answers once a client is connected; `help` lists everything
 | `partyadd <pid>` | re-attach a companion standing on the current map (89 = John Cassidy) |
 | `spawn <pid> [count] [tile] [script]` | spawn an NPC; `tile` -1 = beside the host; `script` is its scripts.lst number, needed for it to talk (Vic: `spawn 0x0100003E 1 -1 50`) |
 | `despawnall` | remove every NPC spawned by this server run |
+| `stat <slot> [stat] [value]` | read or set a seat's base SPECIAL (st pe en ch in ag lk); no stat = all seven, base and current |
+| `ending` | play the ending slides and credits on every connected client |
 | `say <channel> <text>` | a line to every client |
 | `quit` | stop the server |
 
