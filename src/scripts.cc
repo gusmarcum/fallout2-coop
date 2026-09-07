@@ -397,6 +397,7 @@ void gameTimeAddTicks(int ticks)
             }
         } else {
             endgameSetupDeathEnding(ENDGAME_DEATH_ENDING_REASON_TIMEOUT);
+            fprintf(stderr, "f2_server: terminal quit set by the 13-year game-clock ending\n");
             _game_user_wants_to_quit = 2;
         }
     }
@@ -530,6 +531,8 @@ int _scriptsCheckGameEvents(int* moviePtr, int window)
     }
 
     if (endgame) {
+        fprintf(stderr, "f2_server: terminal quit set by _scriptsCheckGameEvents"
+                        " (GVAR_ENEMY_ARROYO — the Arroyo-destroyed ending)\n");
         _game_user_wants_to_quit = 2;
     } else {
         presenter()->worldInvalidate();

@@ -836,6 +836,7 @@ int lsgLoadGame(int mode)
 
         messageListFree(&gLoadSaveMessageList);
         mapNewMap();
+        fprintf(stderr, "f2_server: terminal quit set by a FAILED LOAD (lsgLoadGameInSlot -1)\n");
         _game_user_wants_to_quit = 2;
 
         return -1;

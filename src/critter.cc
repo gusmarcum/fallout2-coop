@@ -1066,6 +1066,7 @@ void critterKill(Object* critter, int anim, bool a3)
         } else {
             // Vanilla single-player: byte-identical to the original.
             endgameSetupDeathEnding(ENDGAME_DEATH_ENDING_REASON_DEATH);
+            fprintf(stderr, "f2_server: terminal quit set by critterKill (the dude died)\n");
             _game_user_wants_to_quit = 2;
         }
     }

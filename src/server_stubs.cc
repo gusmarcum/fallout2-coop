@@ -370,6 +370,7 @@ int dialogSetReplyWindow(int a1, int a2, int a3, int a4, char* a5) { (void)a1; (
 void endgamePlayMovie()
 {
     serverStubHeadlessOnce("endgamePlayMovie");
+    fprintf(stderr, "f2_server: terminal quit set by endgamePlayMovie (headless stub)\n");
     _game_user_wants_to_quit = 2;
 }
 // Benign: selects which death-ending narration/slideshow to show — presentation

@@ -222,6 +222,13 @@ int main(int argc, char** argv)
             return 1;
         }
         fprintf(stderr, "f2_server: %s loaded, ready to serve\n", worldLabel);
+        // A load that leaves the terminal quit set means the world we just booted
+        // will stop the serve loop on its first beat. Silent, otherwise: the server
+        // would report the slot loaded and then exit with no explanation.
+        if (gameTerminalQuitRequested()) {
+            fprintf(stderr, "f2_server: ►► %s loaded with the TERMINAL QUIT already set —"
+                            " this world will stop the serve loop immediately\n", worldLabel);
+        }
 
         // Bridge the control-plane claim state into f2_core so the resumable-combat
         // turn barrier (combat.cc) can wait for a live wire driver.
@@ -776,6 +783,10 @@ int main(int argc, char** argv)
                 // ACTemVil (Temple of Trials challenger) does exactly that at half
                 // HP, so winning the scripted fistfight killed the server.
                 if (gameTerminalQuitRequested()) {
+                    // SAY WHY WE ARE STOPPING. This exit was silent, so a server that
+                    // died to a script-set quit looked identical to a clean shutdown:
+                    // no dump, no error, the log just ended. Cost an evening once.
+                    fprintf(stderr, "f2_server: terminal quit observed at tick %d — stopping\n", tick);
                     return false;
                 }
                 // Last viewer left: a DEMO/probe server (no keepalive) has nothing
