@@ -53,14 +53,14 @@ the per-feature sandbox proof scripts under [`tools/`](tools).
 
 ## Contributors
 
-**[@adainstarks](https://github.com/adainstarks)** (William Starks), for help with this
-project.
+**[@adainstarks](https://github.com/adainstarks)** (William Starks) — **testing**, not
+development. He played the two-player sessions this was built and fixed in, including the
+full playthrough that 1.0.0 is named for. No code here is his.
 
-Worth stating plainly alongside the commit counts above: this project is fixed by being
-played. Almost every entry in [`bugs/`](bugs) began as a symptom someone reported from a
-live two-player session, not as something spotted by reading the code. The commit history
-records who wrote the patch; it does not record who found the fault, and those are not
-always the same person.
+That is worth recording next to the commit counts above, because those counts miss it
+entirely. This project is fixed by being played: almost every entry in [`bugs/`](bugs)
+began as a symptom reported from a live session, not as something spotted by reading the
+code. Git records who wrote the patch. It does not record who found the fault.
 
 ## Licence
 

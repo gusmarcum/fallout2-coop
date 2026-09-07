@@ -413,9 +413,10 @@ suites pass on every commit of this repository.
 
 ## Contributors
 
-- **[@adainstarks](https://github.com/adainstarks)** (William Starks), for help with this
-  project. Most of what is fixed here was found by two people actually playing it, and
-  every bug note in [`bugs/`](bugs) started as something someone hit in a live session.
+- **[@adainstarks](https://github.com/adainstarks)** (William Starks) — testing. He played
+  the co-op sessions this was built and fixed in, including the full playthrough behind the
+  1.0.0 release. Nearly every note in [`bugs/`](bugs) began as a symptom he or I hit in a
+  live game rather than something found by reading code.
 
 ## Credits
 
