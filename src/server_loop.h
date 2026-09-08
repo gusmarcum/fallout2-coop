@@ -198,6 +198,31 @@ void serverServe(const std::function<void(int)>& intentsDrain,
     const std::function<bool(int)>& keepServing,
     const std::function<bool()>& simGate = nullptr);
 
+// ── THE SCRIPTED INPUT LOCK (game_ui_disable/game_ui_enable) ──────────────────
+// Vanilla keeps ONE boolean for "the player's controls are locked", and BOTH the
+// scripts and the engine flip it: a script's game_ui_disable sets it, and the engine
+// clears it when the thing the script kicked off finishes — actionExplode's tail,
+// combat ending, a dialog closing. Six shipped scripts rely on exactly that and never
+// call game_ui_enable at all (CIMine, the Navarro minefield, is one — bugs/016).
+//
+// Splitting that boolean across the wire is what broke them: the SCRIPT's set was sent
+// to the viewer while the ENGINE's clear ran on the server, where gameUiDisable and
+// gameUiEnable were no-ops, so the lock leaked and the player never got their controls
+// back. This is the one place the flag lives now, and it puts both edges on the wire.
+//
+// EDGE-TRIGGERED, exactly like vanilla's own `if (!gGameUiDisabled)` guards: a second
+// lock while locked emits nothing, so actionExplode's own gameUiDisable(1) on top of a
+// script's lock stays silent and its closing gameUiEnable() is the edge that frees you.
+//
+// The ADDRESSEE is remembered from the lock and NOT re-derived at unlock time. The
+// mine's explosion is queued by the script and drained a beat later by the server's own
+// tick, outside the walking player's scope, so asking "who is acting now" when the
+// unlock comes would credit the host and leave whoever actually stepped on it locked.
+void serverUiLockSet(bool locked, int actorNetId);
+
+// True while a scripted input lock is outstanding (vanilla's gameUiIsDisabled).
+bool serverUiLockActive();
+
 } // namespace fallout
 
 #endif /* FALLOUT_SERVER_LOOP_H_ */

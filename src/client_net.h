@@ -153,6 +153,12 @@ public:
     // player looking at a black screen forever.
     bool fadeWatchdogExpired(unsigned int nowMs, unsigned int maxBlackMs) const;
     void clearFadeBlack();
+
+    // A scripted input lock (game_ui_disable) that was never released. Six shipped
+    // scripts leak one; the Navarro minefield is the one that bites (bugs/016). The
+    // server no longer leaks it, but a lost unlock must never cost a session.
+    bool uiLockWatchdogExpired(unsigned int nowMs, unsigned int maxLockedMs) const;
+    void clearUiLock();
     void setCombatModalOpen(bool open);
     bool combatModalOpen() const;
 

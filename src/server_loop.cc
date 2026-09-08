@@ -50,6 +50,43 @@ bool serverLoopActive()
     return gServerLoopActive;
 }
 
+// The scripted input lock. See server_loop.h for why this exists and why the
+// addressee is remembered rather than re-derived.
+static bool gUiLocked = false;
+static int gUiLockedForNetId = 0;
+
+void serverUiLockSet(bool locked, int actorNetId)
+{
+    if (locked) {
+        if (gUiLocked) {
+            return; // already held: vanilla's own guard emits nothing here either
+        }
+        gUiLocked = true;
+        gUiLockedForNetId = actorNetId;
+        if (getenv("F2_TRACE_WORLD") != nullptr) {
+            fprintf(stderr, "[world] input lock TAKEN for netId=%d\n", actorNetId);
+        }
+        presenter()->screenInputLock(true, actorNetId);
+        return;
+    }
+
+    if (!gUiLocked) {
+        return;
+    }
+    gUiLocked = false;
+    int owner = gUiLockedForNetId;
+    gUiLockedForNetId = 0;
+    if (getenv("F2_TRACE_WORLD") != nullptr) {
+        fprintf(stderr, "[world] input lock RELEASED for netId=%d\n", owner);
+    }
+    presenter()->screenInputLock(false, owner);
+}
+
+bool serverUiLockActive()
+{
+    return gUiLocked;
+}
+
 // The client-viewer counterpart of the loop flag: set once for the lifetime of a
 // network viewer process (mainClientViewer, main.cc). It lives HERE, in f2_core,
 // not in client-only client_net.cc, because core code branches on it too — e.g.

@@ -47,6 +47,7 @@
 
 #include "animation.h"
 #include "server_loop.h" // serverFeatureEnabled — features default ON for a server
+#include "object.h" // gDude — the acting player an engine-side input lock is taken for
 #include "pres_record.h"
 #include "art.h"
 #include "automap.h"
@@ -469,12 +470,26 @@ int gameShowDeathDialog(const char* message)
     serverStubHeadlessOnce("gameShowDeathDialog");
     return 0;
 }
-// Benign: a dedicated server has no interactive UI to gate — it is never
-// "UI-disabled" (matches gameUiIsDisabled()==false above), so both are no-ops.
-void gameUiDisable(int a1) { }
-void gameUiEnable() { }
-// Benign: the headless server has no blocking UI, so the game UI is never disabled.
-bool gameUiIsDisabled() { return false; }
+// NOT no-ops any more, and that was a real bug (bugs/016). The server has no UI of its
+// own, but vanilla's UI-disabled flag is SHARED between the scripts and the engine, and
+// the engine half is what actually gives a player their controls back: a script calls
+// game_ui_disable, and actionExplode's tail (or combat ending, or a dialog closing)
+// calls gameUiEnable() to undo it. Six shipped scripts never call game_ui_enable
+// themselves and rely entirely on that. While these were no-ops the viewer was told to
+// lock and never told to unlock, so the Navarro minefield left the player unable to
+// open a menu, pan the screen or use the mouse until they relaunched.
+//
+// Routed through serverUiLockSet so the script opcodes and these engine edges share one
+// flag, one addressee and one emitter. The addressee for an engine-side lock is the
+// acting player (gDude under the verb's ServerActorScope); an engine-side unlock frees
+// whoever the lock was taken for.
+void gameUiDisable(int a1)
+{
+    (void)a1;
+    serverUiLockSet(true, gDude != nullptr ? gDude->netId : 0);
+}
+void gameUiEnable() { serverUiLockSet(false, 0); }
+bool gameUiIsDisabled() { return serverUiLockActive(); }
 // HEADLESS-SAFE (sfall metarule `outlined_object`): nothing is under a cursor.
 Object* gmouse_get_outlined_object() { serverStubHeadlessOnce("gmouse_get_outlined_object"); return nullptr; }
 // Benign, and faithful for the same reason as interfaceReset: the whole body is
