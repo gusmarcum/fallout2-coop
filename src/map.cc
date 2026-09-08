@@ -902,6 +902,11 @@ err:
             debugPrint("map: releasing a scripted input lock that outlived its map\n");
             serverUiLockSet(false, 0);
         }
+
+        // Object ids are reused once a map is torn down, so who-is-wearing-what has to
+        // be forgotten with it or a stale entry could suppress a real unequip on
+        // whatever inherits the id (bugs/018).
+        invenArmorLedgerReset();
     }
 
     if (scriptsExecStartProc() == -1) {

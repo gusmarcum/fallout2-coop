@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <unordered_map>
 
 #include "actions.h"
 #include "animation.h"
@@ -79,6 +80,32 @@ void _inven_reset_dude()
     _inven_pid = 0x1000000;
 }
 
+// ►► WHICH ARMOUR'S BONUSES ARE CURRENTLY ON EACH BODY, so the same suit cannot be
+// taken off twice. Everything _adjust_ac does is a DELTA — armour class, every damage
+// resistance and threshold, and the suit's own perk are each `bonus - old + new` — and
+// none of it checks whether `old` is actually applied. perkRemoveEffect in particular
+// subtracts flat, with no notion of whether the perk is held. So a second removal of a
+// suit already taken off silently charges the player for it twice: Advanced Power Armor
+// is +4 Strength, and a live world logged
+//
+//     armor perk 68 -> -1 for slot 0 (Strength now 5)
+//     armor perk 68 -> -1 for slot 0 (Strength now 1)
+//
+// nine down to one, with the armour class and resistances quietly going the same way
+// (bugs/018). Seven call sites adjust armour, and widening the perk to every player
+// actor (bugs/012) let more than one of them fire for a single unequip.
+//
+// The ledger only ever SUPPRESSES a removal it knows is redundant. A body it has not
+// seen is trusted exactly as before, so the first call on any critter, in single player
+// and in both golden suites, behaves identically. Keyed by object id and dropped on a
+// map load, because ids are reused when a map is torn down.
+static std::unordered_map<int, int> gArmorBonusApplied; // critter id -> armour id, 0 = none
+
+void invenArmorLedgerReset()
+{
+    gArmorBonusApplied.clear();
+}
+
 // This function removes armor bonuses and effects granted by [oldArmor] and
 // adds appropriate bonuses and effects granted by [newArmor]. Both [oldArmor]
 // and [newArmor] can be NULL.
@@ -86,6 +113,21 @@ void _inven_reset_dude()
 // 0x4715F8
 void _adjust_ac(Object* critter, Object* oldArmor, Object* newArmor)
 {
+    if (critter != nullptr) {
+        auto it = gArmorBonusApplied.find(critter->id);
+        if (it != gArmorBonusApplied.end() && oldArmor != nullptr && it->second != oldArmor->id) {
+            // This suit's bonuses are not on this body: either nothing is applied, or a
+            // different suit is. Taking it off again would charge for it a second time.
+            if (serverDedicatedActive()) {
+                fprintf(stderr, "f2_server: armor bonuses for item id=%d are not applied to"
+                                " critter id=%d (applied: %d) — redundant removal ignored\n",
+                    oldArmor->id, critter->id, it->second);
+            }
+            oldArmor = nullptr;
+        }
+        gArmorBonusApplied[critter->id] = newArmor != nullptr ? newArmor->id : 0;
+    }
+
     int armorClassBonus = critterGetBonusStat(critter, STAT_ARMOR_CLASS);
     int oldArmorClass = armorGetArmorClass(oldArmor);
     int newArmorClass = armorGetArmorClass(newArmor);
