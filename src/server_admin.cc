@@ -207,42 +207,60 @@ static bool adminWriteSave(int slot, const char* label)
     return lsgPerformSaveGame() != -1;
 }
 
-// Which autosave slot to overwrite next: an EMPTY one if the window is not full
-// yet, otherwise the OLDEST. Recomputed from the saves on disk every time rather
-// than held in a cursor, which makes it inherently restart-safe — a fresh process
-// cannot clobber the newest checkpoint just because its counter started at zero,
-// which is precisely what a remembered cursor would do.
+// Which autosave slot to write next. A PLAIN ROUND ROBIN over the window:
+// 11, 12, 13, 14, 15, back to 11. Five real checkpoints, always the five most
+// recent, which is what an autosave rotation is for and what the owner asked for.
 //
-// ►► ORDERED BY THE HEADER'S gameTime (in-game clock), NOT by the real-world save
-// time. Not a stylistic choice: `fileTime` is filled as `tm_hour + tm_min`
-// (savegame.cc:539 — vanilla's own bug, inherited, left alone here because it is a
-// save-header display field and changing it is a format decision, not this fix's
-// business). 14:30 and 01:43 both come out 44, so it cannot order two saves from
-// the same day. gameTime is written correctly and rises monotonically through a
-// campaign, so it is the better recency signal anyway. A save from an ABANDONED
-// timeline (operator loaded an older save and played on) sorts as newest and is
-// therefore preserved longest — acceptable, arguably right: it is the one nothing
-// else can reproduce.
-static int autosavePickSlot()
-{
-    int oldest = kAutosaveSlot;
-    bool haveOldest = false;
-    unsigned int oldestGameTime = 0;
+// ►► THIS REPLACED AN "OLDEST IN-GAME TIME WINS" RULE, and the reason is worth
+// keeping. That rule recycled the least-advanced save so the most progressed ones
+// survived longest, which sounds right and degenerates badly: load an earlier save
+// and play on, and the current timeline is behind every other slot forever, so it
+// is always the oldest and every autosave lands on the SAME slot. A live world sat
+// on one rolling autosave for a whole session that way, with four untouched slots
+// from an abandoned timeline beside it. The cost of the swap is real and accepted:
+// after a rollback the rotation WILL overwrite those older, further-along saves
+// within one lap. Manual slots 1-10 are where a save worth keeping belongs.
+//
+// The cursor continues across a restart instead of resetting to 11, or a server
+// restarted often (a dev world) would grind slots 11 and 12 and never reach 15.
+// It is seeded from the newest save on disk by REAL-WORLD DATE, which is exact in
+// the header; `fileTime` is only consulted to break a same-day tie and is lossy
+// (savegame.cc:539 writes tm_hour + tm_min, vanilla's own bug, so 14:30 and 01:43
+// both come out 44). A tie it gets wrong costs one slot of lap position, nothing more.
+static int gAutosaveCursor = -1; // -1 = not seeded yet this run
 
+static void autosaveSeedCursor()
+{
+    int newest = -1;
+    int newestKey = -1;
+    int newestTime = -1;
     for (int index = 0; index < kAutosaveKeep; index++) {
         int slot = kAutosaveSlot + index;
         LoadSaveSlotData data;
         if (!readSlotHeader(slot, data)) {
-            return slot; // never recycle while the window still has room
+            gAutosaveCursor = slot; // an empty slot is the next one to fill
+            return;
         }
-        if (!haveOldest || data.gameTime < oldestGameTime) {
-            haveOldest = true;
-            oldestGameTime = data.gameTime;
-            oldest = slot;
+        int key = data.fileYear * 10000 + data.fileMonth * 100 + data.fileDay;
+        if (key > newestKey || (key == newestKey && data.fileTime > newestTime)) {
+            newestKey = key;
+            newestTime = data.fileTime;
+            newest = slot;
         }
     }
+    gAutosaveCursor = newest < 0
+        ? kAutosaveSlot
+        : kAutosaveSlot + ((newest - kAutosaveSlot) + 1) % kAutosaveKeep;
+}
 
-    return oldest;
+static int autosavePickSlot()
+{
+    if (gAutosaveCursor < 0) {
+        autosaveSeedCursor();
+    }
+    int slot = gAutosaveCursor;
+    gAutosaveCursor = kAutosaveSlot + ((slot - kAutosaveSlot) + 1) % kAutosaveKeep;
+    return slot;
 }
 
 // The autosave ticker's clock, at file scope so a live reload can re-arm it. A

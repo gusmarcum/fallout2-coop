@@ -479,15 +479,17 @@ int gameShowDeathDialog(const char* message)
 // lock and never told to unlock, so the Navarro minefield left the player unable to
 // open a menu, pan the screen or use the mouse until they relaunched.
 //
-// Routed through serverUiLockSet so the script opcodes and these engine edges share one
-// flag, one addressee and one emitter. The addressee for an engine-side lock is the
-// acting player (gDude under the verb's ServerActorScope); an engine-side unlock frees
-// whoever the lock was taken for.
-void gameUiDisable(int a1)
-{
-    (void)a1;
-    serverUiLockSet(true, gDude != nullptr ? gDude->netId : 0);
-}
+// ►► ONLY THE RELEASE IS WIRED, DELIBERATELY. The fault was a MISSING release, so that
+// is all that is added here; the disable stays the no-op it always was.
+//
+// Taking a wire lock here too would be more faithful to vanilla and badly wrong in
+// practice: combat.cc disables the UI when a fight STARTS and only enables it when the
+// fight ENDS (combat.cc ~2666), so an engine-side lock would freeze a viewer's controls
+// for the whole battle. Vanilla can afford that because it also owns the combat UI that
+// the flag is gating; we do not, and our players keep playing through a fight. So the
+// engine's disable stays silent and only its enable speaks, which is exactly the edge
+// the leaked script locks were waiting for.
+void gameUiDisable(int a1) { (void)a1; }
 void gameUiEnable() { serverUiLockSet(false, 0); }
 bool gameUiIsDisabled() { return serverUiLockActive(); }
 // HEADLESS-SAFE (sfall metarule `outlined_object`): nothing is under a cursor.
