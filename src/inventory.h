@@ -104,6 +104,10 @@ Object* stealSessionTarget();
 // the point), with transfers rerouted to the steal verbs for the thief and
 // refused for everyone else.
 void inventoryOpenStealingViewer(Object* thief, Object* target);
+// Forget which armour's bonuses are applied to whom (bugs/018). Called on a server map
+// load: object ids are reused once a map is torn down, so a stale entry could suppress a
+// real unequip on whatever inherits the id.
+void invenArmorLedgerReset();
 int _inven_set_timer(Object* item);
 Object* inven_get_current_target_obj();
 
