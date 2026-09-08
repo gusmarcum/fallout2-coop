@@ -4,6 +4,54 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.1.0 (2026-09-08)
+
+A bug-fix release with three changes you will notice. Everything here came out of one
+long play session on the oil rig.
+
+### Fixed
+
+- **The Navarro minefield no longer takes your controls away.** Stepping on a mine left
+  the player unable to open a menu, pan the screen or use the mouse, with clicks only
+  half registering, until they restarted the game. The mine's script disables the
+  interface and never re-enables it; in the original game the explosion's own code hands
+  the controls back, because the flag is shared between the scripts and the engine on one
+  machine. Co-op had split that flag across the wire and only reconnected the script half,
+  so the release never reached the player. Six of the game's scripts leak a lock this way,
+  including two in Modoc and one in New Reno, and this fixes all of them. The client also
+  now releases any input lock held longer than fifteen seconds and says so, so no script
+  can cost a session again.
+- **A save made after Frank Horrigan dies is playable.** Loading one booted the world,
+  served a single beat and kicked everybody out, which looked exactly like the client
+  crashing on that map. The oil rig's entry script signals the game's ending on every
+  entry once Horrigan is dead, and the serve loop honoured it. A keepalive server now
+  logs that once and keeps running; stopping it on purpose is still `quit` on the command
+  channel.
+- **The nine-door puzzle in the Enclave works.** One of the terminals opens two doors and
+  then closes those same two a few lines later. The original game's doors slide on a
+  deferred animation, so the second instruction quietly does nothing and the doors stay
+  open; the server applies the slide immediately, so it undid the first instruction and
+  that terminal could never open anything. The doors also appeared open on screen while
+  the server still blocked the way through them.
+- **Power armour cannot be taken off twice.** Rarely, a suit's bonuses were removed twice
+  over, dropping Advanced Power Armor's wearer from 9 Strength to 1 rather than 5, and it
+  stuck. Armour class and every damage resistance were being double-subtracted the same
+  way, unnoticed. The bonuses can now only be taken off the body they are actually on.
+
+### Changed
+
+- **Autosaves rotate through their five slots in order** — 11, 12, 13, 14, 15, then back
+  to 11 — instead of always recycling whichever save was furthest behind in in-game time.
+  The old rule kept the most-progressed saves longest, which sounds right and degenerates:
+  load an earlier save and play on, and every autosave lands on the same slot forever. The
+  trade is real and worth stating: after going back to an older save, the rotation will
+  overwrite the newer, further-along ones within one lap. Manual slots are where a save
+  worth keeping belongs.
+- **The ending no longer asks whether you want to keep playing.** In a shared world the
+  answer is always yes, and one player's dialog box would sit on their screen while
+  everyone else played on. The slides and the credits still play in full first. Single
+  player still asks.
+
 ## v1.0.0 (2026-09-07)
 
 **Fallout 2 has been played from start to finish in co-op.** That is what the version
