@@ -27,6 +27,8 @@ extern int _game_user_wants_to_quit;
 // again by combatTeardown. Long-lived loops that must survive a fight ending
 // (serverServe, the dialog pump) have to test THIS, not `!= 0`.
 bool gameTerminalQuitRequested();
+// Clear a terminal quit a dedicated server must not honour (bugs/017).
+void gameClearTerminalQuit();
 
 extern MessageList gMiscMessageList;
 

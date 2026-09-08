@@ -101,6 +101,15 @@ bool gameTerminalQuitRequested()
     return _game_user_wants_to_quit > 1;
 }
 
+// Put the world back to "keep playing" after a terminal quit that a DEDICATED server
+// must not honour. The story ending is not the server's ending (bugs/017): the oil rig
+// map signals it again every time anyone re-enters after Horrigan is dead, and honouring
+// it stopped the serve loop and kicked everybody out of a world they were still playing.
+void gameClearTerminalQuit()
+{
+    _game_user_wants_to_quit = 0;
+}
+
 // misc.msg
 //
 // 0x58E940

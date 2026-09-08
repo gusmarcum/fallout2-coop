@@ -12,6 +12,7 @@
 #include "cycle.h"
 #include "db.h"
 #include "dbox.h"
+#include "client_net.h" // clientViewerActive — a co-op viewer never gets asked to stop playing
 #include "debug.h"
 #include "draw.h"
 #include "game.h"
@@ -285,6 +286,20 @@ void endgamePlayMovie()
 // 0x43F8C4
 static int endgameEndingHandleContinuePlaying()
 {
+    // ►► A CO-OP VIEWER ANSWERS "YES" WITHOUT BEING ASKED. The question is "do you
+    // want to keep playing?", and in a shared world the answer is always yes: one
+    // player's box would sit on their screen alone while everyone else played on, and
+    // "No" here sets the terminal quit, which used to take the server down with it
+    // (bugs/017). Answering it here rather than skipping the whole ending keeps the
+    // timing exactly as vanilla — the slides and the credits have already played by the
+    // time this is reached, so nothing is cut short.
+    //
+    // Single player is untouched: it still asks, and "No" still ends the game.
+    if (clientViewerActive()) {
+        debugPrint("client-viewer: ending finished — keeping the world running (auto-yes)\n");
+        return 1;
+    }
+
     bool isoWasEnabled = isoDisable();
 
     bool gameMouseWasVisible;
