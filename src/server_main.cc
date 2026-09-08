@@ -783,11 +783,37 @@ int main(int argc, char** argv)
                 // ACTemVil (Temple of Trials challenger) does exactly that at half
                 // HP, so winning the scripted fistfight killed the server.
                 if (gameTerminalQuitRequested()) {
-                    // SAY WHY WE ARE STOPPING. This exit was silent, so a server that
-                    // died to a script-set quit looked identical to a clean shutdown:
-                    // no dump, no error, the log just ended. Cost an evening once.
-                    fprintf(stderr, "f2_server: terminal quit observed at tick %d — stopping\n", tick);
-                    return false;
+                    // ►► A KEEPALIVE SERVER OUTLIVES THE STORY IT IS HOSTING, and this
+                    // is the last place that had not been told (bugs/017). Every other
+                    // route to the ending is already suppressed for a dedicated server
+                    // — METARULE_SIGNAL_END_GAME, op_endgame_movie, the 13-year clock —
+                    // because the campaign finishing is not a reason to end everyone's
+                    // session. The oil rig map signals the ending again on EVERY entry
+                    // once Horrigan is dead, so honouring it here meant a save made
+                    // after the final fight booted, served for one beat and kicked the
+                    // players out, which read as "the client crashes on that map".
+                    //
+                    // Clear it and keep serving. The operator's `quit` is a separate
+                    // path (server_admin's kQuit request), so stopping the server on
+                    // purpose still works. A DEMO/probe server keeps the old behaviour:
+                    // it has no operator to ask and the goldens end their runs this way.
+                    if (keepAlive) {
+                        static bool said = false;
+                        if (!said) {
+                            said = true;
+                            fprintf(stderr, "f2_server: terminal quit observed at tick %d —"
+                                            " IGNORED (a dedicated server outlives the story;"
+                                            " stop it with `quit` on the command channel)\n",
+                                tick);
+                        }
+                        gameClearTerminalQuit();
+                    } else {
+                        // SAY WHY WE ARE STOPPING. This exit was silent, so a server that
+                        // died to a script-set quit looked identical to a clean shutdown:
+                        // no dump, no error, the log just ended. Cost an evening once.
+                        fprintf(stderr, "f2_server: terminal quit observed at tick %d — stopping\n", tick);
+                        return false;
+                    }
                 }
                 // Last viewer left: a DEMO/probe server (no keepalive) has nothing
                 // left to serve, so it stops. A KEEPALIVE dedicated server does NOT —
