@@ -32,6 +32,7 @@
 #include "credits.h"
 #include "critter.h"
 #include "display_monitor.h" // death / revive prompts
+#include "game_ui.h" // gameUiEnable — the input-lock watchdog (bugs/016)
 #include "cycle.h"
 #include "db.h"
 #include "dbox.h" // showDialogBox — vanilla pipboy-in-combat refusal
@@ -114,6 +115,9 @@ static int _mainDeathWordWrap(char* text, int width, short* beginnings, short* c
 // across a time skip and a map-update proc, so this must not clip a working fade in
 // normal play. It is a brick-preventer, not a pacing knob.
 static constexpr unsigned int kViewerFadeBlackMaxMs = 6000;
+// A scripted input lock held longer than this with no release is treated as leaked
+// (bugs/016). Generous: a real cutscene legitimately holds the controls for a while.
+static constexpr unsigned int kViewerUiLockMaxMs = 15000;
 static unsigned int gViewerFadeBlackSinceMs = 0;
 
 // PARTY WIPE: how long the viewer waits for the combat presentation to finish
@@ -2259,6 +2263,22 @@ static int mainClientViewer(const char* connectSpec)
                 kViewerFadeBlackMaxMs);
             paletteFadeTo(_cmap);
             conn.clearFadeBlack();
+        }
+
+        // ►► THE SAME BARGAIN FOR THE SCRIPTED INPUT LOCK. A game_ui_disable whose
+        // game_ui_enable never arrives is a client that cannot open a menu, pan the
+        // screen or use the mouse, with no way out but restarting — which is exactly
+        // what the Navarro minefield did (bugs/016): CIMine locks the controls and
+        // never unlocks them, relying on the engine's own cleanup, which used to stop
+        // at the server. That leak is fixed at the source, but no script should ever be
+        // able to cost a session, so the lock is BOUNDED here too. Longer than the
+        // fade's bound because a real cutscene holds the controls longer than a fade.
+        if (conn.uiLockWatchdogExpired(getTicks(), kViewerUiLockMaxMs)) {
+            debugPrint("client-viewer: input still locked after %u ms — releasing (watchdog)\n",
+                kViewerUiLockMaxMs);
+            gameUiEnable();
+            conn.clearUiLock();
+            displayMonitorAddMessage("Controls released (the script never gave them back).");
         }
 
         // The server says we used a Motion Sensor: open OUR automap, with scanner

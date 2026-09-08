@@ -894,6 +894,14 @@ err:
         if (moved > 0) {
             debugPrint("map: %d door sprite(s) put back on their frame offsets\n", moved);
         }
+
+        // A scripted input lock must never outlive the map it was taken on. The script
+        // that would have released it is gone with the old map's script list, so a lock
+        // still held here can only ever be a leak (bugs/016).
+        if (serverUiLockActive()) {
+            debugPrint("map: releasing a scripted input lock that outlived its map\n");
+            serverUiLockSet(false, 0);
+        }
     }
 
     if (scriptsExecStartProc() == -1) {

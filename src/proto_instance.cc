@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <unordered_map>
+
 #include "animation.h"
 #include "art.h"
 #include "color.h"
@@ -33,6 +35,7 @@
 #include "random.h"
 #include "scripts.h"
 #include "server_loop.h"
+#include "sim_clock.h" // simClockNow — the per-beat scripted-door ledger (bugs/015)
 #include "skill.h"
 #include "stat.h"
 #include "tile.h"
@@ -2323,9 +2326,48 @@ static int objectOpenClose(Object* obj)
 }
 
 // 0x49D3D8
+// ►► VANILLA'S GUARD READS A FRAME THAT HAS NOT MOVED YET, and that is the whole of
+// obj_open/obj_close's semantics. Both test obj->frame, and in vanilla the slide is a
+// DEFERRED animation: the frame keeps its pre-run value for the entire script run, so
+// whichever of open/close a script calls FIRST on a given door is the one that takes
+// effect, and any later reversal in the same run fails its own guard and does nothing.
+//
+// The headless server applies the slide immediately, so the reversal passed its guard
+// and undid the first call. QIPzlTrm, the Enclave puzzle terminal, does exactly this:
+// its Term3 branch opens the doors on tiles 19496 and 20510 and then closes those same
+// two again. Vanilla leaves them open; we left them shut. Worse, the viewer had already
+// begun the open slide and never played the close on top of it, so it drew an open door
+// across a hex the server was still blocking with — "it is open but it acts like it's
+// closed" (bugs/015).
+//
+// So on the server, let the FIRST scripted move of a door in a beat stand and ignore a
+// reversal that follows it. The ledger is keyed by netId and stamped with both the sim
+// clock and the map-load generation, so it clears itself every beat and can never carry
+// an entry across a map load or a quickload.
+static unsigned int gDoorScriptMoveBeat = 0;
+static unsigned int gDoorScriptMoveGeneration = 0;
+static std::unordered_map<int, bool> gDoorScriptMoved;
+
+static bool doorScriptMoveClaim(Object* obj)
+{
+    if (!serverLoopActive() || obj == nullptr || obj->netId == 0) {
+        return true; // vanilla, or an object the ledger cannot key: behave as before
+    }
+
+    unsigned int beat = simClockNow();
+    unsigned int generation = mapGetLoadGeneration();
+    if (beat != gDoorScriptMoveBeat || generation != gDoorScriptMoveGeneration) {
+        gDoorScriptMoveBeat = beat;
+        gDoorScriptMoveGeneration = generation;
+        gDoorScriptMoved.clear();
+    }
+
+    return gDoorScriptMoved.emplace(obj->netId, true).second;
+}
+
 int objectOpen(Object* obj)
 {
-    if (obj->frame == 0) {
+    if (obj->frame == 0 && doorScriptMoveClaim(obj)) {
         objectOpenClose(obj);
     }
 
@@ -2335,7 +2377,8 @@ int objectOpen(Object* obj)
 // 0x49D3F4
 int objectClose(Object* obj)
 {
-    if (obj->frame != 0) {
+    // Same rule as objectOpen: the first scripted move of this door in the beat wins.
+    if (obj->frame != 0 && doorScriptMoveClaim(obj)) {
         objectOpenClose(obj);
     }
 

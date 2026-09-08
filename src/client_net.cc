@@ -659,6 +659,20 @@ public:
         return _fadeBlackSinceMs != 0 && getTicksBetween(nowMs, _fadeBlackSinceMs) > maxBlackMs;
     }
 
+    // Same watchdog, same reasoning, as the fade above: a lock whose matching unlock
+    // never arrives leaves the player unable to open a menu, pan the screen or use the
+    // mouse, with no way out but restarting the game. That is what the Navarro
+    // minefield did (bugs/016), and while the server fix stops that particular leak,
+    // NO script should ever be able to cost a session. Longer than the fade's bound
+    // because a real cutscene legitimately holds the controls longer than a fade.
+    bool uiLockWatchdogExpired(unsigned int nowMs, unsigned int maxLockedMs) const
+    {
+        return _uiLockSinceMs != 0 && getTicksBetween(nowMs, _uiLockSinceMs) > maxLockedMs;
+    }
+
+    void clearUiLock() { _uiLockSinceMs = 0; }
+
+
     // Automap latch (same one-shot shape, same reason — a modal screen must not be
     // opened from inside pump()).
     bool takeAutomapOpen(bool* usingScanner)
@@ -4450,8 +4464,11 @@ private:
             return; // somebody else's cutscene
         }
         if (locked) {
+            _uiLockSinceMs = getTicks();
+            if (_uiLockSinceMs == 0) _uiLockSinceMs = 1; // 0 = "not locked"
             gameUiDisable(0);
         } else {
+            _uiLockSinceMs = 0;
             gameUiEnable();
         }
     }
@@ -4955,6 +4972,7 @@ private:
     // When the screen went black (0 = not black). The fade is applied at decode; this
     // is only the watchdog's clock.
     unsigned int _fadeBlackSinceMs = 0;
+    unsigned int _uiLockSinceMs = 0; // scripted input lock held since (0 = not locked)
     // Audit chunks accumulated so far (cleared after each completed comparison).
     std::vector<StateAuditRecord> _auditRecords;
     // Container netId the server opened for this actor (0 = none pending).
@@ -5149,6 +5167,9 @@ public:
     bool takeAutomapOpen(bool* usingScanner) { return _decoder.takeAutomapOpen(usingScanner); }
     bool fadeWatchdogExpired(unsigned int nowMs, unsigned int maxBlackMs) const
     { return _decoder.fadeWatchdogExpired(nowMs, maxBlackMs); }
+    bool uiLockWatchdogExpired(unsigned int nowMs, unsigned int maxLockedMs) const
+    { return _decoder.uiLockWatchdogExpired(nowMs, maxLockedMs); }
+    void clearUiLock() { _decoder.clearUiLock(); }
     void clearFadeBlack() { _decoder.clearFadeBlack(); }
     void setCombatModalOpen(bool open) { _decoder.setCombatModalOpen(open); }
     bool combatModalOpen() const { return _decoder.combatModalOpen(); }
@@ -5479,6 +5500,16 @@ bool ClientConnection::fadeWatchdogExpired(unsigned int nowMs, unsigned int maxB
 void ClientConnection::clearFadeBlack()
 {
     if (_impl->stream != nullptr) _impl->stream->clearFadeBlack();
+}
+
+bool ClientConnection::uiLockWatchdogExpired(unsigned int nowMs, unsigned int maxLockedMs) const
+{
+    return _impl->stream != nullptr && _impl->stream->uiLockWatchdogExpired(nowMs, maxLockedMs);
+}
+
+void ClientConnection::clearUiLock()
+{
+    if (_impl->stream != nullptr) _impl->stream->clearUiLock();
 }
 
 void ClientConnection::setCombatModalOpen(bool open)

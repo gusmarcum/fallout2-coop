@@ -4337,18 +4337,33 @@ static void opGameUiDisable(Program* program)
 {
     // The cutscene lock belongs to the player the script is acting on, matching the
     // gfade_out/gfade_in pair right below — a script issues them together and they
-    // must aim at the same person. Routed through the presenter so a dedicated
-    // server, whose own gameUiDisable is a no-op stub, still tells the viewers.
+    // must aim at the same person.
+    //
+    // Through serverUiLockSet, NOT straight to the presenter: the engine takes and
+    // releases this same lock (actionExplode's tail is what frees the player after a
+    // mine, since CIMine never calls game_ui_enable itself), so both halves have to
+    // share one flag or the release never reaches the viewer (bugs/016).
     Object* actor = scriptContextDude(program);
-    presenter()->screenInputLock(true, actor != nullptr ? actor->netId : 0);
+    if (serverLoopActive()) {
+        serverUiLockSet(true, actor != nullptr ? actor->netId : 0);
+    } else {
+        gameUiDisable(0); // vanilla: one local flag, exactly as before
+    }
 }
 
 // game_ui_enable
 // 0x45B3D8
 static void opGameUiEnable(Program* program)
 {
-    Object* actor = scriptContextDude(program);
-    presenter()->screenInputLock(false, actor != nullptr ? actor->netId : 0);
+    // The release frees whoever the lock was TAKEN for, which is not always the player
+    // this script resolves to now — see server_loop.h. Passing an actor here would
+    // re-derive it and get the deferred cases wrong.
+    (void)program;
+    if (serverLoopActive()) {
+        serverUiLockSet(false, 0);
+    } else {
+        gameUiEnable(); // vanilla
+    }
 }
 
 // game_ui_is_disabled
