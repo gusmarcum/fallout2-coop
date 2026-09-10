@@ -40,6 +40,7 @@
 #include "script_request_handler.h"
 #include "scripts.h"
 #include "server_loop.h"
+#include "server_seat_items.h" // one suit per seat on a map's first load
 #include "server_players.h"
 #include "settings.h"
 #include "svga.h"
@@ -614,7 +615,15 @@ int mapLoadByName(char* fileName)
 
     if (rc == -1) {
         if (kWorldTrace) {
-            fprintf(stderr, "[world] map load %s: fresh .MAP (no saved state: doors/loot reset)\n", fileName);
+            // mapLoadSaved reaches this branch on purpose with a name that already ends
+            // in .SAV (the saved state file is opened verbatim), so that load is NOT a
+            // reset; say so, or a correct load reads like the bug this line exists to expose.
+            const char* dot = strrchr(fileName, '.');
+            if (dot != nullptr && strcmp(dot, ".SAV") == 0) {
+                fprintf(stderr, "[world] map load %s: loading the saved state file\n", fileName);
+            } else {
+                fprintf(stderr, "[world] map load %s: fresh .MAP (no saved state: doors/loot reset)\n", fileName);
+            }
         }
         const char* filePath = mapBuildPath(fileName);
         File* stream = fileOpen(filePath, "rb");
@@ -915,6 +924,10 @@ err:
 
     scriptsExecMapEnterProc();
     scriptsExecMapUpdateProc();
+    // After the enter procs, so the containers are in the state a player would find
+    // them in; before the emissions window closes, so the copies ride the baseline
+    // like any other object. A no-op on the client, the probe and every revisit.
+    serverSeatItemsOnFirstMapLoad();
     tileEnable();
 
     if (gMapTransition.map > 0) {

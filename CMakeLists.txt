@@ -193,6 +193,8 @@ add_library(f2_core OBJECT
     "src/server_script_rules.cc"
     "src/server_script_rules.h"
     "src/server_players.h"
+    "src/server_seat_items.cc"
+    "src/server_seat_items.h"
     "src/settings.cc"
     "src/settings.h"
     "src/sfall_arrays.cc"

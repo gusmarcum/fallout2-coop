@@ -425,19 +425,14 @@ int gameMoviePlay(int movie, int flags)
     // cost game time. A movie is not.
     gameMovieMarkSeen(movie);
 
-    // ►► ENV-GATED, DEFAULT ON — F2_MOVIES=0 is a KILL SWITCH (the standing rule:
-    // every feature ships on, the goldens opt out; serverFeatureEnabled answers OFF
-    // under the headless probe, so gates and demos still get the old
-    // mark-seen-and-continue stub byte-for-byte).
-    //
-    // The switch is worth keeping because the projection has a failure mode with no
-    // runtime escape: a viewer that shows a black screen instead of a movie leaves the
-    // server parked in the barrier, and `movdone` is a CONTROL-plane verb, so the
-    // operator's command channel cannot release it. A feature whose failure needs a
-    // server restart must be switchable off without one.
-    if (!serverFeatureEnabled("F2_MOVIES")) {
-        return 0;
-    }
+    // Always projected. F2_MOVIES=0 was a kill switch for this projection, adopted in
+    // September 2026 for a joining client that crashed on the Temple of Trials cutscene.
+    // That crash was the client's own mods, not the movie (owner, 2026-09-09), and the
+    // switch had cost the live worlds every cutscene in the game. The hazard it guarded
+    // against, a room where no viewer can ack and the barrier parks the server, is
+    // bounded in gameMovieServerBarrier now (timeout) and releasable from the console
+    // (movdone). A leftover F2_MOVIES=0 is reported once at boot (server_main.cc) and
+    // ignored.
 
     // The barrier below parks the world; an open player trade cannot outlive it
     // (server_trade.h). The trade tick cannot see a movie — gameMovieIsPlaying is

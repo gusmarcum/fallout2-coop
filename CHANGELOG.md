@@ -4,6 +4,54 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## Unreleased
+
+### Added
+
+- **One suit per player.** The game places exactly one Advanced Power Armor in Navarro and
+  one Mk II in the oil rig's trap room. The first time the server loads one of those maps
+  it tops the locker up to one suit per seat in the save, so a second player is not sent
+  through Navarro without a disguise because the first one took the only suit. Nothing is
+  removed, a revisit changes nothing, and the rule table in `src/server_seat_items.cc` is
+  the place to add more.
+
+### Changed
+
+- **Cutscenes always play.** `F2_MOVIES=0` used to switch scripted movies off on the
+  server, and the launch files this project shipped set it, so no cutscene ever reached
+  the players: not the tanker leaving for the oil rig, not the rig going up. The switch
+  was adopted for a client that crashed on the Temple of Trials cutscene, and that crash
+  was the client's own mods, not the movie. The switch is retired; a launch file that
+  still sets it gets one notice at boot and is otherwise ignored. Clients must run
+  unmodified game data.
+- **A cutscene can no longer park the server.** The movie barrier releases on the first
+  player to finish or skip, as before, and now also on its own after three minutes if no
+  player ever reports back, with a line on the console. The operator can release it by
+  typing `movdone` on the command channel.
+
+### Fixed
+
+- **A server started on a fresh map can save.** The slot writer copies the automap
+  database into the slot and gave up when the file did not exist. Only a client creates
+  that file, so a dedicated server hosting a new world from its own folder failed every
+  save with "error 0" until a client happened to run beside it. The server now writes
+  the same empty database the client would have.
+- **A new world starts from the shipped maps.** Starting the server on a fresh map in a
+  folder that had hosted another world kept that world's map state files, and the loader
+  prefers those, so places the old world had visited came up already looted and cleared.
+  The server now clears them, like the game's own new game does.
+- **A failed save no longer damages the slot.** The save backup covered the save file,
+  the maps and the automap but not the companion protos, which are written before the
+  step that can fail. A failed save restored everything else and left protos from the
+  world that failed to save, and loading that slot crashed the game. The protos are now
+  backed up and restored with the rest, and a recycled autosave slot is emptied of them
+  too. `F2_SERVER_DEBUG_LOG=1` makes the server name the failing step in
+  `f2_server-debug.log`.
+- **The world trace no longer reports a correct saved-state load as a reset.** With
+  `F2_TRACE_WORLD=1`, re-entering a visited map logged "fresh .MAP (no saved state)" for
+  the inner load of the saved file, which made every revisit read like the very bug the
+  line exists to expose. It now says "loading the saved state file".
+
 ## v1.1.0 (2026-09-08)
 
 A bug-fix release with three changes you will notice. Everything here came out of one

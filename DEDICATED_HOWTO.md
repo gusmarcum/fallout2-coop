@@ -68,7 +68,7 @@ The feature variables still exist, but only as **kill switches** for debugging �
 | `F2_SERVER_SMOOTH_WALK=0` | out-of-combat walkers teleport instead of walking |
 | `F2_DIALOG_STREAM=0` | no live conversations and no barter |
 | `F2_WORLDMAP_STREAM=0` | no travel, and therefore no random encounters |
-| `F2_MOVIES=0` | cutscenes are marked seen and never shown (read the ⚠ in §2.6 first) |
+| `F2_MOVIES=0` | retired: ignored with a notice at boot, cutscenes always play (see §2.6) |
 
 `F2_SERVER_TICKS` unset means the server never closes on its own. With `F2_SERVER_CMD` set
 it is a keepalive server: it freezes when empty and waits for reconnects.
@@ -141,7 +141,7 @@ enabled. `=0` disables. Any other value also enables, so `=1` is harmless and ex
 | `F2_SERVER_SMOOTH_WALK=0` | animated out-of-combat walks, one tile per beat |
 | `F2_DIALOG_STREAM=0` | dialogue + barter block-and-pump (live conversations and trade) |
 | `F2_WORLDMAP_STREAM=0` | worldmap block-and-pump (live travel, car travel, random-encounter prompts) |
-| `F2_MOVIES=0` | projecting cutscenes to viewers — see §2.6 |
+| `F2_MOVIES=0` | nothing any more: the switch is retired, cutscenes always play (§2.6) |
 | `F2_NO_MODAL_PRESENT=1` | keeping the world animating behind an open modal (note: this one is a `=1` switch) |
 | `F2_NO_ATTACK_HEADER=1` | the "X throws the Spear at you." line before combat damage lines |
 
@@ -165,18 +165,22 @@ enabled. `=0` disables. Any other value also enables, so `=1` is harmless and ex
 | `F2_SERVER_ACTION_GATE` | **on** | per-player action pacing (an action is gated for as long as the animation it produced runs). `=0` disables — the only kill switch here that defaults ON |
 | `F2_SERVER_OUTBOX_PACE` | off | **experimental**: meter wire emission from animation durations instead of firing everything at once. In-combat only; out-of-combat stays realtime. Also switches combat glides to frame-true pacing (walk 371ms/run 125ms per tile vs the rounded 400/100) |
 | `F2_SERVER_SEED` | — | RNG seed, for reproducible worlds and encounters |
+| `F2_SERVER_DEBUG_LOG` | off | `1` writes the engine's debug stream (the LOADSAVE step reports among it) to `f2_server-debug.log` next to the exe |
 
 ### 2.6 Movies
-**On by default.** One thing still has to be true for a cutscene to play: **at least one
-viewer connected** when it triggers — with none the barrier bails at once.
+**Always on.** One thing has to be true for a cutscene to play: **at least one viewer
+connected** when it triggers. With none the barrier bails at once and the movie is only
+marked seen, which is what a headless or unattended run wants.
 
-With `F2_MOVIES=0`, `gameMoviePlay` marks the movie seen and returns without sending
-anything, so `movie 4` prints "playing… / barrier released" instantly and nothing shows.
+`F2_MOVIES=0` used to switch the projection off. It was adopted for a client that crashed
+on the Temple of Trials cutscene, and that crash turned out to be the client's own mods,
+not the movie. The switch is retired: a launch file that still sets it gets one notice at
+boot and is otherwise ignored. Clients must run unmodified game data.
 
-> ⚠ Why the kill switch is worth knowing about: `movdone` — the ack that releases the movie
-> barrier — is a wire verb only the CLIENT sends, so the operator console **cannot** release
-> it. A viewer that renders black instead of the movie leaves the server parked with no
-> escape but a restart. If you hit that on your build or data, `F2_MOVIES=0` is the way out.
+The failure the switch guarded against is bounded now. The barrier releases on the first
+`movdone` from any viewer, finished or skipped; if no viewer ever acks, it releases on its
+own after three minutes with a line on the console; and the operator can release it at any
+time by typing `movdone` on the command channel.
 
 ### 2.7 Lifecycle — run vs freeze vs stop
 The model is **"empty = freeze, player = play, never quit on its own"**:
@@ -190,6 +194,25 @@ The model is **"empty = freeze, player = play, never quit on its own"**:
 
 > Startup still blocks for the first wire client before serving: the world comes alive when
 > the first player joins, then persists across everyone leaving.
+
+### 2.8 Seat items: one suit per player
+The game ships exactly one of a few things every player body needs on its own back. The
+first time a dedicated server loads such a map, it tops the item up inside its own
+container to the number of player seats in the save (the host plus every extra body the
+save carries, online or parked). It never removes anything, never runs on a revisit (the
+map's .SAV exists then and already carries the copies), and never runs on a client or the
+headless probe. One console line per rule when it fires:
+`f2_server: seat items: Locker at tile 11317 holds 2 x Advanced Power Armor (1 before, 2 seats in the save)`
+
+| map | item | container |
+|---|---|---|
+| `navarro` | Advanced Power Armor (pid 348) | Locker at tile 11317, elevation 1 |
+| `enctrp` | Adv. Power Armor MKII (pid 349) | Locker at tile 19527, elevation 0 |
+
+The table is `kSeatItemRules` in `src/server_seat_items.cc`: a row is the map's file
+name, the item pid, and the container's pid, tile and elevation, which is how the map file
+itself identifies the object. A seat that joins after a map's first visit gets nothing
+retroactively; `give 348 1` on the command channel drops a suit to the host to trade over.
 
 ---
 
@@ -405,6 +428,12 @@ was actually offered a panel, and the level must be inside that elevator's butto
 ---
 
 ## 6. Persistence check
+
+A world started with `F2_SERVER_MAP` (or `new` in the lobby) begins by clearing `data\MAPS\*.SAV`,
+the automap database and the per-save proto overrides, exactly as the game's own new game
+does; the console says how many stale files it found. A loaded world restores them from
+its slot. If a save ever fails, run with `F2_SERVER_DEBUG_LOG=1` and read the LOADSAVE step
+in `f2_server-debug.log`; the slot is left as it was before the attempt.
 
 With any server running that has a `CMD` port:
 ```sh
