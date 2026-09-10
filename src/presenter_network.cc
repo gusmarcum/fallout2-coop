@@ -1261,11 +1261,12 @@ public:
         flushFrame();
     }
 
-    void worldmapEnd() override
+    void worldmapEnd(bool mapLoadFollows) override
     {
         if (presenterEmissionsSuppressed()) return;
-        if (eventTraceEnabled()) fprintf(stderr, "[worldmap] SEND end\n");
+        if (eventTraceEnabled()) fprintf(stderr, "[worldmap] SEND end (map load follows=%d)\n", mapLoadFollows ? 1 : 0);
         beginEvent(EVENT_WORLDMAP_END, 0);
+        putI32(mapLoadFollows ? 1 : 0);
         endEvent();
         flushFrame();
     }

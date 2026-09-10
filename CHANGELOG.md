@@ -52,6 +52,12 @@ client must run the same version.
   it could not know whether the server already had the name, and the server then threw the
   roll away for a returning player. The client now asks the server first and opens the
   screen only for a name the world does not know. A fresh world still asks everyone once.
+- **Leaving the worldmap no longer flashes the map you just left.** Picking a destination
+  (or being pulled into an encounter) closed the worldmap screen a second or two before
+  the new map arrived, and in that gap you were shown the map you had left, with whatever
+  its fight still had queued playing at full speed. The screen now holds on black until
+  the new map is applied, the way the original game loads the new map underneath the
+  worldmap. Escaping the worldmap still returns you to the old map at once.
 - **The world trace no longer reports a correct saved-state load as a reset.** With
   `F2_TRACE_WORLD=1`, re-entering a visited map logged "fresh .MAP (no saved state)" for
   the inner load of the saved file, which made every revisit read like the very bug the

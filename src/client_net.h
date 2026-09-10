@@ -153,6 +153,10 @@ public:
     // the server replies, then known or new. Read on a throwaway connection made before
     // the viewer is active, so it is NOT gated on clientViewerActive.
     int accountState() const;
+    // The worldmap trip just ended in a map load (EVENT_WORLDMAP_END flag). One-shot:
+    // main.cc takes it right after the worldmap modal returns and holds on black until
+    // the new snapshot is applied instead of revealing the map that was left (bugs/021).
+    bool takeWorldmapHoldForLoad();
     // Decode nothing but the account answer on this connection (the pre-join query).
     // Call right after connect(); the stream is created there.
     void setQueryOnly(bool queryOnly);

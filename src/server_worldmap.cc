@@ -485,7 +485,10 @@ int worldmapServerDriver()
     // a second click made during the same session outlived it.
     worldmapIntentClear();
 
-    presenter()->worldmapEnd();
+    // `map != -1` here means a mapLoadById follows below (a destination or an
+    // encounter); the viewer holds on black for it instead of showing the map we are
+    // leaving for the second or two the load and the snapshot take (bugs/021).
+    presenter()->worldmapEnd(map != -1);
 
     // One line per worldmap session — this path has no headless oracle and its
     // failure mode (map == -1) is invisible on the wire: the viewer just gets a
