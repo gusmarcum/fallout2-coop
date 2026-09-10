@@ -1,4 +1,7 @@
 #include <string.h>
+#include <stdio.h>
+
+#include <chrono>
 
 #include "db.h"
 #include "game_movie.h"
@@ -28,6 +31,13 @@ static unsigned char gGameMoviesSeen[MOVIE_COUNT];
 static std::function<bool()> gMovieServerPump;
 static bool gMovieAcked = false;
 
+// Upper bound on the barrier, wall clock. The release policy is FIRST ACK, so with any
+// viewer able to finish or skip the movie the barrier ends within the movie's own
+// length; this bound is for the room where nobody can (every viewer stuck on a client
+// that cannot render the file), which used to park the server until a restart. Longer
+// than any scripted cutscene in the game, so a healthy room never reaches it.
+static constexpr int kMovieBarrierMaxMs = 180000;
+
 void gameMovieSetServerPump(std::function<bool()> pump)
 {
     gMovieServerPump = std::move(pump);
@@ -49,9 +59,15 @@ void gameMovieServerBarrier()
     // NEXT movie. The window between two movies is the only safe place to reset.
     gMovieAcked = false;
 
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     while (!gMovieAcked) {
         if (!gMovieServerPump()) {
-            break; // bail: no viewers left, or quit — never wedge the tick
+            break; // bail: no viewers left, or quit; never wedge the tick
+        }
+        if (std::chrono::steady_clock::now() - started > std::chrono::milliseconds(kMovieBarrierMaxMs)) {
+            fprintf(stderr, "f2_server: movie barrier released after %d s with no ack from any viewer\n",
+                kMovieBarrierMaxMs / 1000);
+            break;
         }
     }
 }

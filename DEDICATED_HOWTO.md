@@ -68,7 +68,7 @@ The feature variables still exist, but only as **kill switches** for debugging �
 | `F2_SERVER_SMOOTH_WALK=0` | out-of-combat walkers teleport instead of walking |
 | `F2_DIALOG_STREAM=0` | no live conversations and no barter |
 | `F2_WORLDMAP_STREAM=0` | no travel, and therefore no random encounters |
-| `F2_MOVIES=0` | cutscenes are marked seen and never shown (read the ⚠ in §2.6 first) |
+| `F2_MOVIES=0` | retired: ignored with a notice at boot, cutscenes always play (see §2.6) |
 
 `F2_SERVER_TICKS` unset means the server never closes on its own. With `F2_SERVER_CMD` set
 it is a keepalive server: it freezes when empty and waits for reconnects.
@@ -141,7 +141,7 @@ enabled. `=0` disables. Any other value also enables, so `=1` is harmless and ex
 | `F2_SERVER_SMOOTH_WALK=0` | animated out-of-combat walks, one tile per beat |
 | `F2_DIALOG_STREAM=0` | dialogue + barter block-and-pump (live conversations and trade) |
 | `F2_WORLDMAP_STREAM=0` | worldmap block-and-pump (live travel, car travel, random-encounter prompts) |
-| `F2_MOVIES=0` | projecting cutscenes to viewers — see §2.6 |
+| `F2_MOVIES=0` | nothing any more: the switch is retired, cutscenes always play (§2.6) |
 | `F2_NO_MODAL_PRESENT=1` | keeping the world animating behind an open modal (note: this one is a `=1` switch) |
 | `F2_NO_ATTACK_HEADER=1` | the "X throws the Spear at you." line before combat damage lines |
 
@@ -167,16 +167,19 @@ enabled. `=0` disables. Any other value also enables, so `=1` is harmless and ex
 | `F2_SERVER_SEED` | — | RNG seed, for reproducible worlds and encounters |
 
 ### 2.6 Movies
-**On by default.** One thing still has to be true for a cutscene to play: **at least one
-viewer connected** when it triggers — with none the barrier bails at once.
+**Always on.** One thing has to be true for a cutscene to play: **at least one viewer
+connected** when it triggers. With none the barrier bails at once and the movie is only
+marked seen, which is what a headless or unattended run wants.
 
-With `F2_MOVIES=0`, `gameMoviePlay` marks the movie seen and returns without sending
-anything, so `movie 4` prints "playing… / barrier released" instantly and nothing shows.
+`F2_MOVIES=0` used to switch the projection off. It was adopted for a client that crashed
+on the Temple of Trials cutscene, and that crash turned out to be the client's own mods,
+not the movie. The switch is retired: a launch file that still sets it gets one notice at
+boot and is otherwise ignored. Clients must run unmodified game data.
 
-> ⚠ Why the kill switch is worth knowing about: `movdone` — the ack that releases the movie
-> barrier — is a wire verb only the CLIENT sends, so the operator console **cannot** release
-> it. A viewer that renders black instead of the movie leaves the server parked with no
-> escape but a restart. If you hit that on your build or data, `F2_MOVIES=0` is the way out.
+The failure the switch guarded against is bounded now. The barrier releases on the first
+`movdone` from any viewer, finished or skipped; if no viewer ever acks, it releases on its
+own after three minutes with a line on the console; and the operator can release it at any
+time by typing `movdone` on the command channel.
 
 ### 2.7 Lifecycle — run vs freeze vs stop
 The model is **"empty = freeze, player = play, never quit on its own"**:

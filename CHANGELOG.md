@@ -4,6 +4,29 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## Unreleased
+
+### Changed
+
+- **Cutscenes always play.** `F2_MOVIES=0` used to switch scripted movies off on the
+  server, and the launch files this project shipped set it, so no cutscene ever reached
+  the players: not the tanker leaving for the oil rig, not the rig going up. The switch
+  was adopted for a client that crashed on the Temple of Trials cutscene, and that crash
+  was the client's own mods, not the movie. The switch is retired; a launch file that
+  still sets it gets one notice at boot and is otherwise ignored. Clients must run
+  unmodified game data.
+- **A cutscene can no longer park the server.** The movie barrier releases on the first
+  player to finish or skip, as before, and now also on its own after three minutes if no
+  player ever reports back, with a line on the console. The operator can release it by
+  typing `movdone` on the command channel.
+
+### Fixed
+
+- **The world trace no longer reports a correct saved-state load as a reset.** With
+  `F2_TRACE_WORLD=1`, re-entering a visited map logged "fresh .MAP (no saved state)" for
+  the inner load of the saved file, which made every revisit read like the very bug the
+  line exists to expose. It now says "loading the saved state file".
+
 ## v1.1.0 (2026-09-08)
 
 A bug-fix release with three changes you will notice. Everything here came out of one

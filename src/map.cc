@@ -614,7 +614,15 @@ int mapLoadByName(char* fileName)
 
     if (rc == -1) {
         if (kWorldTrace) {
-            fprintf(stderr, "[world] map load %s: fresh .MAP (no saved state: doors/loot reset)\n", fileName);
+            // mapLoadSaved reaches this branch on purpose with a name that already ends
+            // in .SAV (the saved state file is opened verbatim), so that load is NOT a
+            // reset; say so, or a correct load reads like the bug this line exists to expose.
+            const char* dot = strrchr(fileName, '.');
+            if (dot != nullptr && strcmp(dot, ".SAV") == 0) {
+                fprintf(stderr, "[world] map load %s: loading the saved state file\n", fileName);
+            } else {
+                fprintf(stderr, "[world] map load %s: fresh .MAP (no saved state: doors/loot reset)\n", fileName);
+            }
         }
         const char* filePath = mapBuildPath(fileName);
         File* stream = fileOpen(filePath, "rb");

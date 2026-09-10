@@ -67,6 +67,15 @@ int main(int argc, char** argv)
     _debug_register_env();
 
     fprintf(stderr, "f2_server: platform %s\n", serverPlatformName());
+    // Cutscenes are always projected to the players. F2_MOVIES=0 used to switch that
+    // off; it was set for a client crash that turned out to be the client's own mods,
+    // and the switch is retired. A launch file that still carries it is told once,
+    // here, instead of silently losing every movie in the game.
+    if (const char* movies = getenv("F2_MOVIES")) {
+        if (strcmp(movies, "0") == 0) {
+            fprintf(stderr, "f2_server: F2_MOVIES=0 is ignored: cutscenes always play (the switch was retired)\n");
+        }
+    }
 
     // Install the server-authored holodisk announcer (server_loop.h): serverEmitBaseline
     // calls it on every join / rebaseline / map change, which is what lets custom disks

@@ -713,6 +713,7 @@ static void writeHelp(const std::function<void(const char* text)>& reply, bool w
     reply("  say <chan> <text>     push a styled line to every message log");
     reply("  saydemo               one line per channel (style eyeball test)");
     reply("  movie <0-16>          project a movie to every viewer (4 = VSUIT)");
+    reply("  movdone               release a parked movie barrier from the console");
     reply("  timeskip <minutes>    advance the game clock like a script does");
     reply("  spawn <pid> [n] [tile]  place n critters of pid (default 1, random tile)");
     reply("  stress <n> [pid] [seed] spawn n hostiles near the players and aggro them");
@@ -805,6 +806,17 @@ bool serverAdminLine(const char* line,
         presenter()->consoleMessageStyled(0, channel, text);
         snprintf(msg, sizeof(msg), "say: sent on %s", channelName);
         reply(msg);
+        return true;
+    }
+
+    if (strcmp(verb, "movdone") == 0) {
+        // Console twin of the viewers' wire ack (server_control.cc). Releases a movie
+        // barrier the room cannot: every client stuck on a cutscene it cannot render.
+        // The barrier also times out on its own (game_movie_state.cc); this is the
+        // operator's way to end it now. Harmless with no movie up: the ack flag is
+        // cleared when the next barrier opens, so a stray one cannot pre-release it.
+        gameMovieAck();
+        reply("movdone: movie barrier released (if one was waiting)");
         return true;
     }
 

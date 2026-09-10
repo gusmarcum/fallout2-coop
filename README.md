@@ -244,7 +244,6 @@ set F2_SERVER_NET=9300
 set F2_SERVER_CMD=9301
 set F2_SERVER_PACE_MS=100
 set F2_AUTOSAVE_SECS=300
-set F2_MOVIES=0
 set F2_SERVER_NAME=Our game
 f2_server.exe
 pause
@@ -327,7 +326,7 @@ Set these as environment variables before starting `f2_server.exe`.
 | `F2_AUTOSAVE_SECS` | `300` | autosave interval into slots 11-15; `0` = off |
 | `F2_SERVER_KEEPALIVE` | on if CMD set | keep running when the last player leaves |
 | `F2_GAME_DIFFICULTY` / `F2_COMBAT_DIFFICULTY` | from cfg | `0` easy, `1` normal, `2` hard |
-| `F2_MOVIES` | on | `0` skips scripted movies; use it if a joining client crashes on a cutscene |
+| `F2_MOVIES` | always on | retired; a leftover `0` in a launch file is ignored and the server says so at boot |
 | `F2_TRACE_WORLD` | off | `1` prints `[world]` lines for door, container and map-state changes |
 
 The full list of variables and verbs, including the diagnostic ones, is in
