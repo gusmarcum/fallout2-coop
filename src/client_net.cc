@@ -224,6 +224,7 @@ enum : unsigned char {
     EVENT_TRADE_END = 67, // trade over, with the line to show
     EVENT_PARTY_WIPE = 68, // everyone is dead: death screen, then the server's reload
     EVENT_ENDGAME = 69, // the game is won: ending slides + credits, no reload follows
+    EVENT_ACCOUNT_STATE = 70, // reply to our pre-join account query: (sessionId, known)
 };
 
 // crc32 (IEEE, reflected) — MUST match server_loop.cc's joinBlobCrc32.
@@ -731,6 +732,8 @@ public:
         return was;
     }
     bool endgamePending() const { return _endgamePending; }
+    int accountState() const { return _accountState; }
+    void setQueryOnly(bool queryOnly) { _queryOnly = queryOnly; }
 
     // Elevator panel latch (same one-shot shape, same reason — see onElevatorPrompt).
     bool takeElevatorPrompt(int* elevator, int* startLevel)
@@ -1094,9 +1097,18 @@ public:
         // onConsole drops it when gDude is null — so nothing here can act on a body that
         // has not been rebuilt. The flood case this gate also guarded against is already
         // handled a layer up, by mapLoad's emission-suppression window on the server.
+        // Query-only connection (main.cc's pre-join account question): decode nothing
+        // but the answer. Everything else a new session is streamed, the world snapshot
+        // above all, must not be applied by a connection that is not the viewer: with
+        // the viewer flag down the snapshot would be applied at once, rebuilding the
+        // local world under the character screen that has not opened yet.
+        if (_queryOnly && type != EVENT_ACCOUNT_STATE) {
+            r.skip(r.remaining());
+            return;
+        }
         if (!_loaded && type != EVENT_SNAPSHOT_BLOB_BEGIN
             && type != EVENT_SNAPSHOT_BLOB_CHUNK && type != EVENT_SNAPSHOT_BLOB_END
-            && type != EVENT_CONSOLE) {
+            && type != EVENT_CONSOLE && type != EVENT_ACCOUNT_STATE) {
             return;
         }
         // ►► §12.2 FEEDER — the ONE rule: a state event addressing a presentation-
@@ -1185,6 +1197,7 @@ public:
         case EVENT_TRADE_END: onTradeEnd(r); break;
         case EVENT_PARTY_WIPE: onPartyWipe(r); break;
         case EVENT_ENDGAME: onEndgame(r); break;
+        case EVENT_ACCOUNT_STATE: onAccountState(r); break;
         // SNAPSHOT_BEGIN/END are pure brackets; presentation cues are cosmetic and
         // ignored headless. All are skipped whole via the event length.
         default: break;
@@ -4282,6 +4295,19 @@ private:
         _endgamePending = true;
     }
 
+    // Reply to the pre-join `account <name>` query (main.cc). Deliberately NOT gated on
+    // clientViewerActive: it is asked on a throwaway connection before the viewer
+    // exists, which is the whole point. Tagged with the asking session; anyone else's
+    // answer is ignored.
+    void onAccountState(Reader& r)
+    {
+        int sessionId = r.i32();
+        bool known = r.i32() != 0;
+        if (r.overflow() || sessionId != _mySessionId) {
+            return;
+        }
+        _accountState = known ? kAccountKnown : kAccountNew;
+    }
     void onMoviePlay(Reader& r)
     {
         int movie = r.i32();
@@ -4968,6 +4994,8 @@ private:
     std::string _promptBody;
     bool _wipePending = false; // EVENT_PARTY_WIPE, consumed by the main loop
     bool _endgamePending = false; // EVENT_ENDGAME, consumed by the main loop
+    int _accountState = kAccountUnanswered; // EVENT_ACCOUNT_STATE, read by the pre-join query
+    bool _queryOnly = false; // decode only EVENT_ACCOUNT_STATE (the pre-join query connection)
     bool _elevatorPending = false;
     // When the screen went black (0 = not black). The fade is applied at decode; this
     // is only the watchdog's clock.
@@ -5163,6 +5191,8 @@ public:
     bool wipePending() const { return _decoder.wipePending(); }
     bool takeEndgame() { return _decoder.takeEndgame(); }
     bool endgamePending() const { return _decoder.endgamePending(); }
+    int accountState() const { return _decoder.accountState(); }
+    void setQueryOnly(bool queryOnly) { _decoder.setQueryOnly(queryOnly); }
     bool takeElevatorPrompt(int* elevator, int* startLevel) { return _decoder.takeElevatorPrompt(elevator, startLevel); }
     bool takeAutomapOpen(bool* usingScanner) { return _decoder.takeAutomapOpen(usingScanner); }
     bool fadeWatchdogExpired(unsigned int nowMs, unsigned int maxBlackMs) const
@@ -5480,6 +5510,18 @@ bool ClientConnection::takeEndgame()
 bool ClientConnection::endgamePending() const
 {
     return _impl->stream != nullptr && _impl->stream->endgamePending();
+}
+
+int ClientConnection::accountState() const
+{
+    return _impl->stream != nullptr ? _impl->stream->accountState() : (int)kAccountUnanswered;
+}
+
+void ClientConnection::setQueryOnly(bool queryOnly)
+{
+    if (_impl->stream != nullptr) {
+        _impl->stream->setQueryOnly(queryOnly);
+    }
 }
 
 bool ClientConnection::takeElevatorPrompt(int* elevator, int* startLevel)

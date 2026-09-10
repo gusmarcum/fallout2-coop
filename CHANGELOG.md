@@ -47,6 +47,11 @@ client must run the same version.
   backed up and restored with the rest, and a recycled autosave slot is emptied of them
   too. `F2_SERVER_DEBUG_LOG=1` makes the server name the failing step in
   `f2_server-debug.log`.
+- **The character creation screen opens once, not on every launch.** With
+  `F2_PLAYER_CREATE=ask` the client opened the creation screen before connecting, because
+  it could not know whether the server already had the name, and the server then threw the
+  roll away for a returning player. The client now asks the server first and opens the
+  screen only for a name the world does not know. A fresh world still asks everyone once.
 - **The world trace no longer reports a correct saved-state load as a reset.** With
   `F2_TRACE_WORLD=1`, re-entering a visited map logged "fresh .MAP (no saved state)" for
   the inner load of the saved file, which made every revisit read like the very bug the

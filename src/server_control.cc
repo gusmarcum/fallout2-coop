@@ -2132,6 +2132,25 @@ void serverControlLine(int sessionId, const char* line)
         return;
     }
 
+    if (strcmp(verb, "account") == 0) {
+        // `account <name>`: does this world already know the name? A client asks this
+        // on a throwaway connection BEFORE deciding whether to open the character
+        // creation screen (main.cc). With F2_PLAYER_CREATE=ask the screen used to open on
+        // every launch, because the client could not know, and login then discarded the
+        // rolled stats for a returning name. Answered before the claimant gate: the asker
+        // holds no seat, and the answer comes from the account table the save carries, so
+        // a fresh world says new and a loaded one says known.
+        char name[64];
+        name[0] = '\0';
+        if (sscanf(line, "%*s %63s", name) == 1 && name[0] != '\0') {
+            bool known = accountSlotForName(name) >= 0;
+            presenter()->accountState(sessionId, known);
+            fprintf(stderr, "f2_server: account '%s' is %s (asked by session %d)\n",
+                name, known ? "known" : "new", sessionId);
+        }
+        return;
+    }
+
     if (strcmp(verb, "movdone") == 0) {
         // A viewer finished or skipped the movie it was shown. FIRST ACK RELEASES
         // EVERYONE (game_movie.h) — so this is answered before the claimant gate on

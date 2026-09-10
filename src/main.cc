@@ -3,6 +3,8 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <chrono>
+#include <thread>
 
 #include <algorithm>
 #include <vector>
@@ -1221,6 +1223,46 @@ static int mainClientViewer(const char* connectSpec)
         return 1;
     }
 
+    // Does the server already know this name? Asked on a THROWAWAY connection, before
+    // the viewer flag below goes up, so the world events a new session is streamed are
+    // ignored and the only thing read is the answer tagged with our session. It decides
+    // whether the creation screen opens at all: with F2_PLAYER_CREATE=ask it used to open
+    // on every launch, and the server then discarded the roll for a returning name. No
+    // answer within a few seconds (an older server, a bad link) means ask, as before.
+    bool accountKnownOnServer = false;
+    {
+        const char* createEnvEarly = getenv("F2_PLAYER_CREATE");
+        const char* nameEarly = getenv("F2_PLAYER_NAME");
+        bool asking = createEnvEarly != nullptr && (strcmp(createEnvEarly, "ask") == 0 || strcmp(createEnvEarly, "ui") == 0);
+        if (asking && nameEarly != nullptr && nameEarly[0] != '\0') {
+            ClientConnection probe;
+            if (probe.connect(host, port)) {
+                probe.setQueryOnly(true);
+                char query[128];
+                snprintf(query, sizeof(query), "account %s", nameEarly);
+                probe.sendLine(query);
+                unsigned int askedAt = getTicks();
+                int state = kAccountUnanswered;
+                while (getTicks() - askedAt < 4000) {
+                    if (!probe.pump()) {
+                        break;
+                    }
+                    state = probe.accountState();
+                    if (state != kAccountUnanswered) {
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+                accountKnownOnServer = state == kAccountKnown;
+                debugPrint("client-viewer: account '%s' is %s on this server; %s\n", nameEarly,
+                    state == kAccountKnown ? "known" : state == kAccountNew ? "new" : "unanswered",
+                    accountKnownOnServer ? "skipping the creation screen" : "opening the creation screen");
+            } else {
+                debugPrint("client-viewer: account query could not connect; asking as before\n");
+            }
+        }
+    }
+
     // Viewer flag for the process lifetime — gates focus behavior (an unfocused
     // viewer keeps pumping + rendering; see clientViewerActive in client_net.h).
     // Set before ANY inputGetInput (the blob-wait loop below pumps too).
@@ -1260,7 +1302,7 @@ static int mainClientViewer(const char* connectSpec)
     createFromUi[0] = '\0';
     {
         const char* createEnv = getenv("F2_PLAYER_CREATE");
-        if (createEnv != nullptr && (strcmp(createEnv, "ask") == 0 || strcmp(createEnv, "ui") == 0)) {
+        if (!accountKnownOnServer && createEnv != nullptr && (strcmp(createEnv, "ask") == 0 || strcmp(createEnv, "ui") == 0)) {
             // Mirrors characterSelectorOpen's bracket exactly, so the editor sees
             // the environment it was written against.
             bool cursorWasHidden = cursorIsHidden();
