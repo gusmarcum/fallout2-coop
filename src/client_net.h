@@ -37,6 +37,12 @@ bool clientApplyStreamFile(const char* path);
 void clientViewerSetActive(bool active);
 bool clientViewerActive();
 
+enum AccountState {
+    kAccountUnanswered = 0,
+    kAccountKnown = 1,
+    kAccountNew = 2,
+};
+
 class ClientConnection {
 public:
     ClientConnection();
@@ -143,6 +149,13 @@ public:
     // one-shot to play the ending slides and the credits. No reload follows.
     bool takeEndgame();
     bool endgamePending() const;
+    // Answer to the pre-join `account <name>` query (main.cc): kAccountUnanswered until
+    // the server replies, then known or new. Read on a throwaway connection made before
+    // the viewer is active, so it is NOT gated on clientViewerActive.
+    int accountState() const;
+    // Decode nothing but the account answer on this connection (the pre-join query).
+    // Call right after connect(); the stream is created there.
+    void setQueryOnly(bool queryOnly);
     bool takeElevatorPrompt(int* elevator, int* startLevel);
     // One-shot: the server says WE used a Motion Sensor, so open our own automap.
     bool takeAutomapOpen(bool* usingScanner);

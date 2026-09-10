@@ -248,6 +248,7 @@ enum EventType : unsigned char {
     EVENT_TRADE_END = 67, // trade over (completed / cancelled / declined / bailed) + the line to show
     EVENT_PARTY_WIPE = 68, // everyone is dead: play the death screen, a reload follows
     EVENT_ENDGAME = 69, // the game is won: play the ending slides + credits, no reload
+    EVENT_ACCOUNT_STATE = 70, // reply to `account <name>`: (sessionId, known), read by that session only
 };
 
 // Event flag bits.
@@ -1447,6 +1448,17 @@ public:
         beginEvent(EVENT_UI_LOCK, 0);
         putI32(locked ? 1 : 0);
         putI32(actorNetId);
+        endEvent();
+        flushFrame();
+    }
+
+    void accountState(int sessionId, bool known) override
+    {
+        // Not subject to the suppression window: the asker is not part of the world
+        // yet, and a dropped answer only costs them the creation screen they had before.
+        beginEvent(EVENT_ACCOUNT_STATE, 0);
+        putI32(sessionId);
+        putI32(known ? 1 : 0);
         endEvent();
         flushFrame();
     }

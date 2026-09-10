@@ -842,6 +842,12 @@ public:
     // cutscene, engine-internal means local.
     virtual void screenInputLock(bool locked, int actorNetId = 0) {}
 
+    // Answer to a client's `account <name>` query, tagged with the asking SESSION:
+    // does this world already know the name? Broadcast like everything else (the wire
+    // has no unicast) and read only by that session, which holds no seat and has no
+    // netId yet. Lets the client open the character creation screen only for a new name.
+    virtual void accountState(int sessionId, bool known) {}
+
     // Combat HUD end-turn buttons (legacy interfaceBarEndButtons*).
     virtual void hudEndButtonsShow(bool animated) {}
     virtual void hudEndButtonsHide(bool animated) {}

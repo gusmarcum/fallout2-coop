@@ -87,9 +87,12 @@ env F2_CLIENT_CONNECT=127.0.0.1:9200 F2_PLAYER_NAME=Cahb \
 ```
 
 **`F2_PLAYER_CREATE` only matters the first time the server sees that name.** After the
-account exists the spec is ignored — you do not re-roll by reconnecting — so the same line
-works for both first join and every reconnect. With no create spec at all, a brand-new name
-joins as a copy of the host body.
+account exists the spec is ignored, you do not re-roll by reconnecting, so the same line
+works for both first join and every reconnect. With `ask`, the client first asks the server
+whether it knows the name (`account <name>`, answered from the save's account table) and
+opens the creation screen only for a new name; a returning player goes straight in. An older
+server that does not answer gets the old behaviour, the screen every time. With no create
+spec at all, a brand-new name joins as a copy of the host body.
 
 ---
 
@@ -225,7 +228,7 @@ the ordinary single-player game.
 |-----|---------|
 | `F2_CLIENT_CONNECT=<host:port>` | connect to a server's **wire** port (`F2_SERVER_NET`) |
 | `F2_PLAYER_NAME=<name>` | account name to log in as — binds you to that name's character across reconnects. Unset = legacy bare `claim` (slot-0-preferred dev affordance) |
-| `F2_PLAYER_CREATE=<spec>` \| `ask` | only used the **first** time the server sees this name: either `ask` to roll in vanilla's creation screen (opens before connecting), or a literal spec `"S P E C I A L [tag tag tag] [trait trait]"`. Ignored for an existing account |
+| `F2_PLAYER_CREATE=<spec>` \| `ask` | only used the **first** time the server sees this name: either `ask` to roll in vanilla's creation screen (opens only when the server does not know the name), or a literal spec `"S P E C I A L [tag tag tag] [trait trait]"`. Ignored for an existing account |
 | `F2_PLAYER_TOKEN=<tok>` | auth token; needed when the server sets `F2_REQUIRE_TOKEN` |
 | `F2_WINDOWED=1` | run windowed, so several clients fit side by side |
 | `F2_UNLOCK_CAMERA=0` | re-leash the camera. Free scrolling is **on by default** — you can pan to the edge of the world, but not into the void (the map-edge border and the script/cutscene scroll blockers still apply) |
