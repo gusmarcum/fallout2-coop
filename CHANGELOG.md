@@ -4,7 +4,16 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
-## Unreleased
+## v1.2.0 (2026-09-10)
+
+Cutscenes come back, and a few things the game only shows two players. Most of this came
+out of one long night of proving what the server actually does with a save, which is how
+three save bugs older than any of our releases turned up. Saves from every earlier version
+load unchanged.
+
+One thing to know: a save made before the account system (before player names) asks for a
+character once on the first join, and applies the roll to the host body. To keep that old
+character, join once with the `F2_PLAYER_CREATE=ask` line removed from the join file.
 
 ### Added
 
