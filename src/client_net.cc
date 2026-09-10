@@ -733,6 +733,12 @@ public:
     }
     bool endgamePending() const { return _endgamePending; }
     int accountState() const { return _accountState; }
+    bool takeWorldmapHoldForLoad()
+    {
+        bool hold = _holdForLoad;
+        _holdForLoad = false;
+        return hold;
+    }
     void setQueryOnly(bool queryOnly) { _queryOnly = queryOnly; }
 
     // Elevator panel latch (same one-shot shape, same reason — see onElevatorPrompt).
@@ -1835,6 +1841,7 @@ private:
 
         _loaded = true;
         _loadCount++;
+        _muteOldWorld = false; // the new world is up: its sounds and floats are welcome
         _dudeHpAuth = (gDude != nullptr) ? gDude->data.critter.hp : 0; // per-hit HP baseline
         _dudeHpSeeded = (gDude != nullptr); // shown == auth at (re)baseline; no spurious roll
         // Combat framing across a rebaseline. A mid-fight re-sync (we were still in
@@ -4093,6 +4100,7 @@ private:
 
     void onFloatText(Reader& r)
     {
+        if (_muteOldWorld) return; // the map we left, while its replacement loads (bugs/021)
         int netId = r.i32();
         std::string text = r.str();
         if (!clientViewerActive()) return;
@@ -4123,6 +4131,7 @@ private:
 
     void onSfx(Reader& r)
     {
+        if (_muteOldWorld) return; // the map we left, while its replacement loads (bugs/021)
         std::string name = r.str();
         if (!clientViewerActive()) return;
         if (_inCombat) {
@@ -4560,6 +4569,7 @@ private:
 
     void onSfxAt(Reader& r)
     {
+        if (_muteOldWorld) return; // the map we left, while its replacement loads (bugs/021)
         std::string name = r.str();
         r.i32(); // source netId — positional volume is a banked v1 refinement (§3.e)
         if (!clientViewerActive()) return;
@@ -4794,10 +4804,20 @@ private:
         gPendingWorldmapEnter = true;
     }
 
-    void onWorldmapEnd(Reader&)
+    void onWorldmapEnd(Reader& r)
     {
+        // Older servers send an empty end; the flag is optional on purpose.
+        bool mapLoadFollows = r.remaining() >= 4 && r.i32() != 0;
         if (!clientViewerActive()) return;
-        debugPrint("client_net: onWorldmapEnd — exiting\n");
+        debugPrint("client_net: onWorldmapEnd — exiting (map load follows=%d)\n", mapLoadFollows ? 1 : 0);
+        if (mapLoadFollows) {
+            // Hold on black until the new world is applied (main.cc consumes this right
+            // after the worldmap modal returns), and mute what the OLD world still sends
+            // or has queued: its sounds and floating text would otherwise play over a
+            // stale map for the length of the load (bugs/021).
+            _holdForLoad = true;
+            _muteOldWorld = true;
+        }
         // [wmend] on stderr, not debugPrint: this is the line that says whether the
         // viewer ever learned the trip ended. Its ABSENCE next to a server-side
         // `[wmsrv] driver exit` is the whole diagnosis — the end never decoded (a
@@ -4995,6 +5015,8 @@ private:
     bool _wipePending = false; // EVENT_PARTY_WIPE, consumed by the main loop
     bool _endgamePending = false; // EVENT_ENDGAME, consumed by the main loop
     int _accountState = kAccountUnanswered; // EVENT_ACCOUNT_STATE, read by the pre-join query
+    bool _holdForLoad = false; // worldmap ended with a map load pending: hold on black (bugs/021)
+    bool _muteOldWorld = false; // drop sfx/floats of the map we left until the new one is applied
     bool _queryOnly = false; // decode only EVENT_ACCOUNT_STATE (the pre-join query connection)
     bool _elevatorPending = false;
     // When the screen went black (0 = not black). The fade is applied at decode; this
@@ -5192,6 +5214,7 @@ public:
     bool takeEndgame() { return _decoder.takeEndgame(); }
     bool endgamePending() const { return _decoder.endgamePending(); }
     int accountState() const { return _decoder.accountState(); }
+    bool takeWorldmapHoldForLoad() { return _decoder.takeWorldmapHoldForLoad(); }
     void setQueryOnly(bool queryOnly) { _decoder.setQueryOnly(queryOnly); }
     bool takeElevatorPrompt(int* elevator, int* startLevel) { return _decoder.takeElevatorPrompt(elevator, startLevel); }
     bool takeAutomapOpen(bool* usingScanner) { return _decoder.takeAutomapOpen(usingScanner); }
@@ -5515,6 +5538,11 @@ bool ClientConnection::endgamePending() const
 int ClientConnection::accountState() const
 {
     return _impl->stream != nullptr ? _impl->stream->accountState() : (int)kAccountUnanswered;
+}
+
+bool ClientConnection::takeWorldmapHoldForLoad()
+{
+    return _impl->stream != nullptr && _impl->stream->takeWorldmapHoldForLoad();
 }
 
 void ClientConnection::setQueryOnly(bool queryOnly)

@@ -719,7 +719,10 @@ public:
     // Worldmap travel streaming. The server enters the worldmap travel driver and
     // viewers render the map; intents flow client→server; state flows back.
     virtual void worldmapBegin() {}
-    virtual void worldmapEnd() {}
+    // mapLoadFollows: the trip ends in a map load (a destination or an encounter), as
+    // opposed to an escape or a bail that leaves the party on the map it came from. The
+    // viewer holds on black for the load instead of revealing the old map (bugs/021).
+    virtual void worldmapEnd(bool mapLoadFollows = false) {}
     // `currentAreaVisitedState` and `currentAreaEntranceMask` describe THE AREA THE PARTY
     // IS STANDING ON, and only that one, because that is the only area whose town map can
     // open. They are here because "which districts have we discovered" is server sim

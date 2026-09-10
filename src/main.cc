@@ -128,6 +128,11 @@ static unsigned int gViewerFadeBlackSinceMs = 0;
 // back in on its own.
 static constexpr unsigned int kViewerWipePresentationMaxMs = 4000;
 static constexpr unsigned int kViewerWipeReloadMaxMs = 30000;
+// A worldmap trip that ends in a map load: how long the viewer holds on black for the
+// new snapshot before giving up and showing whatever it has (bugs/021). A load plus a
+// snapshot is one to three seconds on a LAN; this bound only matters if the server
+// failed the load, and then the old map is the honest thing to show.
+static constexpr unsigned int kViewerMapChangeHoldMaxMs = 15000;
 static unsigned int gViewerWipeSinceMs = 0;
 // Same grace period, for the ending: let the blow that won the game finish drawing
 // before the slide show takes the screen.
@@ -1204,6 +1209,51 @@ static bool viewerKeepRunning()
     return _game_user_wants_to_quit == 0;
 }
 
+// The worldmap trip ended in a map load (the server said so with the end event).
+// Vanilla loads the new map underneath the worldmap screen and only then takes the
+// screen away; the viewer cannot, so it holds on black instead of revealing the map it
+// just left for the second or two the load and the snapshot take. Live report: after a
+// random encounter you were shown back at the encounter, the dead cycling their lines,
+// until it threw you into the place you clicked. Same wait the party-wipe death screen
+// uses. The decoder mutes the old world's sounds and floating text until the new one
+// is applied (client_net.cc), and no presentation is drained here.
+static void viewerHoldForNewWorld(ClientConnection& conn)
+{
+    bool isoWasEnabled = isoDisable();
+    if (gIsoWindow != -1) {
+        unsigned char* isoBuffer = windowGetBuffer(gIsoWindow);
+        if (isoBuffer != nullptr) {
+            int isoWidth = windowGetWidth(gIsoWindow);
+            bufferFill(isoBuffer, isoWidth, windowGetHeight(gIsoWindow), isoWidth, 0);
+            windowRefresh(gIsoWindow);
+        }
+    }
+    paletteFadeTo(gPaletteBlack);
+
+    int loadsBefore = conn.loadCount();
+    unsigned int started = getTicks();
+    bool alive = true;
+    while (conn.loadCount() == loadsBefore && getTicksSince(started) < kViewerMapChangeHoldMaxMs) {
+        sharedFpsLimiter.mark();
+        if (!conn.pump()) {
+            alive = false;
+            break;
+        }
+        inputGetInput(); // keeps the window serviced; no modal is up, so nothing acts on keys
+        renderPresent();
+        sharedFpsLimiter.throttle();
+    }
+    debugPrint("client-viewer: worldmap trip ends in a map load; held on black %u ms (%s)\n",
+        getTicksSince(started),
+        conn.loadCount() != loadsBefore ? "new world applied" : alive ? "no world yet, showing what we have" : "server gone");
+
+    if (isoWasEnabled) {
+        isoEnable(); // idempotent after a mapLoad, which re-enables it itself
+    }
+    tileWindowRefresh();
+    paletteFadeTo(_cmap);
+}
+
 static int mainClientViewer(const char* connectSpec)
 {
     // Parse host:port.
@@ -1644,8 +1694,11 @@ static int mainClientViewer(const char* connectSpec)
             // driver bailed with map == -1), and then nothing ever redraws the
             // world: the viewer sits on a black window over a perfectly good map.
             // Repaint here — but not when a rebaseline is queued, since that path
-            // reloads the map and repaints on its own a few lines below.
-            if (!conn.blobDeferred()) {
+            // reloads the map and repaints on its own a few lines below. When the trip
+            // ends in a map load, hold on black for it instead (bugs/021).
+            if (conn.takeWorldmapHoldForLoad()) {
+                viewerHoldForNewWorld(conn);
+            } else if (!conn.blobDeferred()) {
                 tileWindowRefresh();
             }
         }
