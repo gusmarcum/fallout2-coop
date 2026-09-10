@@ -1,9 +1,11 @@
 #include "object_render.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "art.h"
 #include "color.h"
+#include "debug.h"
 #include "draw.h"
 #include "geometry.h"
 #include "light.h"
@@ -174,6 +176,26 @@ void _obj_render_post_roof(Rect* rect, int elevation)
     while (objectListNode != nullptr) {
         Object* object = objectListNode->obj;
         if ((object->flags & OBJECT_HIDDEN) == 0) {
+            // ►► AN OBJECT THAT WAS NEVER PLACED HAS NO PLACE ON SCREEN. This list
+            // holds the objects with no tile. Vanilla draws them at their raw (sx,
+            // sy) for the mapper's drag-and-drop; in the game nothing lives here
+            // long enough to be seen. On a co-op viewer things do: a spawn the
+            // server announced at tile -1 (the trade screen's staging box, item
+            // art 0 = reserved.frm, the red question mark) fails objectSetLocation
+            // and stays here unhidden, and a body loaded from a blob at tile -1
+            // did the same before objectLoad hid it (bugs/023, and the parked-body
+            // sticker before it). Both carry the allocation's (0, 0). Skip those;
+            // an object the mapper is dragging has a real position and still draws.
+            if (object->tile == -1 && object->sx == 0 && object->sy == 0) {
+                static const Object* lastSkipped = nullptr;
+                if (object != lastSkipped && getenv("F2_TRACE_EVENTS") != nullptr) {
+                    lastSkipped = object;
+                    debugPrint("object_render: not drawing unplaced object pid=0x%08X fid=0x%08X netId=%d at the screen origin\n",
+                        object->pid, object->fid, object->netId);
+                }
+                objectListNode = objectListNode->next;
+                continue;
+            }
             _obj_render_object(object, &updatedRect, 0x10000);
         }
         objectListNode = objectListNode->next;
