@@ -26,6 +26,7 @@
 #include "queue.h"
 #include "random.h"
 #include "savegame.h"
+#include "db.h"
 #include "script_request_handler_server.h"
 #include "scripts.h"
 #include "server_players.h"
@@ -299,6 +300,32 @@ static int serverLoadMap(const char* mapName)
     objectShow(gDude, nullptr);
 
     _map_init();
+
+    // A NEW WORLD starts from the shipped maps. Vanilla's new game wipes the MAPS
+    // working copies and the per-save proto overrides (_ResetLoadSave, via gameReset);
+    // this path never did, so a fresh world hosted from a folder that had seen another
+    // one silently inherited that world's visited maps: mapLoadByName prefers
+    // MAPS\<map>.SAV when it exists, so Navarro came up already looted and cleared
+    // (bugs/020). The automap database goes with them; the first save recreates it.
+    savegameRefreshPatchesPath();
+    {
+        char pattern[COMPAT_MAX_PATH];
+        snprintf(pattern, sizeof(pattern), "%s\\*.%s", "MAPS", "SAV");
+        char** stale;
+        int staleCount = fileNameListInit(pattern, &stale, 0, 0);
+        if (staleCount > 0) {
+            fprintf(stderr, "f2_server: new world: clearing %d map state file(s) left by a previous world\n", staleCount);
+        }
+        if (staleCount != -1) {
+            fileNameListFree(&stale, 0);
+        }
+    }
+    _ResetLoadSave();
+    {
+        char automapDb[COMPAT_MAX_PATH];
+        snprintf(automapDb, sizeof(automapDb), "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", "AUTOMAP.DB");
+        compat_remove(automapDb);
+    }
 
     char* mapNameCopy = compat_strdup(mapName);
     int rc = mapLoadByName(mapNameCopy);

@@ -165,6 +165,7 @@ enabled. `=0` disables. Any other value also enables, so `=1` is harmless and ex
 | `F2_SERVER_ACTION_GATE` | **on** | per-player action pacing (an action is gated for as long as the animation it produced runs). `=0` disables — the only kill switch here that defaults ON |
 | `F2_SERVER_OUTBOX_PACE` | off | **experimental**: meter wire emission from animation durations instead of firing everything at once. In-combat only; out-of-combat stays realtime. Also switches combat glides to frame-true pacing (walk 371ms/run 125ms per tile vs the rounded 400/100) |
 | `F2_SERVER_SEED` | — | RNG seed, for reproducible worlds and encounters |
+| `F2_SERVER_DEBUG_LOG` | off | `1` writes the engine's debug stream (the LOADSAVE step reports among it) to `f2_server-debug.log` next to the exe |
 
 ### 2.6 Movies
 **Always on.** One thing has to be true for a cutscene to play: **at least one viewer
@@ -193,6 +194,25 @@ The model is **"empty = freeze, player = play, never quit on its own"**:
 
 > Startup still blocks for the first wire client before serving: the world comes alive when
 > the first player joins, then persists across everyone leaving.
+
+### 2.8 Seat items: one suit per player
+The game ships exactly one of a few things every player body needs on its own back. The
+first time a dedicated server loads such a map, it tops the item up inside its own
+container to the number of player seats in the save (the host plus every extra body the
+save carries, online or parked). It never removes anything, never runs on a revisit (the
+map's .SAV exists then and already carries the copies), and never runs on a client or the
+headless probe. One console line per rule when it fires:
+`f2_server: seat items: Locker at tile 11317 holds 2 x Advanced Power Armor (1 before, 2 seats in the save)`
+
+| map | item | container |
+|---|---|---|
+| `navarro` | Advanced Power Armor (pid 348) | Locker at tile 11317, elevation 1 |
+| `enctrp` | Adv. Power Armor MKII (pid 349) | Locker at tile 19527, elevation 0 |
+
+The table is `kSeatItemRules` in `src/server_seat_items.cc`: a row is the map's file
+name, the item pid, and the container's pid, tile and elevation, which is how the map file
+itself identifies the object. A seat that joins after a map's first visit gets nothing
+retroactively; `give 348 1` on the command channel drops a suit to the host to trade over.
 
 ---
 
@@ -408,6 +428,12 @@ was actually offered a panel, and the level must be inside that elevator's butto
 ---
 
 ## 6. Persistence check
+
+A world started with `F2_SERVER_MAP` (or `new` in the lobby) begins by clearing `data\MAPS\*.SAV`,
+the automap database and the per-save proto overrides, exactly as the game's own new game
+does; the console says how many stale files it found. A loaded world restores them from
+its slot. If a save ever fails, run with `F2_SERVER_DEBUG_LOG=1` and read the LOADSAVE step
+in `f2_server-debug.log`; the slot is left as it was before the attempt.
 
 With any server running that has a `CMD` port:
 ```sh

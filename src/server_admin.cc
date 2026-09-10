@@ -2029,7 +2029,7 @@ bool serverAdminLine(const char* line,
             return true;
         }
         if (!adminWriteSave(slot, label)) {
-            snprintf(msg, sizeof(msg), "save: FAILED writing slot %d (error %d) - see the LOADSAVE line above for the step that failed",
+            snprintf(msg, sizeof(msg), "save: FAILED writing slot %d (error %d) - run with F2_SERVER_DEBUG_LOG=1 and read f2_server-debug.log for the step that failed",
                 slot + 1, savegameGetErrorCode());
             reply(msg);
             fprintf(stderr, "f2_server: admin save slot %d FAILED (error %d)\n",

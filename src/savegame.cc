@@ -146,6 +146,99 @@ static LoadGameHandler* _master_load_list[LOAD_SAVE_HANDLER_COUNT] = {
 static const char* _patches = nullptr;
 static int _slot_cursor = 0;
 static int _map_backup_count = -1;
+
+// The slot's two proto folders (party-member and party-item protos). Vanilla's save
+// backup covers SAVE.DAT, the map .SAVs and the automap, and NOT these, although
+// _GameMap2Slot writes them before the step that can fail. A failed save therefore
+// left a slot whose SAVE.DAT and maps were restored but whose protos belonged to the
+// world that failed to save, which the loader trusts and crashes on (bugs/020).
+static const char* const kSlotProtoDirs[2] = {
+    PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME,
+    PROTO_DIR_NAME "\\" ITEMS_DIR_NAME,
+};
+static const char* const kSlotProtoBackupExt = "prb";
+static int _proto_backup_count[2] = { -1, -1 };
+
+// Rename every SAVEGAME\SLOTxx\<dir>\*.<fromExt> to .<toExt>; returns how many, or -1.
+static int slotProtoRenameAll(int dirIndex, const char* fromExt, const char* toExt)
+{
+    char pattern[COMPAT_MAX_PATH];
+    snprintf(pattern, sizeof(pattern), "%s\\%s%.2d\\%s\\*.%s", "SAVEGAME", "SLOT", _slot_cursor + 1, kSlotProtoDirs[dirIndex], fromExt);
+
+    char** fileList;
+    int fileListLength = fileNameListInit(pattern, &fileList, 0, 0);
+    if (fileListLength == -1) {
+        return -1;
+    }
+
+    int renamed = 0;
+    for (int index = 0; index < fileListLength; index++) {
+        char from[COMPAT_MAX_PATH];
+        char to[COMPAT_MAX_PATH];
+        snprintf(from, sizeof(from), "%s\\%s\\%s%.2d\\%s\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, kSlotProtoDirs[dirIndex], fileList[index]);
+        _strmfe(to, from, toExt);
+        compat_remove(to);
+        if (compat_rename(from, to) != 0) {
+            fileNameListFree(&fileList, 0);
+            return -1;
+        }
+        renamed++;
+    }
+    fileNameListFree(&fileList, 0);
+    return renamed;
+}
+
+static void slotProtoEraseAll(int dirIndex, const char* ext)
+{
+    char dir[COMPAT_MAX_PATH];
+    snprintf(dir, sizeof(dir), "%s\\%s%.2d\\%s\\", "SAVEGAME", "SLOT", _slot_cursor + 1, kSlotProtoDirs[dirIndex]);
+    MapDirErase(dir, ext);
+}
+
+// A fresh DEDICATED world has no MAPS\AUTOMAP.DB: the automap is client presentation
+// (automap.cc lives in f2_client, the server stubs automapSaveCurrent), and vanilla's
+// client creates the file at game init. _GameMap2Slot copies that file into the slot
+// and fails without it, so a server started on a fresh map could not save at all until
+// a client in the same folder happened to create it (bugs/020). Write the same empty
+// database automapCreate writes: version byte 1, size 1925, one offset per map and
+// elevation, the first three maps -1 and the rest 0, exactly _defam.
+static int savegameEnsureAutomapDb()
+{
+    char path[COMPAT_MAX_PATH];
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", "AUTOMAP.DB");
+
+    File* existing = fileOpen(path, "rb");
+    if (existing != nullptr) {
+        fileClose(existing);
+        return 0;
+    }
+
+    File* stream = fileOpen(path, "wb");
+    if (stream == nullptr) {
+        debugPrint("\nLOADSAVE: ** Error creating an empty automap database! **\n");
+        return -1;
+    }
+
+    const int mapCount = 160; // AUTOMAP_MAP_COUNT
+    const int elevationCount = 3; // ELEVATION_COUNT
+    int rc = 0;
+    if (fileWriteUInt8(stream, 1) == -1 || fileWriteInt32(stream, 1925) == -1) {
+        rc = -1;
+    }
+    for (int map = 0; rc == 0 && map < mapCount; map++) {
+        for (int elevation = 0; elevation < elevationCount; elevation++) {
+            if (fileWriteInt32(stream, map < 3 ? -1 : 0) == -1) {
+                rc = -1;
+                break;
+            }
+        }
+    }
+    fileClose(stream);
+    if (rc == 0) {
+        debugPrint("\nLOADSAVE: created an empty automap database for a headless world.\n");
+    }
+    return rc;
+}
 static bool _automap_db_flag = false;
 static bool _loadingGame = false;
 // kSaveSlotSpace, not 10: indices 10.. (directories SLOT11..) are the
@@ -362,6 +455,9 @@ int lsgPerformSaveGame()
 
     snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
     MapDirErase(_gmpath, "BAK");
+    for (int dirIndex = 0; dirIndex < 2; dirIndex++) {
+        slotProtoEraseAll(dirIndex, kSlotProtoBackupExt);
+    }
 
     // The "game saved" notification is raised by the caller: it reads the
     // slot-picker screen's message list, which a headless writer never loads.
@@ -738,6 +834,10 @@ static int _EndLoad(File* stream)
 // 0x47F510
 static int _GameMap2Slot(File* stream)
 {
+    if (savegameEnsureAutomapDb() == -1) {
+        return -1;
+    }
+
     if (_partyMemberPrepSave() == -1) {
         return -1;
     }
@@ -1129,6 +1229,13 @@ static int _SaveBackup()
 
     debugPrint("\nLOADSAVE: %d map files backed up.\n", fileListLength);
 
+    for (int dirIndex = 0; dirIndex < 2; dirIndex++) {
+        _proto_backup_count[dirIndex] = slotProtoRenameAll(dirIndex, PROTO_FILE_EXT, kSlotProtoBackupExt);
+        if (_proto_backup_count[dirIndex] == -1) {
+            return -1;
+        }
+    }
+
     snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
 
     char* v1 = _strmfe(_str2, "AUTOMAP.DB", "SAV");
@@ -1201,6 +1308,17 @@ static int _RestoreSave()
     }
 
     fileNameListFree(&fileList, 0);
+
+    // The protos the failed save wrote are the poison; erase them and bring the backed
+    // up set back. savegameEraseSlot above already removed the .pro files, so only the
+    // rename is left, but erase again in case a caller reaches here another way.
+    for (int dirIndex = 0; dirIndex < 2; dirIndex++) {
+        slotProtoEraseAll(dirIndex, PROTO_FILE_EXT);
+        int restored = slotProtoRenameAll(dirIndex, kSlotProtoBackupExt, PROTO_FILE_EXT);
+        if (restored != _proto_backup_count[dirIndex]) {
+            debugPrint("\nLOADSAVE: restored %d of %d %s protos.\n", restored, _proto_backup_count[dirIndex], kSlotProtoDirs[dirIndex]);
+        }
+    }
 
     if (!_automap_db_flag) {
         return 0;
@@ -1278,6 +1396,13 @@ int savegameEraseSlot()
     strcat(_str0, v1);
 
     compat_remove(_str0);
+
+    // The proto folders too: the loader copies exactly the protos SAVE.DAT names, so a
+    // leftover from another world with the same pid is read as this world's (bugs/020).
+    // Backups (.prb) are left alone so _RestoreSave can still bring them back.
+    for (int dirIndex = 0; dirIndex < 2; dirIndex++) {
+        slotProtoEraseAll(dirIndex, PROTO_FILE_EXT);
+    }
 
     return 0;
 }

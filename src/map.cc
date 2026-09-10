@@ -40,6 +40,7 @@
 #include "script_request_handler.h"
 #include "scripts.h"
 #include "server_loop.h"
+#include "server_seat_items.h" // one suit per seat on a map's first load
 #include "server_players.h"
 #include "settings.h"
 #include "svga.h"
@@ -923,6 +924,10 @@ err:
 
     scriptsExecMapEnterProc();
     scriptsExecMapUpdateProc();
+    // After the enter procs, so the containers are in the state a player would find
+    // them in; before the emissions window closes, so the copies ride the baseline
+    // like any other object. A no-op on the client, the probe and every revisit.
+    serverSeatItemsOnFirstMapLoad();
     tileEnable();
 
     if (gMapTransition.map > 0) {

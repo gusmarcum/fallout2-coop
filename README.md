@@ -99,6 +99,13 @@ vanilla death screen and the server reloads the most recently written save, whic
 that is, without anyone leaving the server. A world with no save yet stands the party back
 up where it fell instead.
 
+**One suit each.** The game places exactly one Advanced Power Armor in Navarro and one
+Mk II in the oil rig's trap room, which is fair to one player and a problem for two. The
+first time the server loads one of those maps it tops the locker up to one suit per seat
+in the save, so nobody walks into Navarro without a disguise because their friend took
+the only one. Nothing is ever removed, a revisit changes nothing, and a world that has
+already been to Navarro can still hand out a suit through the admin console.
+
 **Quicksave and quickload.** Vanilla's `F6` and `F7`, server-side. `F6` writes the server's
 slot 16; `F7` reloads it in place for every connected player, through the same rebuild each
 client already performs after a map change, and the game says who pressed it. It works in
@@ -328,6 +335,7 @@ Set these as environment variables before starting `f2_server.exe`.
 | `F2_GAME_DIFFICULTY` / `F2_COMBAT_DIFFICULTY` | from cfg | `0` easy, `1` normal, `2` hard |
 | `F2_MOVIES` | always on | retired; a leftover `0` in a launch file is ignored and the server says so at boot |
 | `F2_TRACE_WORLD` | off | `1` prints `[world]` lines for door, container and map-state changes |
+| `F2_SERVER_DEBUG_LOG` | off | `1` writes the engine's debug output to `f2_server-debug.log`, which names the step when a save or load fails |
 
 The full list of variables and verbs, including the diagnostic ones, is in
 [`DEDICATED_HOWTO.md`](DEDICATED_HOWTO.md).

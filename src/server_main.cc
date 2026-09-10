@@ -41,7 +41,8 @@
 #include "presenter_network.h"
 #include "server_admin.h"
 #include "server_anim.h"
-#include "game_movie.h" // gameMovieSetServerPump — the movie barrier
+#include "game_movie.h"
+#include "debug.h" // _debug_register_log: F2_SERVER_DEBUG_LOG // gameMovieSetServerPump — the movie barrier
 #include "server_boot.h"
 #include "server_control.h"
 #include "server_loop.h"
@@ -74,6 +75,16 @@ int main(int argc, char** argv)
     if (const char* movies = getenv("F2_MOVIES")) {
         if (strcmp(movies, "0") == 0) {
             fprintf(stderr, "f2_server: F2_MOVIES=0 is ignored: cutscenes always play (the switch was retired)\n");
+        }
+    }
+    // The engine's debugPrint stream is dropped on the dedicated server, and the save
+    // and load code say which step failed only there. F2_SERVER_DEBUG_LOG=1 writes it to
+    // f2_server-debug.log next to the exe (its own name, so a client running from the
+    // same folder cannot clobber it with its debug.log).
+    if (const char* debugLog = getenv("F2_SERVER_DEBUG_LOG")) {
+        if (strcmp(debugLog, "0") != 0) {
+            _debug_register_log("f2_server-debug.log", "wt");
+            fprintf(stderr, "f2_server: engine debug output -> f2_server-debug.log\n");
         }
     }
 
