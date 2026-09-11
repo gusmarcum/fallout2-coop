@@ -2809,6 +2809,14 @@ static void opGameDialogSystemEnter(Program* program)
     }
 
     Object* self = scriptGetSelf(program);
+
+    // A viewer's conversations come from the server and nothing on a viewer would
+    // ever pick this request up: the pending-dialog state it leaves closes every
+    // inventory screen on its first frame (bugs/029).
+    if (clientViewerActive()) {
+        debugPrint("client-viewer: ignored dialogue_system_enter from %s\n", objectGetName(self));
+        return;
+    }
     if (PID_TYPE(self->pid) == OBJ_TYPE_CRITTER) {
         if (!critterIsActive(self)) {
             return;

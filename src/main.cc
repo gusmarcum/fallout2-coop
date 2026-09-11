@@ -2484,6 +2484,14 @@ static int mainClientViewer(const char* connectSpec)
             watchCursorShown = false;
         }
 
+        // The same lever between rebaselines: a vanilla modal that re-enables scripts
+        // when it closes (the elevator panel) turns the viewer into a second sim until
+        // the next load, running NPC scripts locally (bugs/029).
+        if (scriptsAreEnabled()) {
+            debugPrint("client-viewer: scripts were enabled between loads; disabling them again\n");
+            scriptsDisable();
+        }
+
         // S4: drive combat presentation. presentationTick starts the next queued
         // attack replay once the previous is idle (serialized, one hit per animation)
         // and applies the deferred end-of-combat chrome after the queue drains.
