@@ -1616,6 +1616,8 @@ enum class ClaimDisposition {
     kResumedExisting, // known account rebound to its saved body
     kCreatedNew,      // new account, a rolled `create` spec was applied
     kNewDefault,      // new account, NO spec (creation skipped) → default premade
+    kAdoptedExisting, // new account, no spec, landed on an ESTABLISHED body (bugs/026)
+    kRollRefused,     // new account WITH a spec, refused: the body is established (bugs/026)
     kClaimed,         // legacy bare `claim`, no account identity to explain
 };
 
@@ -1666,6 +1668,14 @@ static void serverGreetClaimant(int slot, ClaimDisposition disposition)
     case ClaimDisposition::kNewDefault:
         sourceLine = "No character was rolled - you joined as the default. "
                      "Reconnect under a new name (and finish the creation screen) to make your own.";
+        break;
+    case ClaimDisposition::kAdoptedExisting:
+        sourceLine = "This seat already held an established character - you joined as them, "
+                     "and your name now owns them.";
+        break;
+    case ClaimDisposition::kRollRefused:
+        sourceLine = "Your new roll was NOT applied: this seat already holds an established "
+                     "character, and you joined as them instead.";
         break;
     case ClaimDisposition::kClaimed:
         break; // bare claim carries no account identity to explain
@@ -1795,8 +1805,11 @@ void serverControlDrainPendingLogins()
                 gBindings[slot] = p.sessionId;
                 fprintf(stderr, "f2_server: control claimed by session %d (slot %d)\n",
                     p.sessionId, slot);
-                gPendingGreets.push_back({ slot,
-                    p.hasCreateSpec ? ClaimDisposition::kCreatedNew : ClaimDisposition::kNewDefault });
+                // The account exists (a same-name login spawned it moments ago),
+                // so this binding RESUMES that character - it did not create one,
+                // and this session's spec, if any, was never applied (bugs/026:
+                // the old kCreatedNew/kNewDefault labels here claimed otherwise).
+                gPendingGreets.push_back({ slot, ClaimDisposition::kResumedExisting });
             }
             continue;
         }
@@ -2460,14 +2473,39 @@ void serverControlLine(int sessionId, const char* line)
             // body — would have its `create` spec silently dropped and join as the
             // premade. Consumed either way so a second login cannot re-apply it.
             //
+            // ►► UNLESS THE BODY IS ESTABLISHED (bugs/026). "Existing body" was
+            // meant to be a level-1 premade, but it is ALSO what a save with a
+            // missing account table hands out: a SOLO save never carried the
+            // table at all (player_sheet.cc), so the campaign host character
+            // itself arrived here "unowned" after every restart, and one finished
+            // creation screen re-rolled it to level 1 (playerCreateApply resets
+            // level, XP, perks, skills by design). The protection playerCreateApply
+            // relies on ("an existing account never carries a creation spec") is
+            // exactly what a lost table removes, so re-assert it at the body:
+            // earned progress is never overwritten by a login roll; the roll is
+            // dropped and the player adopts the established character instead.
+            // The drain's SPAWN path stays unguarded on purpose - its body is
+            // freshly seeded from the host this beat, so its "progress" is clone
+            // residue and applying the spec there is the designed behaviour.
+            //
             // Safe to run inline (unlike the SPAWN, which is why that one latches):
             // this writes a proto row, it does not mutate the registry or re-mint a
             // netId, so no barrier is holding a pointer this could invalidate.
+            Object* body = playerActorAt(slot);
+            const bool established = body != nullptr
+                && (pcGetStat(PC_STAT_LEVEL, body) > 1
+                    || pcGetStat(PC_STAT_EXPERIENCE, body) > 0);
             auto it = gPendingCreateSpecs.find(sessionId);
             if (it != gPendingCreateSpecs.end()) {
                 PlayerCreateSpec spec = it->second;
                 gPendingCreateSpecs.erase(it);
-                if (playerCreateApply(slot, &spec) != 0) {
+                if (established) {
+                    fprintf(stderr, "f2_server: login '%s' — create spec REFUSED, slot %d holds an"
+                                    " established character (level %d, %d XP); resuming it instead\n",
+                        name, slot, pcGetStat(PC_STAT_LEVEL, body),
+                        pcGetStat(PC_STAT_EXPERIENCE, body));
+                    disp = ClaimDisposition::kRollRefused;
+                } else if (playerCreateApply(slot, &spec) != 0) {
                     fprintf(stderr, "f2_server: login '%s' — character creation FAILED (slot %d)\n",
                         name, slot);
                 } else {
@@ -2476,6 +2514,8 @@ void serverControlLine(int sessionId, const char* line)
                     serverRequestRebaseline();
                     disp = ClaimDisposition::kCreatedNew;
                 }
+            } else if (established) {
+                disp = ClaimDisposition::kAdoptedExisting;
             }
 
             fprintf(stderr, "f2_server: account '%s' -> slot %d/%d (new)\n",
@@ -2639,6 +2679,10 @@ void serverControlLine(int sessionId, const char* line)
             || strcmp(verb, "quicksave") == 0 // F6/F7 latch a request; neither is an action
             || strcmp(verb, "quickload") == 0
             || strcmp(verb, "elevcancel") == 0 // releases an offer; no action, no animation
+            // Answers a panel the server offered, usually while the use animation that
+            // opened it still runs; dropped here, the offer leaked and that panel never
+            // showed again (bugs/028). The ride checks its own offer and destination.
+            || strcmp(verb, "elev") == 0
             // A read-only diagnostic must never be refused for being busy — busy is
             // exactly when you want to ask (state_audit.h).
             || strcmp(verb, "audit") == 0;
@@ -3588,6 +3632,9 @@ void serverControlLine(int sessionId, const char* line)
             return;
         }
         int elevator = gPendingElevator[slot];
+        // One offer, one answer, whatever the answer: a refusal that kept the offer
+        // would leave the repeat-offer guard silencing this panel for good (bugs/028).
+        gHasPendingElevator[slot] = false;
         if (n < 2 || arg < 0 || arg >= elevatorLevelCount(elevator)) {
             fprintf(stderr, "f2_server: control elev bad level=%d (elevator %d has %d)\n",
                 n >= 2 ? arg : -1, elevator, elevatorLevelCount(elevator));
@@ -3607,9 +3654,6 @@ void serverControlLine(int sessionId, const char* line)
             serverControlRefuse(sessionId, "That floor doesn't exist.");
             return;
         }
-
-        // One offer, one ride.
-        gHasPendingElevator[slot] = false;
 
         // The scope matters for the SAME-MAP case: objectSetLocation only moves the
         // camera elevation (mapSetElevation) for gDude, and the whole party is riding,

@@ -36,6 +36,7 @@
 #include "worldmap.h" // wmMapMusicStart — baseline music re-announce
 #include "object.h"
 #include "party_member.h" // objectIsPartyMember — companions ride the baseline (§C domain)
+#include "tile.h" // tileDistanceBetween — F2_TRACE_PARTY heartbeat roster line
 
 namespace fallout {
 
@@ -508,6 +509,58 @@ void serverTick(int tick, const std::function<void(int)>& intentsDrain, bool adv
     }
     simClockAdvance(kServerTickDelta);
     _process_bk();
+    // ─── Companion follow heartbeat (bugs/027) ──────────────────────────────
+    // Out of combat, a companion only moves because its critter_p_proc measures
+    // the distance to its leader and orders a run - and the engine services
+    // critter procs ROUND-ROBIN, one script per background tick, shared with
+    // every critter on the map (_script_chk_critters). Vanilla pumps that tick
+    // every rendered frame; the server pumps it once per beat, so on a
+    // 40-critter map a companion re-checks its follow every ~4 s instead of
+    // well under a second, runs to where its leader WAS, and stands there until
+    // its next turn in the cycle. That is the live report "companions lag
+    // behind / don't come to exactly where I am".
+    //
+    // So party members get their own cadence on top of the round-robin: every
+    // kCompanionHeartbeatBeats beats, fire each companion's critter_p_proc
+    // directly, under the same gates the round-robin honours (no dialog, no
+    // combat, no movie - critter procs must not run under a modal barrier).
+    // Rapid refires are vanilla-safe: on a sparse map the round-robin already
+    // reaches each critter many times a second, so companion scripts tolerate
+    // it (distance checks + anim-busy guards). Wild critters keep the vanilla
+    // round-robin cadence - aggro/perception pacing is untouched.
+    {
+        constexpr int kCompanionHeartbeatBeats = 5; // 500 ms at the default 100 ms pace
+        if (tick % kCompanionHeartbeatBeats == 0
+            && !_gdialogActive() && !isInCombat() && !gameMovieIsPlaying()) {
+            // F2_TRACE_PARTY=1: one roster line per member every ~25 s - sid,
+            // tile, distance to leader - to catch a member whose script is gone
+            // (sid=-1 never follows) or whose follow loop never closes the gap
+            // (the recurring "Cassidy won't follow" report needs this evidence).
+            static bool traceParty = getenv("F2_TRACE_PARTY") != nullptr;
+            static int heartbeats = 0;
+            bool trace = traceParty && (heartbeats++ % 50 == 0);
+            for (int index = 1; index < partyMemberCount(); index++) {
+                Object* member = partyMemberAt(index);
+                if (member == nullptr || PID_TYPE(member->pid) != OBJ_TYPE_CRITTER) {
+                    continue;
+                }
+                if ((member->flags & OBJECT_HIDDEN) != 0 || critterIsDead(member)) {
+                    continue;
+                }
+                if (trace) {
+                    Object* leader = partyMemberLeader(member);
+                    fprintf(stderr, "[party] %s sid=%d tile=%d elev=%d dist=%d%s\n",
+                        critterGetName(member), member->sid, member->tile, member->elevation,
+                        leader != nullptr ? tileDistanceBetween(member->tile, leader->tile) : -1,
+                        member->sid == -1 ? " (NO SCRIPT - cannot follow)" : "");
+                }
+                if (member->sid == -1) {
+                    continue;
+                }
+                scriptExecProc(member->sid, SCRIPT_PROC_CRITTER);
+            }
+        }
+    }
     scriptsHandleRequests();
     // dialogue_system_enter (how scenery that talks starts its conversation:
     // the Gecko robot terminal, consoles, computers) parks a pending-dialog

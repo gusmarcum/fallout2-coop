@@ -204,6 +204,7 @@ int _scr_message_free();
 int _scr_game_exit();
 int scriptsEnable();
 int scriptsDisable();
+bool scriptsAreEnabled();
 void _scr_enable_critters();
 void _scr_disable_critters();
 int scriptsSaveGameGlobalVars(File* stream);

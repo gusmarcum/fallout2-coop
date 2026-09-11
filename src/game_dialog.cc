@@ -2186,6 +2186,64 @@ static void serverDialogPartyOrders()
     gGameDialogOptionEntriesLength = savedLength;
 }
 
+// The headless trade. The interactive path runs it across two steps:
+// gameDialogTicker case 2 (mode 2->3: enterGameMode + _gdialog_barter_create_win)
+// then the mode==3 branch of _gdProcess (exitGameMode + inventoryOpenTrade +
+// cleanup + destroy). We BYPASS the ticker (a client-tick callback that would
+// build the SDL barter window) and drive create -> trade -> destroy inline. The
+// create/destroy win fns are serverLoopActive-guarded to allocate/free ONLY the
+// three hidden table objects (no SDL), so the enterGameMode/exitGameMode(kSpecial)
+// pair, a no-op round trip here, is elided.
+//
+// Called from two places in _gdProcess: at the top of a page when the request is
+// already pending (a script asked for the trade and then ended the page), and
+// after an intent that raised it (the Barter button, or an option whose script
+// asked for it and registered its own page).
+static void serverDialogRunPendingBarter()
+{
+    _gdialog_barter_create_win();
+    inventoryOpenTrade(gGameDialogWindow, gGameDialogSpeaker, _peon_table_obj, _barterer_table_obj, gGameDialogBarterModifier);
+    _gdialog_barter_cleanup_tables();
+    _gdialog_barter_destroy_win();
+
+    // inventoryOpenTrade's DONE path already ran _barter_end_to_talk_to (which
+    // closed the dialog programs and set mode=1, state=1). A CANCEL/empty-queue
+    // path leaves mode==2 and state==4. Normalize BOTH, mirroring the interactive
+    // mode==3 branch, which always ends barter at state==1 (see the `if (v5 == 4)`
+    // block). mode=0 so the subsequent _gdialogExitFromScript teardown does NOT
+    // short-circuit (it returns early for modes 2/8/11); state=1 so a leftover
+    // state==4 can't misroute _gdDestroyHeadWindow / gameDialogEnter teardown
+    // into the barter-recovery path.
+    _dialogue_switch_mode = 0;
+    _dialogue_state = 1;
+}
+
+// The engine's placeholder pages. Two scripted paths make a page whose only
+// option is a proc-less engine line the player clicks to move on:
+// - gsay_end with no options registered: _gdialogGo adds list -1 / message -1
+//   (rendered "[Done]" or "[More]").
+// - gsay_message: a reply plus a list -2 / message -2 "[Done]" line, run as a
+//   nested conversation loop at once.
+// The Duntons' barter routine takes the second path right after requesting the
+// trade, with an empty message (bugs/022): the original game shows an empty page
+// with only [Done] after the trade. With no reply text there is nothing to read,
+// so the click is the page's whole content; end it for the player. A page that
+// does carry a reply is left alone: vanilla shows it, and so do we.
+static bool serverDialogPageIsBlankPlaceholder()
+{
+    if (gGameDialogOptionEntriesLength != 1) {
+        return false;
+    }
+    const GameDialogOptionEntry* entry = &(gDialogOptionEntries[0]);
+    if (entry->messageListId >= 0 || entry->messageListId < -2 || entry->proc != 0) {
+        return false;
+    }
+    if (entry->messageId != entry->messageListId) {
+        return false; // -1/-1 or -2/-2 only; a text option (-4) has real content
+    }
+    return gDialogReplyText[0] == '\0';
+}
+
 int _gdProcess()
 {
     if (_gdReenterLevel == 0) {
@@ -2244,11 +2302,55 @@ int _gdProcess()
             // numeric-key press drives at line ~1992 below. The initial node's
             // options are already registered (gDialogOptionEntries, populated by
             // the gsay_option opcodes before gsay_end reached _gdProcess).
+
+            // ►► A TRADE THE SCRIPT HAS ALREADY ASKED FOR OPENS BEFORE THE PAGE.
+            // An option's script can request the trade (gdialog_mod_barter) and
+            // then end the page (gsay_end) before registering anything, which
+            // re-enters _gdProcess with mode 2 pending. The interactive ticker
+            // serves that request on the very next frame, before the player can
+            // see or click anything; only the intent handler below did here, so
+            // the trade opened one click late and the click had consumed the
+            // page (bugs/022). Serve it the ticker's way: first.
+            if (_dialogue_switch_mode == 2) {
+                if (getenv("F2_DIALOG_TRACE") != nullptr) {
+                    debugPrint("\n[dtrace] pending trade served before the page (reenter=%d)\n", _gdReenterLevel);
+                }
+                serverDialogRunPendingBarter();
+            }
+
+            // The engine's blank placeholder page, with nothing on it to read: in
+            // vanilla the player clicks the blank line to move on, and that click
+            // is the page's whole content. Do it for them.
+            if (serverDialogPageIsBlankPlaceholder()) {
+                if (gDialogServerPump != nullptr) {
+                    fprintf(stderr, "f2_server: [dialog] blank placeholder page, ending it (reenter=%d)\n", _gdReenterLevel);
+                }
+                break;
+            }
+
+            // Never park the driver on a page with nothing to choose: there is no
+            // dsay that could ever answer it, and the viewer shows an empty window.
+            if (gGameDialogOptionEntriesLength == 0) {
+                if (gDialogServerPump != nullptr) {
+                    fprintf(stderr, "f2_server: [dialog] page with no options, ending it (reenter=%d)\n", _gdReenterLevel);
+                }
+                break;
+            }
+
             if (getenv("F2_DIALOG_TRACE") != nullptr) {
                 debugPrint("\n[dtrace] node: %d options; reply=\"%.80s\"\n",
                     gGameDialogOptionEntriesLength, gDialogReplyText);
                 for (int oi = 0; oi < gGameDialogOptionEntriesLength; oi++) {
-                    debugPrint("[dtrace]   opt %d: \"%.70s\"\n", oi, gDialogOptionEntries[oi].text);
+                    // Resolve message options the way the emitter does, so the trace
+                    // shows the line the player would read, not the empty .text a
+                    // message option carries; the ids tell a script page apart from
+                    // the engine's -1/-1 placeholder.
+                    char resolved[900];
+                    resolved[0] = '\0';
+                    gameDialogGetOptionText(oi, resolved, sizeof(resolved));
+                    debugPrint("[dtrace]   opt %d: list=%d msg=%d proc=%d \"%.70s\"\n", oi,
+                        gDialogOptionEntries[oi].messageListId, gDialogOptionEntries[oi].messageId,
+                        gDialogOptionEntries[oi].proc, resolved);
                 }
             }
             // LIVE (dedicated server, pump installed): ship the current node to the
@@ -2355,32 +2457,17 @@ int _gdProcess()
             // options (barter replaces them), so _gdProcessChoice returns -1 even
             // though barter must still run — breaking first would skip it.
             if (_dialogue_switch_mode == 2) {
-                // Headless barter. The interactive path runs this across two
-                // steps: gameDialogTicker case 2 (mode 2->3: enterGameMode +
-                // _gdialog_barter_create_win) then the mode==3 branch below
-                // (exitGameMode + inventoryOpenTrade + cleanup + destroy). We
-                // BYPASS the ticker (a client-tick callback that would build the
-                // SDL barter window) and drive create -> trade -> destroy inline.
-                // The create/destroy win fns are serverLoopActive-guarded to
-                // allocate/free ONLY the three hidden table objects (no SDL), so
-                // the enterGameMode/exitGameMode(kSpecial) pair — a no-op round
-                // trip here — is elided.
-                _gdialog_barter_create_win();
-                inventoryOpenTrade(gGameDialogWindow, gGameDialogSpeaker, _peon_table_obj, _barterer_table_obj, gGameDialogBarterModifier);
-                _gdialog_barter_cleanup_tables();
-                _gdialog_barter_destroy_win();
+                serverDialogRunPendingBarter();
 
-                // inventoryOpenTrade's DONE path already ran _barter_end_to_talk_to
-                // (which closed the dialog programs and set mode=1, state=1). A
-                // CANCEL/empty-queue path leaves mode==2 and state==4. Normalize
-                // BOTH — mirroring the interactive mode==3 branch, which always
-                // ends barter at state==1 (see the `if (v5 == 4)` block). mode=0
-                // so the subsequent _gdialogExitFromScript teardown does NOT
-                // short-circuit (it returns early for modes 2/8/11); state=1 so a
-                // leftover state==4 can't misroute _gdDestroyHeadWindow /
-                // gameDialogEnter teardown into the barter-recovery path.
-                _dialogue_switch_mode = 0;
-                _dialogue_state = 1;
+                if (choiceResult == -1) {
+                    // The option's script requested the trade and registered no page
+                    // of its own. Vanilla's keyboard path ends the page on -1 (the
+                    // break at ~1992); the trade has now run, so do the same rather
+                    // than re-sending a page whose option list _gdProcessChoice has
+                    // already cleared. That re-send was the "screen with no options"
+                    // after a text-option trade (bugs/022).
+                    break;
+                }
 
                 // ►► CONTINUE, NOT BREAK. Leaving a trade RETURNS YOU TO THE
                 // CONVERSATION -- that is what the 'T' button means, and what
@@ -2392,8 +2479,10 @@ int _gdProcess()
                 //
                 // Looping also re-emits the node (dialogEmitNode runs at the top of
                 // each iteration), which is what repopulates every viewer's option
-                // list -- without it the viewer holds an empty dialog window that
-                // no node will ever fill.
+                // list. The node is intact here: the Barter button never touches
+                // it, and a script that registers its own page after the trade
+                // request (Tubby: gdialog_barter, then Reply + options) left it in
+                // gDialogOptionEntries before we got here.
                 continue;
             }
 

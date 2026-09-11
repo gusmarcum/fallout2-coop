@@ -82,6 +82,44 @@ int queueExit()
     return 0;
 }
 
+// The object a saved event belongs to, found by the id the save recorded. Ids are only
+// unique among a map's top-level objects at the moment each one is handed out
+// (scriptsNewObjectId), so an item carried in from another map can share its id with
+// this map's scenery, and the first match used to win: a charge armed before a save came
+// back bound to an invisible blocking hex, which "exploded" for no damage and was then
+// destroyed (bugs/031). queueAddEvent flags every owner OBJECT_QUEUED and the flag is
+// saved, so a flagged match is preferred over the first one.
+static void queueFindEventOwnerIn(Object* obj, int objectId, Object** queued, Object** first)
+{
+    if (obj->id == objectId) {
+        if ((obj->flags & OBJECT_QUEUED) != 0) {
+            *queued = obj;
+            return;
+        }
+        if (*first == nullptr) {
+            *first = obj;
+        }
+    }
+
+    Inventory* inventory = &(obj->data.inventory);
+    for (int index = 0; index < inventory->length && *queued == nullptr; index++) {
+        Object* item = inventory->items[index].item;
+        if (item->id == objectId || itemGetType(item) == ITEM_TYPE_CONTAINER) {
+            queueFindEventOwnerIn(item, objectId, queued, first);
+        }
+    }
+}
+
+static Object* queueFindEventOwner(int objectId)
+{
+    Object* queued = nullptr;
+    Object* first = nullptr;
+    for (Object* obj = objectFindFirst(); obj != nullptr && queued == nullptr; obj = objectFindNext()) {
+        queueFindEventOwnerIn(obj, objectId, &queued, &first);
+    }
+    return queued != nullptr ? queued : first;
+}
+
 // 0x4A2338
 int queueLoad(File* stream)
 {
@@ -122,19 +160,7 @@ int queueLoad(File* stream)
             break;
         }
 
-        Object* obj;
-        if (objectId == -2) {
-            obj = nullptr;
-        } else {
-            obj = objectFindFirst();
-            while (obj != nullptr) {
-                obj = _inven_find_id(obj, objectId);
-                if (obj != nullptr) {
-                    break;
-                }
-                obj = objectFindNext();
-            }
-        }
+        Object* obj = objectId != -2 ? queueFindEventOwner(objectId) : nullptr;
 
         queueListNode->owner = obj;
 
@@ -600,6 +626,10 @@ static int _queue_do_explosion_(Object* explosive, bool animate)
             minDamage += 10;
         }
     }
+
+    fprintf(stderr, "[explode] pid=%d holder=%s net=%d -> tile=%d elev=%d dmg=%d-%d\n",
+        explosive->pid, owner != nullptr ? objectGetName(owner) : "(ground)",
+        owner != nullptr ? owner->netId : explosive->netId, tile, elevation, minDamage, maxDamage);
 
     if (actionExplode(tile, elevation, minDamage, maxDamage, gDude, animate) == -2) {
         queueAddEvent(50, explosive, nullptr, EVENT_TYPE_EXPLOSION);

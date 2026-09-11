@@ -1706,6 +1706,11 @@ int scriptsDisable()
     return 0;
 }
 
+bool scriptsAreEnabled()
+{
+    return gScriptsEnabled;
+}
+
 // 0x4A53E0
 void _scr_enable_critters()
 {

@@ -213,8 +213,16 @@ int _dialogSetScrollDown(int a1, int a2, char* a3, char* a4, char* a5, char* a6,
 int _dialogSetScrollUp(int a1, int a2, char* a3, char* a4, char* a5, char* a6, int a7) { serverStubAbort("_dialogSetScrollUp"); }
 int _dialogStart(Program* a1) { serverStubAbort("_dialogStart"); }
 int _dialogToggleMediaFlag(int a1) { serverStubAbort("_dialogToggleMediaFlag"); }
-void _displayFile(char* fileName) { serverStubAbort("_displayFile"); }
-void _displayFileRaw(char* fileName) { serverStubAbort("_displayFileRaw"); }
+// HEADLESS-SAFE (script opcodes `display`/`displayraw`, bugs/024): draws an image
+// file into the current managed script window. Vanilla GAME data reaches this:
+// gcfestus.int Node30a runs `display(mstr(700))`, a script typo for display_msg
+// that Interplay shipped (it hands a message string to a filename parameter), so
+// handing Festus the reactor part killed the whole server. The client survives
+// the same call because no managed window exists during a gsay dialog and the
+// bogus filename never resolves to art, so it draws nothing. No window can ever
+// exist here; doing nothing IS the client behavior.
+void _displayFile(char* fileName) { (void)fileName; serverStubHeadlessOnce("_displayFile"); }
+void _displayFileRaw(char* fileName) { (void)fileName; serverStubHeadlessOnce("_displayFileRaw"); }
 // Benign: the dude's idle "fidget" animation ticker (registered by combat.cc:2732
 // at combat-end and by ClientPresenter). Pure ambient presentation with no sim
 // authority; the real body draws RNG only to pick a cosmetic idle frame, which a
@@ -263,7 +271,14 @@ int _register_priority(int a1)
     }
     serverStubAbort("_register_priority");
 }
-bool _selectWindowID(int index) { serverStubAbort("_selectWindowID"); }
+// HEADLESS-SAFE (every intlib script opcode calls this first, bugs/024): selects
+// a managed script window as the drawing target. The client returns false when
+// the slot holds no window, which is always the case inside a gsay dialog, and
+// every intlib op ignores the result and carries on. The server has no managed
+// windows at all, so false is the honest answer, not a masked failure; the ops'
+// own drawing calls (_windowOutput, _windowPlayMovie, ...) still abort loudly,
+// so a genuinely unsevered UI path keeps its tripwire.
+bool _selectWindowID(int index) { (void)index; serverStubHeadlessOnce("_selectWindowID"); return false; }
 void _setSystemPalette(unsigned char* palette) { serverStubAbort("_setSystemPalette"); }
 int _soundType(Sound* sound, int type) { serverStubAbort("_soundType"); }
 int _win_debug(char* string) { serverStubAbort("_win_debug"); }

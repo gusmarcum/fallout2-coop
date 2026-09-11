@@ -4,6 +4,70 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.3.0 (2026-09-11)
+
+Ten fixes, every one of them from live play. Three could end a session on the spot: a
+vanilla script line that killed the server, a status message that killed the client, and a
+solo world that forgot which character was yours. The rest came out of one long afternoon
+in Navarro and San Francisco: elevator panels going quiet, screens closing the moment they
+opened, a car that vanished on load, and planted explosives going off in the wrong place.
+Saves from every earlier version load unchanged.
+
+### Added
+
+- **Two diagnostics for operators.** `F2_TRACE_PARTY=1` prints one roster line per party
+  member every 25 seconds (script id, tile, elevation, distance to the leader), which tells
+  a member with no script apart from a slow follow loop. Every detonation now prints two
+  console lines naming the charge, who was holding it, the tile it went off on, the damage
+  range, and the critter at the center.
+
+### Fixed
+
+- **A trade started from a dialogue line opens the trade screen.** Picking the option that
+  begins bartering sent the dialogue page first and the trade second, so the player was left
+  looking at an empty page. A pending trade is served before the page now.
+- **No stray red box during a trade.** Objects that had no place on the map yet were drawn
+  as a red question mark in the corner of the screen. Unplaced objects are skipped.
+- **Installing the part in the Gecko power plant no longer takes the server down.** Festus's
+  script calls a window opcode through an Interplay typo (`display` where `display_msg` was
+  meant), and the server's stub for that opcode aborted the process. The window opcodes
+  answer headless and draw nothing now. A bytecode walk of all 1,443 shipped scripts
+  confirms Festus is the only reachable caller.
+- **The controls-released notice no longer crashes the client.** A scripted scene that holds
+  the interface for more than 15 seconds trips the input-lock watchdog, and the watchdog's
+  message was a constant that the display monitor word-wrapped in place. The monitor wraps a
+  copy now. The Vic and Valerie reunion in Vault City was an endless crash loop before this.
+- **A solo world keeps your character and your name.** A world with one player never wrote
+  the block that records which account owns which body, so every restart reopened character
+  creation, and finishing it applied a fresh roll to the campaign character: level 1, no XP,
+  no perks. Solo saves carry the account table now, a body with a level or any XP refuses a
+  creation roll outright, and the greetings say what actually happened.
+- **Companions keep up.** The server pumps the background script tick once per beat where
+  vanilla pumps it every frame, so on a busy map a companion re-checked its follow about
+  every four seconds and kept stopping where its leader used to be. Party members now get
+  their own follow heartbeat twice a second, under the same dialog, combat and movie gates.
+- **An elevator panel keeps working after you pick the floor you are already on.** That
+  answer skips the panel's gauge animation, so it reached the server while the animation
+  that opened the panel still counted the player as busy, and the busy gate threw it away
+  without releasing the pending offer. The panel then stayed silent for the rest of the
+  session. The answer is never dropped now, and every answer ends the offer.
+- **Screens stop closing the moment they open after an elevator ride.** The elevator panel
+  turned scripts back on when it closed, which on a client means it runs NPC scripts the
+  server already runs. An NPC asking to start a conversation then left the client in a state
+  where the inventory, loot and other screens close on their first frame until it restarted.
+  The panel restores the state it found, and a client ignores local conversation requests.
+- **The car survives a cancelled world map trip.** Driving off clears the marker that says
+  where the car is parked, and arriving somewhere sets it again. Backing out of the world
+  map with Escape never did, so a save made after that lost the car on load: the car's own
+  script deletes it when the marker is not its tile, and the town script that would put it
+  back does nothing while a save is loading. A cancelled trip re-points the marker at the
+  car standing on the map.
+- **A planted or dropped charge goes off where it actually is.** A save records each bomb
+  timer against its object id, and object ids are only unique within one map, so after a load
+  the timer could attach to a piece of local scenery that shares the id: the blast landed on
+  that scenery for no damage, destroyed it, and the real charge sat inert in the victim's
+  pocket. The loader now prefers the object that actually carries a timer.
+
 ## v1.2.0 (2026-09-10)
 
 Cutscenes come back, and a few things the game only shows two players. Most of this came

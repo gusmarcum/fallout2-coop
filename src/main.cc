@@ -35,6 +35,7 @@
 #include "critter.h"
 #include "display_monitor.h" // death / revive prompts
 #include "game_ui.h" // gameUiEnable — the input-lock watchdog (bugs/016)
+#include "msg_channel.h" // kMsgChannelSystem — the watchdog's release notice (bugs/025)
 #include "cycle.h"
 #include "db.h"
 #include "dbox.h" // showDialogBox — vanilla pipboy-in-combat refusal
@@ -2366,14 +2367,23 @@ static int mainClientViewer(const char* connectSpec)
         // what the Navarro minefield did (bugs/016): CIMine locks the controls and
         // never unlocks them, relying on the engine's own cleanup, which used to stop
         // at the server. That leak is fixed at the source, but no script should ever be
-        // able to cost a session, so the lock is BOUNDED here too. Longer than the
-        // fade's bound because a real cutscene holds the controls longer than a fade.
+        // able to cost a session, so the lock is BOUNDED here too.
+        //
+        // Firing is NORMAL, not only a leak signal: vanilla's long float cutscenes
+        // hold the lock far past any sane bound BY DESIGN (vcmainwk's Vic-Valerie
+        // reunion is 38 timed stages, two-plus minutes, bugs/025). The scene keeps
+        // playing — its floats stream regardless, its timers advance on the server,
+        // and its own closing game_ui_enable is then a no-op here — the player just
+        // gets their controls back instead of sitting through it, the same stance
+        // the combat lock takes (a co-op player keeps playing).
         if (conn.uiLockWatchdogExpired(getTicks(), kViewerUiLockMaxMs)) {
             debugPrint("client-viewer: input still locked after %u ms — releasing (watchdog)\n",
                 kViewerUiLockMaxMs);
             gameUiEnable();
             conn.clearUiLock();
-            displayMonitorAddMessage("Controls released (the script never gave them back).");
+            displayMonitorAddMessageStyled(
+                const_cast<char*>("Controls released (a scripted scene held them past the cap)."),
+                kMsgChannelSystem);
         }
 
         // The server says we used a Motion Sensor: open OUR automap, with scanner
@@ -2472,6 +2482,14 @@ static int mainClientViewer(const char* connectSpec)
             // The re-pin reset the cursor to the MOVE hex; drop our watch-cursor
             // latch so the combat-busy check below re-applies it if still needed.
             watchCursorShown = false;
+        }
+
+        // The same lever between rebaselines: a vanilla modal that re-enables scripts
+        // when it closes (the elevator panel) turns the viewer into a second sim until
+        // the next load, running NPC scripts locally (bugs/029).
+        if (scriptsAreEnabled()) {
+            debugPrint("client-viewer: scripts were enabled between loads; disabling them again\n");
+            scriptsDisable();
         }
 
         // S4: drive combat presentation. presentationTick starts the next queued

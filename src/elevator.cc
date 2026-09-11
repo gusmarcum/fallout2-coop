@@ -146,6 +146,7 @@ static unsigned char* gElevatorWindowBuffer;
 
 // 0x570A70
 static bool gElevatorWindowIsoWasEnabled;
+static bool gElevatorWindowScriptsWereEnabled;
 
 static FrmImage _elevatorFrmImages[ELEVATOR_FRM_COUNT];
 static FrmImage _elevatorBackgroundFrmImage;
@@ -291,6 +292,7 @@ static int elevatorWindowInit(int elevator)
     gameMouseObjectsHide();
 
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
+    gElevatorWindowScriptsWereEnabled = scriptsAreEnabled();
     scriptsDisable();
 
     int index;
@@ -421,7 +423,11 @@ static void elevatorWindowFree()
         _elevatorFrmImages[index].unlock();
     }
 
-    scriptsEnable();
+    // Only if they were on: a co-op viewer runs with scripts off, and turning them on
+    // here ran NPC scripts locally until the next load (bugs/029).
+    if (gElevatorWindowScriptsWereEnabled) {
+        scriptsEnable();
+    }
 
     if (gElevatorWindowIsoWasEnabled) {
         isoEnable();

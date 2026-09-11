@@ -46,6 +46,11 @@ static constexpr int kPlayerSheetBlockMagicV2 = 0x50534832; // 'PSH2' (v2)
 //                 next login).
 //   'PAC2' (v2) — inserts an account name/token table (slots [0, count+1),
 //                 host included) between the count and the bodies.
+//                 The count MAY BE 0 (bugs/026): a SOLO world whose host slot is
+//                 account-owned writes a table-only appendix - magic, count 0,
+//                 one-row table, events magic, nothing else (no bodies and no
+//                 sheet block; playerSheetBlockWrite emits nothing at count 0,
+//                 and the loader skips the sheet-block read to match).
 // Writes 'PAC2' now; a fresh vanilla/stock build reads neither and stops at EOF,
 // loading the save as a host-only single-player game (NO version bump).
 static constexpr int kPlayerActorAppendixMagic = 0x50414354; // 'PACT' (v1)
@@ -214,12 +219,26 @@ int playerSheetBlockRead(File* stream)
 
 int playerActorAppendixSave(File* stream)
 {
-    // Extras are slots [1, playerActorCount()). Nothing to append at N <= 1 —
-    // and appending nothing (not even the magic) is what keeps single-player
-    // saves byte-for-byte a vanilla save.
+    // Extras are slots [1, playerActorCount()). With no extras AND no owned
+    // host account, append nothing (not even the magic) - that is what keeps a
+    // never-logged-into single-player save byte-for-byte a vanilla save.
+    //
+    // ►► An owned slot 0 is appendix-worthy ON ITS OWN (bugs/026). The account
+    // table only ever rode the appendix, and the appendix only existed once a
+    // second body did - so a SOLO co-op world forgot who owned the host on every
+    // save/load cycle. The next login by that name then looked brand new to the
+    // server AND to the client's pre-join `account` probe: the creation screen
+    // reopened on every reconnect, and a FINISHED screen re-rolled the
+    // established campaign character (playerCreateApply resets level, XP, perks,
+    // skills by design). A solo save with a named host therefore writes the
+    // short form documented at the magic above: table, no bodies, no sheet
+    // block. extras == 0 makes every loop below a no-op.
     int extras = playerActorCount() - 1;
-    if (extras <= 0) {
+    if (extras <= 0 && !accountSlotOwned(0)) {
         return 0;
+    }
+    if (extras < 0) {
+        return 0; // no registry at all: nothing meaningful to append
     }
 
     if (fileWriteInt32(stream, kPlayerActorAppendixMagicV2) == -1) {
@@ -409,7 +428,11 @@ int playerActorAppendixLoad(File* stream)
     // Applied AFTER the registry is populated: the block is keyed by slot, and
     // slot 0's row is gDudeProto itself, so a misread here corrupts the live
     // host — fail loud, never half-apply.
-    if (playerSheetBlockRead(stream) == -1) {
+    //
+    // Skipped at extras == 0: a table-only solo appendix (bugs/026) carries no
+    // sheet block at all (the writer emits nothing at count 0), so the next
+    // bytes on the stream are the events magic, not a sheet-block magic.
+    if (extras > 0 && playerSheetBlockRead(stream) == -1) {
         return -1;
     }
 
