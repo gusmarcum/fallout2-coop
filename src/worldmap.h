@@ -326,6 +326,9 @@ void wmCarParkAtMapArea(int mapIdx);
 // placement scripts do not skip placing the car on the next map. Call from every
 // worldmap entry; no-ops on a viewer (it does not own gvars).
 void wmCarClearPlacedTile();
+// The inverse, for a worldmap session that lands nowhere: point the gvar back at the
+// car still standing on the current map. No-ops on a viewer.
+void wmCarRepinPlacedTile();
 int wmTeleportToArea(int areaIdx);
 
 void wmSetPartyWorldPos(int x, int y);

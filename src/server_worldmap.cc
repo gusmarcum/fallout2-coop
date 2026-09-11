@@ -421,7 +421,7 @@ int worldmapServerDriver()
     // gMapTransition regardless of what this function returns, so the session simply ends
     // on top of the map the party walked out of. That map is intact and script-alive
     // (the destructive teardown lives in the map != -1 branch below), which is why the
-    // server looks perfectly happy — but NOTHING WAS UNDONE, and two pieces of state
+    // server looks perfectly happy — but NOTHING WAS UNDONE, and three pieces of state
     // were left describing a trip that never finished:
     //
     //   * WORLD POSITION. Travel moved worldPosX/Y. End the session there and the party
@@ -434,6 +434,9 @@ int worldmapServerDriver()
     //     thing that clears it is arriving somewhere (WM_INTENT_ENTER). So a true value
     //     here always belongs to the session being cancelled, and leaving it set puts the
     //     party "in the car" while standing on foot on a map.
+    //   * GVAR_CAR_PLACED_TILE. The car's use_p_proc and this driver's entry both clear
+    //     it, and only a town script re-pins it, on arrival. Left cleared, the car still
+    //     standing here destroys itself on the next load (bugs/030).
     //
     // ►► WHY THIS IS IN THE TAIL AND NOT IN THE ESCAPE BRANCH, which is where it was
     // first written: the bail paths are the SAME bug through a different door, and the
@@ -460,6 +463,7 @@ int worldmapServerDriver()
         wmGenData.walkDistance = 0;
         wmGenData.isInCar = false;
         wmMatchWorldPosToArea(wmGenData.worldPosX, wmGenData.worldPosY, &(wmGenData.currentAreaId));
+        wmCarRepinPlacedTile();
 
         // ►► SHIP THE REWIND BEFORE THE SCREEN CLOSES. The viewer renders the worldmap
         // out of its OWN wmGenData mirror and opens on it — the entry emitState exists

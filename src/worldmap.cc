@@ -38,6 +38,7 @@
 #include "perk.h"
 #include "presenter.h"
 #include "proto_instance.h"
+#include "proto_types.h" // PROTO_ID_CAR — wmCarRepinPlacedTile finds the parked car
 #include "queue.h"
 #include "random.h"
 #include "scripts.h"
@@ -4785,6 +4786,29 @@ void wmCarClearPlacedTile()
         return;
     }
     gameSetGlobalVar(GVAR_CAR_PLACED_TILE, -1);
+}
+
+// A trip that lands nowhere returns the party to the map it left WITHOUT re-entering
+// it, so no town script's Create_Car re-pins the gvar that the car's use_p_proc and
+// wmCarClearPlacedTile both cleared. The car's own map_enter_p_proc (zsdrvcar)
+// destroys the car whenever the gvar is not its tile, and on a LOAD it still runs
+// while the town script's placement is skipped: a save made after a cancelled trip
+// loaded without the car (bugs/030). Vanilla's worldmap has no cancel, so no script
+// ever had to cover this.
+void wmCarRepinPlacedTile()
+{
+    if (clientViewerActive()) {
+        return;
+    }
+
+    for (int elevation = 0; elevation < ELEVATION_COUNT; elevation++) {
+        for (Object* obj = objectFindFirstAtElevation(elevation); obj != nullptr; obj = objectFindNextAtElevation()) {
+            if (obj->pid == PROTO_ID_CAR) {
+                gameSetGlobalVar(GVAR_CAR_PLACED_TILE, obj->tile);
+                return;
+            }
+        }
+    }
 }
 
 int wmMatchAreaContainingMapIdx(int mapIdx, int* areaIdxPtr)
