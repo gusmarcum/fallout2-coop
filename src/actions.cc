@@ -2165,6 +2165,11 @@ int actionExplode(int tile, int elevation, int minDamage, int maxDamage, Object*
     }
 
     if (serverLoopActive()) {
+        fprintf(stderr, "[explode] center tile=%d elev=%d critter=%s net=%d dmg=%d extras=%d\n",
+            tile, elevation, critter != nullptr ? objectGetName(critter) : "(none)",
+            critter != nullptr ? critter->netId : 0, critter != nullptr ? attack->defenderDamage : 0,
+            attack->extrasLength);
+
         // Server equivalent of the animated path: report/apply FIRST so XP is
         // awarded (mainTargetWasDead/extrasWasDead are false pre-kill) and each
         // victim's destroy_p_proc runs, THEN finalize corpses with critterKill
