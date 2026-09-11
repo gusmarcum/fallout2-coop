@@ -419,7 +419,8 @@ void elevatorRideApply(Object* rider, int map, int elevation, int tile)
 
     // Same map. Find the doors BEFORE moving anyone — the search is relative to the
     // rider's current tile and elevation, both of which the placement changes.
-    Object* doors = elevation != rider->elevation ? elevatorFindDoors(rider) : nullptr;
+    bool changesFloor = elevation != rider->elevation;
+    Object* doors = changesFloor ? elevatorFindDoors(rider) : nullptr;
 
     reg_anim_clear(rider);
     objectSetRotation(rider, ROTATION_SE, nullptr);
@@ -428,8 +429,9 @@ void elevatorRideApply(Object* rider, int map, int elevation, int tile)
     // Everyone else who is online and not the rider, onto free tiles beside it. A
     // radius of 1 lets _obj_attempt_placement itself spread them if the free-tile
     // search comes up empty; co-locating is better than stranding a player on a
-    // floor the party has left (map.cc's own rule for reattach).
-    for (int slot = 0; slot < playerActorCount(); slot++) {
+    // floor the party has left (map.cc's own rule for reattach). Picking the floor
+    // the rider is already on leaves no one behind, so no one else is moved.
+    for (int slot = 0; changesFloor && slot < playerActorCount(); slot++) {
         Object* actor = playerActorAt(slot);
         if (actor == nullptr || actor == rider || !playerActorOnline(slot)) {
             continue;

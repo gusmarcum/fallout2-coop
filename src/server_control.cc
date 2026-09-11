@@ -2679,6 +2679,10 @@ void serverControlLine(int sessionId, const char* line)
             || strcmp(verb, "quicksave") == 0 // F6/F7 latch a request; neither is an action
             || strcmp(verb, "quickload") == 0
             || strcmp(verb, "elevcancel") == 0 // releases an offer; no action, no animation
+            // Answers a panel the server offered, usually while the use animation that
+            // opened it still runs; dropped here, the offer leaked and that panel never
+            // showed again (bugs/028). The ride checks its own offer and destination.
+            || strcmp(verb, "elev") == 0
             // A read-only diagnostic must never be refused for being busy — busy is
             // exactly when you want to ask (state_audit.h).
             || strcmp(verb, "audit") == 0;
@@ -3628,6 +3632,9 @@ void serverControlLine(int sessionId, const char* line)
             return;
         }
         int elevator = gPendingElevator[slot];
+        // One offer, one answer, whatever the answer: a refusal that kept the offer
+        // would leave the repeat-offer guard silencing this panel for good (bugs/028).
+        gHasPendingElevator[slot] = false;
         if (n < 2 || arg < 0 || arg >= elevatorLevelCount(elevator)) {
             fprintf(stderr, "f2_server: control elev bad level=%d (elevator %d has %d)\n",
                 n >= 2 ? arg : -1, elevator, elevatorLevelCount(elevator));
@@ -3647,9 +3654,6 @@ void serverControlLine(int sessionId, const char* line)
             serverControlRefuse(sessionId, "That floor doesn't exist.");
             return;
         }
-
-        // One offer, one ride.
-        gHasPendingElevator[slot] = false;
 
         // The scope matters for the SAME-MAP case: objectSetLocation only moves the
         // camera elevation (mapSetElevation) for gDude, and the whole party is riding,
