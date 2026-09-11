@@ -293,6 +293,20 @@ void displayMonitorAddMessageStyled(char* str, int channel)
     // SFALL
     consoleFileAddMessage(str);
 
+    // The wrap loops below split the text IN PLACE (a '\0' dropped at each line
+    // break, the ' ' restored afterwards), so the input must be writable. Every
+    // vanilla caller passes a buffer, which is why the engine got away with it;
+    // co-op call sites also pass string literals and std::string internals, and
+    // the input-lock watchdog's literal killed the client the moment its message
+    // needed wrapping: the '\0' landed in read-only .rdata (bugs/025). Wrap a
+    // local copy instead, so no caller memory is ever written. 1024 is ~12
+    // wrapped lines; the longest vanilla message is far below it, and anything
+    // longer only loses its tail here (the SFALL console log above got it whole).
+    char wrapCopy[1024];
+    strncpy(wrapCopy, str, sizeof(wrapCopy) - 1);
+    wrapCopy[sizeof(wrapCopy) - 1] = '\0';
+    str = wrapCopy;
+
     int oldFont = fontGetCurrent();
     fontSetCurrent(DISPLAY_MONITOR_FONT);
 
