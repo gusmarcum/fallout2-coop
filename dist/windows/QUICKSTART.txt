@@ -1,0 +1,32 @@
+Fallout 2 Co-op v1.3.0 (https://github.com/gusmarcum/fallout2-coop)
+
+You need your own Fallout 2 (Steam or GOG, US 1.02d) and Windows 10 or 11,
+64-bit. Everyone must run the same release of this project with identical game
+files.
+
+HOST
+1. Copy your Fallout 2 folder somewhere new, for example D:\Games\Fallout2Coop.
+   That copy is the co-op world.
+2. Extract this zip into that folder, next to master.dat.
+3. Double-click start-server.cmd. The first time, press Enter for a new game.
+   After that, Enter continues the newest co-op save.
+4. Double-click join.cmd, pick your character name, and leave the address
+   empty.
+
+OTHER PLAYERS
+Extract this zip into your own Fallout 2 folder, double-click join.cmd, pick
+your character name, and enter the host's address (for example their ZeroTier
+IP). Your answers are saved in join-settings.cmd; delete it to change them.
+
+Your name is your character: use the same one every time, and a different one
+from your friends. Letters, digits, - and _ only.
+
+Keys: T chat, TAB automap, F6/F7 quicksave/quickload (rewinds everyone),
+click a player to trade, Use on a dead player to revive them.
+Cutscenes play for everyone; the first player to skip one ends it for all.
+
+Play over a VPN such as ZeroTier. Never forward the game port (9300) to the
+internet. If a friend can't connect, check that Windows Firewall on the host
+allows f2_server.exe. Windows may warn about an unsigned exe the first time:
+More info, then Run anyway.
+To stop the server, press F6 in game to quicksave, then close the server window.

@@ -54,8 +54,9 @@ Edition.
 ## Download
 
 **[Latest release](https://github.com/gusmarcum/fallout2-coop/releases/latest)**: a zip with
-`f2_server.exe`, `fallout2-ce.exe`, this README, the licence and a quick-start note. The two
-exes are also attached loose for people who only need the client.
+`f2_server.exe`, `fallout2-ce.exe`, the two launchers `start-server.cmd` and `join.cmd`, this
+README, the licence and a quick-start note. The two exes are also attached loose for people
+who only need the client.
 
 - Windows 10 or 11, 64-bit. Both exes are statically linked; there is nothing else to install.
 - You need your own Fallout 2 (Steam or GOG, US 1.02d). The server and every client must have
@@ -236,61 +237,39 @@ fake clients: trade and death, quicksave, armor perks, the parked body, inventor
 
 ## Quick start
 
-**Host** (runs the server, and usually a client too)
+**Host** (runs the server, and usually plays too)
 
 1. Copy your Fallout 2 folder somewhere new, for example `D:\Games\Fallout2Coop`. That copy
    is the world; its `data\SAVEGAME` holds the co-op saves.
-2. Put `f2_server.exe` and `fallout2-ce.exe` from a release into that folder.
-3. Start the server from a `.cmd` file in that folder:
-
-```bat
-@echo off
-cd /d "%~dp0"
-set F2_SERVER_MAP=artemple.map
-set F2_SERVER_NET=9300
-set F2_SERVER_CMD=9301
-set F2_SERVER_PACE_MS=100
-set F2_AUTOSAVE_SECS=300
-set F2_SERVER_NAME=Our game
-f2_server.exe
-pause
-```
-
-   To continue a saved world use `set F2_SERVER_LOAD=<slot>` instead of `F2_SERVER_MAP`.
-   Slots 1 to 10 are manual saves, 11 to 15 the rotating autosaves, 16 the quicksave.
-4. Join from the same PC:
-
-```bat
-@echo off
-cd /d "%~dp0"
-set F2_CLIENT_CONNECT=127.0.0.1:9300
-set F2_PLAYER_NAME=Gus
-set F2_PLAYER_CREATE=ask
-fallout2-ce.exe
-```
+2. Extract the release zip into that folder, next to `master.dat`.
+3. Double-click `start-server.cmd`. It lists the saves in the world. The first time, press
+   Enter to start a new game at the Temple of Trials; after that, Enter continues the newest
+   co-op save (slots 11 to 15 are the rotating autosaves, 16 the quicksave). Type a slot
+   number to load a different one, or `NEW` to start over.
+4. Double-click `join.cmd`, pick your character name, and leave the address empty.
 
 **Other players**
 
-Put `fallout2-ce.exe` next to your own Fallout 2 files and start it from a `.cmd` with the
-host's address:
-
-```bat
-@echo off
-cd /d "%~dp0"
-set F2_CLIENT_CONNECT=10.144.94.83:9300
-set F2_PLAYER_NAME=Friend
-set F2_PLAYER_CREATE=ask
-fallout2-ce.exe
-```
+Extract the release zip into your own Fallout 2 folder, double-click `join.cmd`, pick your
+character name, and enter the host's address, for example their ZeroTier IP. `join.cmd`
+remembers both in `join-settings.cmd`; delete that file to change them.
 
 The first time a name is seen you create a character; after that the same name is the same
 character, with the inventory, level and quest state you had when you last played. Names
-must differ between players and stay the same across sessions. While you are away your body
-is parked; when you come back it is placed next to the host, on whatever map the host is on.
+must differ between players and stay the same across sessions, and use letters, digits, `-`
+and `_` only. While you are away your body is parked; when you come back it is placed next
+to the host, on whatever map the host is on.
 
 A VPN such as ZeroTier is the recommended way to play over the internet. Do not forward the
-game port to the internet: the wire has no authentication. The client reads `fallout2.cfg`
-from the folder the exe is in, so keep it next to the game files.
+game port (9300) to the internet: the wire has no authentication. If a friend cannot
+connect, check that Windows Firewall on the host allows `f2_server.exe`. The client reads
+`fallout2.cfg` from the folder the exe is in, so keep it next to the game files.
+
+**What the launchers set.** `start-server.cmd` runs `f2_server.exe` with the game port on
+9300, real-time pace, an autosave every five minutes and keepalive on, and leaves the admin
+console off. To run a server your own way, set the variables under
+[Server settings](#server-settings) and start `f2_server.exe` directly. A client joins with
+`F2_CLIENT_CONNECT=<host>:9300`, `F2_PLAYER_NAME=<name>` and `F2_PLAYER_CREATE=ask`.
 
 ## Keys in the client
 
@@ -344,6 +323,8 @@ The full list of variables and verbs, including the diagnostic ones, is in
 
 Connect to the `F2_SERVER_CMD` port with a TCP tool (telnet, nc, or a small script) and send one
 command per line. It answers once a client is connected; `help` lists everything.
+`start-server.cmd` leaves the console off; to turn it on, remove `rem` from its
+`F2_SERVER_CMD` line.
 
 | Command | Meaning |
 |---|---|
