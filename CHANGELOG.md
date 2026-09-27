@@ -15,6 +15,10 @@ Saves from every earlier version load unchanged.
 
 ### Added
 
+- **Launchers in the zip (re-issued 2026-09-27).** `start-server.cmd` lists the world's saves
+  and continues the newest co-op save on Enter, or starts a new game the first time;
+  `join.cmd` asks for a character name and the host's address once and remembers them. Both
+  live in `dist/windows`. The exes are unchanged.
 - **Two diagnostics for operators.** `F2_TRACE_PARTY=1` prints one roster line per party
   member every 25 seconds (script id, tile, elevation, distance to the leader), which tells
   a member with no script apart from a slow follow loop. Every detonation now prints two

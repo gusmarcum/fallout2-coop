@@ -23,3 +23,5 @@ LICENSE text eol=lf
 
 # Force CRLF
 *.bat text eol=crlf
+*.cmd text eol=crlf
+dist/windows/*.txt text eol=crlf
