@@ -715,12 +715,13 @@ static void writeHelp(const std::function<void(const char* text)>& reply, bool w
     reply("  movie <0-16>          project a movie to every viewer (4 = VSUIT)");
     reply("  movdone               release a parked movie barrier from the console");
     reply("  timeskip <minutes>    advance the game clock like a script does");
-    reply("  spawn <pid> [n] [tile]  place n critters of pid (default 1, random tile)");
+    reply("  spawn <pid> [n] [tile]  place n critters of pid (default 1, random tile; `near` = beside the host)");
     reply("  stress <n> [pid] [seed] spawn n hostiles near the players and aggro them");
     reply("  despawnall            destroy everything spawn/stress created");
     reply("  revive <slot>         revive a dead player at 1 HP (no-op if not dead)");
     reply("  kill <slot>           kill a player (tests the revive and party-wipe rules)");
     reply("  xp <slot> <amount>    award experience to one seat (levels come with it)");
+    reply("  partyxp <slot> <amt>  award it the way play does: everyone playing is paid");
     reply("  sheet [slot]          level/xp/unspent points/owed perk/tags/traits per seat");
     reply("  rest <minutes> [slot] pass time for EVERYONE and heal every player");
     reply("  ending                play the ending slides + credits on every client");
@@ -1344,6 +1345,58 @@ bool serverAdminLine(const char* line,
             slot, amount, gained, levelBefore, levelAfter);
         return true;
     }
+    if (strcmp(verb, "partyxp") == 0) {
+        // `partyxp <slot> <amount>`: pay an award the way PLAY pays one, as if
+        // <slot> had earned it (stat.h, party experience). `xp` above addresses one
+        // seat and is never shared; this one asks the same question every award
+        // site asks, so it answers "who would be paid right now" on a live world
+        // without anybody having to find a rat first. One line per recipient on the
+        // console, which is what tools/party_xp_proof.py reads.
+        if (!worldLoaded) {
+            reply("partyxp: no world loaded");
+            return true;
+        }
+        char slotText[32];
+        const char* amountText = splitVerb(rest != nullptr ? rest : "", slotText, sizeof(slotText));
+        if (slotText[0] == '\0' || amountText == nullptr || amountText[0] == '\0') {
+            reply("usage: partyxp <earner slot> <amount>   (paid to everyone who is playing)");
+            return true;
+        }
+
+        int slot = atoi(slotText);
+        Object* earner = slot >= 0 && slot < playerActorCount() ? playerActorAt(slot) : nullptr;
+        if (earner == nullptr) {
+            snprintf(msg, sizeof(msg), "partyxp: no character in slot %d (0..%d)", slot, playerActorCount() - 1);
+            reply(msg);
+            return true;
+        }
+
+        int amount = (int)strtol(amountText, nullptr, 0);
+        if (amount == 0) {
+            reply("partyxp: amount 0, nothing to award");
+            return true;
+        }
+
+        // The same pay-out play uses, so what this proves about who is paid, and
+        // how many times, is true of every award site.
+        PartyXpShare shares[kMaxPlayerActors];
+        int shareCount = pcPartyXpAward(amount, earner, "partyxp", shares);
+        fprintf(stderr, "f2_server: admin partyxp earner=slot %d amount=%d shared=%d recipients=%d\n",
+            slot, amount, pcPartyXpActive() ? 1 : 0, shareCount);
+
+        snprintf(msg, sizeof(msg), "partyxp: %d xp earned by slot %d (%s), paid to %d player%s%s",
+            amount, slot, critterGetName(earner), shareCount, shareCount == 1 ? "" : "s",
+            pcPartyXpActive() ? "" : " (sharing is off: the earner alone)");
+        reply(msg);
+        for (int index = 0; index < shareCount; index++) {
+            snprintf(msg, sizeof(msg), "partyxp:   slot %d (%s) +%d, now %d xp, level %d",
+                playerActorSlotOf(shares[index].actor), critterGetName(shares[index].actor),
+                shares[index].gained, pcGetStat(PC_STAT_EXPERIENCE, shares[index].actor),
+                pcGetStat(PC_STAT_LEVEL, shares[index].actor));
+            reply(msg);
+        }
+        return true;
+    }
 
     if (strcmp(verb, "encnext") == 0) {
         // TEST HOOK: arm the next worldmap travel check to roll an encounter AND to
@@ -1834,6 +1887,12 @@ bool serverAdminLine(const char* line,
         // = random near the players. pid takes 0x-hex or decimal (strtol base 0).
         // script = scripts.lst line number (1-based) to attach, for NPCs whose proto
         // carries none (see spawnAttachScript); 0/absent = the proto's own, if any.
+        //
+        // tile `near`: right beside the host, the first free hex in a growing ring
+        // around them (the placement a joining player gets). The random placement
+        // is anywhere reachable within 30 hexes, which is right for a crowd and
+        // wrong for "put one here so I can look at it": on a busy map the critter
+        // lands out of sight behind a building.
         if (!worldLoaded) {
             reply("spawn: no world loaded");
             return true;
@@ -1850,7 +1909,9 @@ bool serverAdminLine(const char* line,
 
         int pid = static_cast<int>(strtol(pidText, nullptr, 0));
         int count = nText[0] != '\0' ? atoi(nText) : 1;
-        int wantTile = tileText[0] != '\0' ? atoi(tileText) : -1;
+        // Tested before atoi: a word reads as 0 there, and 0 is a real tile.
+        bool besideHost = strcmp(tileText, "near") == 0;
+        int wantTile = tileText[0] != '\0' && !besideHost ? atoi(tileText) : -1;
         int scriptNumber = scriptText[0] != '\0' ? atoi(scriptText) : 0;
         if (scriptNumber < 0) {
             reply("spawn: script must be a scripts.lst line number (1-based)");
@@ -1871,14 +1932,23 @@ bool serverAdminLine(const char* line,
         int placed = 0;
         int lastTile = -1;
         int unreachable = 0; // only counted on the random path; an explicit tile is honored
+        Object* host = playerActorAt(0);
         for (int i = 0; i < count; i++) {
-            int tile = wantTile != -1 && hexGridTileIsValid(wantTile)
-                ? wantTile
-                : stressRandomFreeTile(gElevation, rng, unreachable);
+            int tile;
+            int elevation = gElevation;
+            if (besideHost) {
+                // Each one placed blocks its hex, so the next lands on the next free one.
+                tile = host != nullptr ? playerActorFindFreeTileNear(host->tile, host->elevation) : -1;
+                elevation = host != nullptr ? host->elevation : gElevation;
+            } else {
+                tile = wantTile != -1 && hexGridTileIsValid(wantTile)
+                    ? wantTile
+                    : stressRandomFreeTile(gElevation, rng, unreachable);
+            }
             if (tile == -1) {
                 break;
             }
-            Object* spawned = stressSpawnOne(pid, tile, gElevation);
+            Object* spawned = stressSpawnOne(pid, tile, elevation);
             if (spawned == nullptr) {
                 continue;
             }

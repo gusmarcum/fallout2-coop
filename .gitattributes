@@ -25,3 +25,4 @@ LICENSE text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 dist/windows/*.txt text eol=crlf
+tools/solo_test/kit/*.txt text eol=crlf

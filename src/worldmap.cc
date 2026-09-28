@@ -2962,19 +2962,30 @@ static int wmRndEncounterOccurred()
                 // award used to have no subject at all, so it landed on slot 0 however
                 // the encounter was spotted — and the line was broadcast, telling every
                 // player they had earned it.
+                //
+                // The party travels as one and is paid as one (stat.h, party
+                // experience): everyone playing gets the award and their own copy of
+                // the line. Not shared, the only recipient is the spotter, null
+                // included, and this is the single award it always was.
                 Object* spotter = partyGetBestSkillPlayerActor(SKILL_OUTDOORSMAN);
-                int xpGained;
-                pcAddExperience(xp, &xpGained, spotter);
 
-                MessageListItem messageListItem;
-                char* text = getmsg(&gMiscMessageList, &messageListItem, 8500);
-                if (strlen(text) < 110) {
-                    char formattedText[120];
-                    snprintf(formattedText, sizeof(formattedText), text, xpGained);
-                    presenter()->consoleMessageStyled(spotter != nullptr ? spotter->netId : 0,
-                        kMsgChannelReward, formattedText);
-                } else {
-                    debugPrint("WorldMap: Error: Rnd Encounter string too long!");
+                PartyXpShare shares[kMaxPlayerActors];
+                int shareCount = pcPartyXpAward(xp, spotter, "encounter spotted", shares);
+
+                for (int index = 0; index < shareCount; index++) {
+                    Object* recipient = shares[index].actor;
+                    int xpGained = shares[index].gained;
+
+                    MessageListItem messageListItem;
+                    char* text = getmsg(&gMiscMessageList, &messageListItem, 8500);
+                    if (strlen(text) < 110) {
+                        char formattedText[120];
+                        snprintf(formattedText, sizeof(formattedText), text, xpGained);
+                        presenter()->consoleMessageStyled(recipient != nullptr ? recipient->netId : 0,
+                            kMsgChannelReward, formattedText);
+                    } else {
+                        debugPrint("WorldMap: Error: Rnd Encounter string too long!");
+                    }
                 }
             }
         }

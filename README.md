@@ -100,6 +100,16 @@ vanilla death screen and the server reloads the most recently written save, whic
 that is, without anyone leaving the server. A world with no save yet stands the party back
 up where it fell instead.
 
+**The party levels together.** Experience used to go to whoever earned it: the player who
+talked to the quest giver, landed the killing shot or picked the lock levelled, and the
+player standing next to them did not, and over a long game the characters drifted levels
+apart. Every award now pays every connected player, in full and exactly once, the earner
+included: quest and dialogue rewards, kills (a fight's kills are one purse, paid when it
+ends), skill use, stealing, and spotting an encounter on the worldmap. Each share goes
+through that player's own sheet, so Swift Learner, level-ups and perk picks stay
+individual. A player who is down is paid with the rest; a player who is away is not.
+`F2_PARTY_XP=0` on the server goes back to individual awards.
+
 **One suit each.** The game places exactly one Advanced Power Armor in Navarro and one
 Mk II in the oil rig's trap room, which is fair to one player and a problem for two. The
 first time the server loads one of those maps it tops the locker up to one suit per seat
@@ -233,7 +243,8 @@ deterministic (the RNG seed no longer comes from the wall clock), and blessed ag
 Windows result set. Every commit in this repository passes both suites, and CI builds the two
 shipped binaries with the same MSYS2 toolchain and flags on every push. Each feature also
 ships with a headless proof script under [`tools/`](tools) that drives a sandbox server with
-fake clients: trade and death, quicksave, armor perks, the parked body, inventory.
+fake clients: trade and death, quicksave, armor perks, the parked body, inventory, party
+experience.
 
 ## Quick start
 
@@ -312,6 +323,7 @@ Set these as environment variables before starting `f2_server.exe`.
 | `F2_AUTOSAVE_SECS` | `300` | autosave interval into slots 11-15; `0` = off |
 | `F2_SERVER_KEEPALIVE` | on if CMD set | keep running when the last player leaves |
 | `F2_GAME_DIFFICULTY` / `F2_COMBAT_DIFFICULTY` | from cfg | `0` easy, `1` normal, `2` hard |
+| `F2_PARTY_XP` | on | experience pays every connected player; `0` pays the earner alone |
 | `F2_MOVIES` | always on | retired; a leftover `0` in a launch file is ignored and the server says so at boot |
 | `F2_TRACE_WORLD` | off | `1` prints `[world]` lines for door, container and map-state changes |
 | `F2_SERVER_DEBUG_LOG` | off | `1` writes the engine's debug output to `f2_server-debug.log`, which names the step when a save or load fails |
@@ -335,11 +347,14 @@ command per line. It answers once a client is connected; `help` lists everything
 | `new <map.map>` | boot a fresh world (lobby only) |
 | `revive <slot>` | stand a dead player up |
 | `kill <slot>` | kill a player (for testing the revive and party-wipe rules) |
+| `xp <slot> <amount>` | give experience to one seat, levels included; never shared, so it is how to close a gap between two characters |
+| `partyxp <slot> <amount>` | give experience the way play does: every connected player is paid once |
+| `sheet [slot]` | level, experience, unspent skill points and owed perk picks per seat |
 | `give <pid> <count>` | give items to the host character; `count` is stacks (boxes for ammo) |
 | `gvar <index> [value]` | read or set a global script variable (quest flags) |
 | `party` | list the party as the server sees it |
 | `partyadd <pid>` | re-attach a companion standing on the current map (89 = John Cassidy) |
-| `spawn <pid> [count] [tile] [script]` | spawn an NPC; `tile` -1 = beside the host; `script` is its scripts.lst number, needed for it to talk (Vic: `spawn 0x0100003E 1 -1 50`) |
+| `spawn <pid> [count] [tile] [script]` | spawn an NPC; `tile` `near` = right beside the host, -1 = a random reachable spot within 30 hexes of a player; `script` is its scripts.lst number, needed for it to talk (Vic: `spawn 0x0100003E 1 near 50`) |
 | `despawnall` | remove every NPC spawned by this server run |
 | `stat <slot> [stat] [value]` | read or set a seat's base SPECIAL (st pe en ch in ag lk); no stat = all seven, base and current |
 | `ending` | play the ending slides and credits on every connected client |

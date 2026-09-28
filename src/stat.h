@@ -77,6 +77,58 @@ int pcAddExperience(int xp, int* xpGained = nullptr, Object* subject = nullptr);
 int pcAddExperienceWithOptions(int xp, bool a2, int* xpGained = nullptr, Object* subject = nullptr);
 int pcSetExperience(int a1, Object* subject = nullptr);
 
+// ---- PARTY EXPERIENCE (owner ruling 2026-09-27) -----------------------------
+// The party earns as ONE ENTITY: whatever one player earns, every player who is
+// playing right now is paid in full. Nothing is split. Each share goes through
+// the funnel above for its own actor, so Swift Learner, the level-up award and
+// the streamed sheet row stay per player.
+//
+// This does not replace the subject ruling (PLAYER_SHEET_DESIGN.md section 4).
+// The call site still names the earner, because the earner's line is worded
+// differently from a teammate's and the steal cap reads the thief's own skill.
+// What changes is who is PAID: the sites that award play (kills, give_exp_points,
+// skill use, stealing, spotting an encounter) hand the award to pcPartyXpAward,
+// which pays everyone who is playing, and then word a line for each share.
+//
+// Deliberately NOT shared, because they are one character's own business:
+// Here and Now (perk.cc), the operator's `xp <slot>` verb and the probe's `xp`.
+
+// True when awards are shared: a dedicated server with more than one player
+// actor, unless the operator set F2_PARTY_XP=0. Always false in single-player,
+// on a viewer and under the headless probe, so every golden is unchanged.
+bool pcPartyXpActive();
+
+// Who is paid for an award that `earner` brought in. Fills `recipients` (room for
+// kMaxPlayerActors) and returns how many.
+//
+// Shared: every seat with a connected player and a body in the world. A downed
+// player is included (a teammate revives them, and leaving them out is how two
+// characters drift apart); a body whose owner is not connected is not. If nobody
+// is connected the earner keeps the award, so XP is never dropped.
+//
+// Not shared: exactly one entry, `earner` AS GIVEN. nullptr stays nullptr, which
+// the funnel reads as gDude and the message layer reads as a broadcast, so a
+// caller that loops over the result behaves byte for byte as it did before.
+int pcPartyXpRecipients(Object* earner, Object** recipients);
+
+// One player's share of one award: who was paid, and what the funnel actually
+// added for them (their own Swift Learner included).
+typedef struct PartyXpShare {
+    Object* actor;
+    int gained;
+} PartyXpShare;
+
+// THE pay-out. Every award site that shares calls this and nothing else, so an
+// award is paid in exactly one place: ONCE to each recipient, the earner
+// included. The earner's own award is not made separately and then topped up
+// for the others; it IS one of these shares, which is why nobody can be paid
+// twice for the same award.
+//
+// Fills `shares` (room for kMaxPlayerActors) in slot order and returns how many.
+// `what` names the source for the server console, which prints one line per
+// award with every share on it.
+int pcPartyXpAward(int xp, Object* earner, const char* what, PartyXpShare* shares);
+
 static inline bool statIsValid(int stat)
 {
     return stat >= 0 && stat < STAT_COUNT;

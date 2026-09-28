@@ -1,4 +1,4 @@
-Fallout 2 Co-op v1.3.0 (https://github.com/gusmarcum/fallout2-coop)
+Fallout 2 Co-op v1.3.1 (https://github.com/gusmarcum/fallout2-coop)
 
 You need your own Fallout 2 (Steam or GOG, US 1.02d) and Windows 10 or 11,
 64-bit. Everyone must run the same release of this project with identical game
@@ -24,6 +24,7 @@ from your friends. Letters, digits, - and _ only.
 Keys: T chat, TAB automap, F6/F7 quicksave/quickload (rewinds everyone),
 click a player to trade, Use on a dead player to revive them.
 Cutscenes play for everyone; the first player to skip one ends it for all.
+Experience is shared: every award pays every connected player in full.
 
 Play over a VPN such as ZeroTier. Never forward the game port (9300) to the
 internet. If a friend can't connect, check that Windows Firewall on the host

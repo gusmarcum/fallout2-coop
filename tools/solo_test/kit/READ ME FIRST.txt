@@ -1,0 +1,99 @@
+SOLO TEST: party experience, tested by one person
+=================================================
+
+What this is
+------------
+A separate copy of the game with its own test server. Nothing here touches your
+real worlds or their saves, and nothing you do in the test is kept: every start
+puts the same save back.
+
+One PC can run only one game client, so you cannot open a second game for the
+second player. A small script holds their seat instead. It does not play. It
+stays connected so the game counts two players, and its window tells you what
+the second player's screen is being sent and what every award paid to whom.
+
+
+How to run it
+-------------
+  1. Close any other Fallout 2 that is running (Steam's, or another co-op game).
+  2. Double-click  "1 START TEST.cmd"   and leave that window open.
+     Wait for the line:  Seated as <your friend> (seat 1).
+  3. Double-click  "2 JOIN.cmd".   You are in the game as your own character,
+     in a window, so you can see the first window next to it.
+     The first window says:  The host joined. Both players are in the game.
+
+
+What to try, and what you should see
+------------------------------------
+Keep an eye on two things: YOUR message log in the game, and the first window.
+
+  A quest award        Double-click "3 Quest monster.cmd".
+                       The Klamath rat god appears right next to you, with his
+                       real script, and attacks. Kill him.
+                         your log:       the script's line, then
+                                         "You gain 300 experience points."   one time
+                         when the fight ends:
+                                         "... you earn 150 exp. points."     one time
+                         first window:   two AWARD blocks, each listing both
+                                         characters with the SAME amount and
+                                         "paid once each to 2 players"
+
+  A kill               Double-click "4 Two raiders.cmd".
+                       Two raiders appear next to you and do nothing. Attack one,
+                       kill both, then END COMBAT yourself (the END CMBT button):
+                       a fight you start among bystanders does not end by itself,
+                       in the normal game either.
+                         your log:       "... you earn 260 exp. points."     one time
+                         first window:   one AWARD block, 260 to both
+
+  A skill              Get hurt in one of the fights, then use First Aid on
+                       yourself. It can fail; try again if it does.
+                         your log:       "You earn 25 XP for honing your skills."
+                         first window:   your friend's screen shows
+                                         "You earn 25 XP from <you> honing a skill."
+                                         and one AWARD block, 25 to both
+
+  A plain reward       Double-click "5 Quest reward.cmd".
+                       500 experience, paid the way play pays it. An operator
+                       award prints nothing in the game's log; open your
+                       character screen and the 500 is there, one time.
+
+  The numbers          "6 Character sheets.cmd" shows both characters' level and
+                       experience whenever you want to compare.
+                       Your own character screen in the game must agree with it.
+
+  Another round        "7 Heal everyone.cmd" heals both characters.
+
+
+What counts as a pass
+---------------------
+  - Every award shows up ONE time in your message log, not two.
+  - Your experience on the character screen goes up by exactly the amount in
+    the line you read.
+  - Every AWARD block in the first window lists both characters with the same
+    amount and ends with "paid once each to 2 players".
+
+What counts as a failure
+------------------------
+  - The same award twice in your log, or your experience going up by double.
+  - An AWARD block that lists only you while the first window says your friend
+    is seated.
+  - The words "SOMEBODY IS ON THIS AWARD TWICE" in the first window.
+If you see any of these, copy the text of the first window and the file
+server-console.log from this folder.
+
+
+Ending the test
+---------------
+Quit the game, then close the first window (or double-click "9 STOP TEST.cmd").
+The test server stops by itself when the last player leaves.
+
+
+What is in this folder
+----------------------
+  test-settings.cmd    the two character names, the save slot and the ports
+  test-save\           the save every test starts from
+  tools\               the stand-in and the helper the launchers call
+  server-console.log   what the test server printed during the last run
+Ports 9800 and 9801 are used, on this PC only. Your real worlds use other ports
+and can stay as they are, but only one game client can run at a time.

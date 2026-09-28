@@ -2874,10 +2874,22 @@ static void _combat_over()
     presenter()->hudActionPoints(0, 0);
 
     if (_game_user_wants_to_quit == 0) {
-        // Pay every bucket to its own earner. playerActorCount() is 1 with an
-        // empty registry, so this is the vanilla single call.
-        for (int slot = 0; slot < playerActorCount(); slot++) {
-            _combat_give_exps(_combat_exps[slot], playerActorAt(slot));
+        if (pcPartyXpActive()) {
+            // The party fought as one, so the buckets are one purse and
+            // _combat_give_exps pays it to everyone who is playing. The buckets
+            // still accrue per killer: that is what the pay-out falls back to
+            // when sharing is switched off.
+            int purse = 0;
+            for (int slot = 0; slot < playerActorCount(); slot++) {
+                purse += _combat_exps[slot];
+            }
+            _combat_give_exps(purse, nullptr);
+        } else {
+            // Pay every bucket to its own earner. playerActorCount() is 1 with an
+            // empty registry, so this is the vanilla single call.
+            for (int slot = 0; slot < playerActorCount(); slot++) {
+                _combat_give_exps(_combat_exps[slot], playerActorAt(slot));
+            }
         }
     }
 
@@ -2936,55 +2948,76 @@ void _combat_give_exps(int exp_points, Object* earner)
         return;
     }
 
-    // nullptr is "no subject in hand" — the vanilla meaning of this function.
-    Object* subject = earner != nullptr ? earner : gDude;
+    // Everyone this award pays (stat.h, party experience). Not shared, that is
+    // the earner alone, exactly as the caller named it.
+    Object* recipients[kMaxPlayerActors];
+    int recipientCount = pcPartyXpRecipients(earner, recipients);
 
-    // A dead earner banks nothing. Per-actor now: one player dying used to
-    // cancel the whole party's payout, because this read gDude no matter who
-    // the XP belonged to.
-    if (critterIsDead(subject)) {
+    // A dead earner banks nothing. When the party earns as one, the earner IS the
+    // party, and it is dead only when everyone being paid is: one player down
+    // with a teammate still standing is a fight the party won, and the player on
+    // the floor is paid with the rest. Not shared, this is the per-actor rule it
+    // always was (one player dying never cancels another's payout).
+    bool anyAlive = false;
+    for (int index = 0; index < recipientCount; index++) {
+        // nullptr is "no subject in hand" — the vanilla meaning of this function.
+        Object* subject = recipients[index] != nullptr ? recipients[index] : gDude;
+        if (!critterIsDead(subject)) {
+            anyAlive = true;
+            break;
+        }
+    }
+
+    if (!anyAlive) {
         return;
     }
 
-    // SFALL: Display actual xp received.
-    int xpGained;
-    pcAddExperience(exp_points, &xpGained, subject);
+    // Paid once to each of them, here and nowhere else.
+    PartyXpShare shares[kMaxPlayerActors];
+    int shareCount = pcPartyXpAward(exp_points, earner, "kills", shares);
 
-    // ►► THE LINE GOES TO WHOEVER EARNED IT. This used to return early for anyone
-    // but the host, so an extra player killed something and was paid in complete
-    // silence — XP and levels arriving with nothing on their screen to say why. It
-    // is ADDRESSED rather than broadcast because the text is second-person ("you
-    // earn"), and because at N players a broadcast copy per kill is a wall of other
-    // people's payouts.
-    //
-    // The flavour roll now runs for every earner, one draw per line actually read.
-    // It was previously inside the host gate to keep an extra's payout from
-    // consuming RNG; that is still true where it matters — with one player actor
-    // nothing here changes at all.
-    if (!playerActorIs(subject)) {
-        return;
+    for (int index = 0; index < shareCount; index++) {
+        Object* subject = shares[index].actor != nullptr ? shares[index].actor : gDude;
+
+        // SFALL: Display actual xp received.
+        int xpGained = shares[index].gained;
+
+        // ►► THE LINE GOES TO WHOEVER EARNED IT. This used to return early for anyone
+        // but the host, so an extra player killed something and was paid in complete
+        // silence — XP and levels arriving with nothing on their screen to say why. It
+        // is ADDRESSED rather than broadcast because the text is second-person ("you
+        // earn"), and because at N players a broadcast copy per kill is a wall of other
+        // people's payouts.
+        //
+        // The flavour roll now runs for every earner, one draw per line actually read.
+        // It was previously inside the host gate to keep an extra's payout from
+        // consuming RNG; that is still true where it matters — with one player actor
+        // nothing here changes at all.
+        if (!playerActorIs(subject)) {
+            continue;
+        }
+
+        v7.num = 621; // %s you earn %d exp. points.
+        if (!messageListGetItem(&gProtoMessageList, &v7)) {
+            continue;
+        }
+
+        v9.num = randomBetween(0, 3) + 622; // generate prefix for message
+
+        // "...without taking a scratch" is about the EARNER's own hide, not the host's.
+        current_hp = critterGetStat(subject, STAT_CURRENT_HIT_POINTS);
+        max_hp = critterGetStat(subject, STAT_MAXIMUM_HIT_POINTS);
+        if (current_hp == max_hp && randomBetween(0, 100) > 65) {
+            v9.num = 626; // Best possible prefix: For destroying your enemies without taking a scratch,
+        }
+
+        if (!messageListGetItem(&gProtoMessageList, &v9)) {
+            continue;
+        }
+
+        snprintf(text, sizeof(text), v7.text, v9.text, xpGained);
+        presenter()->consoleMessageStyled(subject->netId, kMsgChannelReward, text);
     }
-
-    v7.num = 621; // %s you earn %d exp. points.
-    if (!messageListGetItem(&gProtoMessageList, &v7)) {
-        return;
-    }
-
-    v9.num = randomBetween(0, 3) + 622; // generate prefix for message
-
-    // "...without taking a scratch" is about the EARNER's own hide, not the host's.
-    current_hp = critterGetStat(subject, STAT_CURRENT_HIT_POINTS);
-    max_hp = critterGetStat(subject, STAT_MAXIMUM_HIT_POINTS);
-    if (current_hp == max_hp && randomBetween(0, 100) > 65) {
-        v9.num = 626; // Best possible prefix: For destroying your enemies without taking a scratch,
-    }
-
-    if (!messageListGetItem(&gProtoMessageList, &v9)) {
-        return;
-    }
-
-    snprintf(text, sizeof(text), v7.text, v9.text, xpGained);
-    presenter()->consoleMessageStyled(subject->netId, kMsgChannelReward, text);
 }
 
 // 0x4222A8

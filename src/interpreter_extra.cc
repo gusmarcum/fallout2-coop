@@ -464,6 +464,24 @@ static void opGiveExpPoints(Program* program)
 {
     int xp = programStackPopInteger(program);
 
+    // The party earns as one (stat.h, party experience): a quest one player
+    // closes, a dialogue reward, a map-enter award, every authored award pays
+    // everyone who is playing. The script's own "you gain N experience points"
+    // line is display_msg, which is already a broadcast, so every player reads it
+    // and it is now true for each of them. scriptContextDude still names the
+    // earner; it only decides the award when nobody is connected to share it.
+    if (pcPartyXpActive()) {
+        // Paid once to each of them, here and nowhere else: this returns before
+        // the single-subject award below, so the earner is not paid a second time.
+        PartyXpShare shares[kMaxPlayerActors];
+        if (pcPartyXpAward(xp, scriptContextDude(program), program->name, shares) == 0) {
+            scriptError("\nScript Error: %s: op_give_exp_points: stat_pc_set failed");
+        }
+        return;
+    }
+
+    // Sharing switched off (F2_PARTY_XP=0), or not a co-op server at all.
+    //
     // A destination map-enter is the completion edge for a group transition: all
     // players captured as making that transition receive the authored story XP.
     // This audience exists only during mapLoad's map-enter procs; dialog, skill,
