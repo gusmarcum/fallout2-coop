@@ -19,6 +19,7 @@
 #include "automap.h"
 #include "character_editor.h"
 #include "character_selector.h"
+#include "client_net.h" // clientViewerRequested
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
@@ -268,7 +269,10 @@ int gameInitWithOptions(const char* windowTitle, bool isMapper, int font, int a4
     debugPrint(">pip_init\t\t");
 
     _InitLoadSave();
-    lsgInit();
+    // Same erase as the one _InitLoadSave skips for a joining client, same reason.
+    if (!clientViewerRequested()) {
+        lsgInit();
+    }
     debugPrint(">InitLoadSave\t");
 
     if (gameDialogInit() != 0) {

@@ -110,6 +110,8 @@ add_library(f2_core OBJECT
     "src/map.cc"
     "src/map.h"
     "src/map_defs.h"
+    "src/map_state_guard.cc"
+    "src/map_state_guard.h"
     "src/memory.cc"
     "src/memory.h"
     "src/memory_defs.h"
