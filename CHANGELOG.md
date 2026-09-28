@@ -4,6 +4,46 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.3.1 (2026-09-27)
+
+One change to how the game is played together, asked for in
+[issue #1](https://github.com/gusmarcum/fallout2-coop/issues/1): experience is shared. An
+award used to go to whoever earned it, so the player who landed the last hit or finished
+the quest levelled and the player next to them did not. Every award now pays every
+connected player in full. Saves from every earlier version load unchanged.
+
+### Added
+
+- **The party levels together.** Every experience award pays every connected player, in
+  full and exactly once, the earner included: quest and dialogue rewards, kills (a fight's
+  kills are one purse, paid when the fight ends), skill use, stealing, and spotting an
+  encounter on the world map. Nothing is split, so two players level at the pace one
+  player would alone. Each share goes through that player's own sheet, so Swift Learner,
+  level-ups, skill points and perk picks stay individual. A player who is down is paid
+  with the rest as long as one teammate is standing; a player who is not connected is not
+  paid. The perk Here and Now still levels only the character who takes it.
+  `F2_PARTY_XP=0` on the server returns to individual awards.
+- **Every award on the server console.** One line per award names its source, who earned
+  it and what each player was paid, for example
+  `[xp] kills 150 by the party -> Host +150 (xp 207082, level 20), Friend +150 (xp 98435, level 14)`.
+- **Operator verbs.** `partyxp <slot> <amount>` pays an award the way play does.
+  `xp <slot> <amount>` still pays one seat only, which makes it the way to close a gap
+  between two characters that already exists. `spawn <pid> [n] near` places a critter on
+  the first free hex beside the host.
+- **A way to test co-op alone.** One PC runs one game client, so one person cannot fill a
+  second seat with a real game. [`tools/solo_test`](tools/solo_test) fills it with a
+  script that stays connected as the second character, hands its combat turns straight
+  back, and reports what that player's screen is sent and what every award paid. It needs
+  Python and a save with two characters.
+
+### Changed
+
+- **A level-up does not heal a player who is down.** They keep the higher maximum, and the
+  revive sets their hit points as before.
+- **`spawn` is documented as it behaves.** The README said tile `-1` places the critter
+  beside the host. It places it at a random reachable spot within 30 hexes of a player;
+  `near` is the placement the old text promised.
+
 ## v1.3.0 (2026-09-11)
 
 Ten fixes, every one of them from live play. Three could end a session on the spot: a
