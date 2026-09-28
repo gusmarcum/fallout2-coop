@@ -4,6 +4,48 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.3.2 (2026-09-28)
+
+Three fixes, all from player reports. The first one matters to every world: maps the party
+had already visited went back to new. Saves from every earlier version load unchanged.
+
+### Fixed
+
+- **Visited maps stay visited
+  ([issue #4](https://github.com/gusmarcum/fallout2-coop/issues/4)).** The dead stood up
+  again, emptied chests were full, and people greeted the party as strangers, on every map
+  except the one the party was standing on; after a server restart a save seemed to keep
+  only the area it was made in. The state of each visited map is a file in the world
+  folder, and the game client erased those files every time it started, as the original
+  game does before its main menu. The host plays from the world folder, so each time the
+  host joined, the running world lost its record of every earlier map. A client started to
+  join a server now leaves those files alone. The server also keeps its own copy of each
+  one and puts back any that go missing, and says so on its console, which covers an older
+  client or the original game started in that folder. A map that was lost before this
+  update loads as new one more time, then stays the way the party leaves it. Quests,
+  experience, karma, the characters and the world map were never affected.
+- **A player who joins sees their own hit points
+  ([issue #2](https://github.com/gusmarcum/fallout2-coop/issues/2)).** The counter of a
+  joining player showed the host's hit points until that player was next hurt or healed, or
+  the party changed map. The server had the right number throughout; only the screen was
+  wrong.
+- **Chat works during a fight
+  ([issue #3](https://github.com/gusmarcum/fallout2-coop/issues/3)).** `T` opened the chat
+  box in combat and the next frame closed it, and the Enter meant for the message asked to
+  end combat instead. The box now stays until the line is sent (Enter) or cancelled (Esc).
+  While it is open it takes every key, so the End Turn and End Combat buttons type into it:
+  send or cancel first.
+
+### Added
+
+- **Proofs that use the real game client.**
+  [`tools/map_state_proof.py`](tools/map_state_proof.py) kills two critters, leaves the
+  map, starts a real game client in the server's folder, walks back, saves, restarts and
+  walks back again, and checks the world at each step.
+  [`tools/client_screen_proof.py`](tools/client_screen_proof.py) checks the hit point
+  counter and the chat box the same way, from the client's own screenshots and a recorded
+  keyboard. Both need Python and a sandbox copy of a game folder.
+
 ## v1.3.1 (2026-09-27)
 
 One change to how the game is played together, asked for in
