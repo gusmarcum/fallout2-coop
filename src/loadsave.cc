@@ -10,6 +10,7 @@
 #include "art.h"
 #include "automap.h"
 #include "character_editor.h"
+#include "client_net.h" // clientViewerRequested: a joining client leaves the world's files alone
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
@@ -232,9 +233,17 @@ void _InitLoadSave()
     _slot_cursor = 0;
     savegameRefreshPatchesPath();
 
-    MapDirErase("MAPS\\", "SAV");
-    MapDirErase(PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME "\\", PROTO_FILE_EXT);
-    MapDirErase(PROTO_DIR_NAME "\\" ITEMS_DIR_NAME "\\", PROTO_FILE_EXT);
+    // Vanilla clears the working copies of the last session here, before the main
+    // menu. A client that was started to JOIN a server has no session of its own, and
+    // the folder it runs in is very often the server's: the host plays from the world
+    // folder. There these files are the running world's record of every map the party
+    // has visited, and erasing them reset every map but the one in memory each time
+    // the host's client started (bugs/032).
+    if (!clientViewerRequested()) {
+        MapDirErase("MAPS\\", "SAV");
+        MapDirErase(PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME "\\", PROTO_FILE_EXT);
+        MapDirErase(PROTO_DIR_NAME "\\" ITEMS_DIR_NAME "\\", PROTO_FILE_EXT);
+    }
 
     configGetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_AUTO_QUICK_SAVE, &quickSaveSlots);
     if (quickSaveSlots > 0 && quickSaveSlots <= 10) {

@@ -23,6 +23,7 @@
 #include "item.h"
 #include "loadsave.h"
 #include "map.h"
+#include "map_state_guard.h"
 #include "memory.h"
 #include "message.h"
 #include "object.h"
@@ -846,6 +847,10 @@ static int _GameMap2Slot(File* stream)
         return -1;
     }
 
+    // The slot gets a copy of every working file found below; one erased behind the
+    // server's back would be missing from this save and from every save after it.
+    mapStateGuardRestoreMissing();
+
     for (int index = 1; index < gPartyMemberDescriptionsLength; index += 1) {
         int pid = gPartyMemberPids[index];
         if (pid == -2) {
@@ -1020,6 +1025,10 @@ static int _SlotMap2Game(File* stream)
         }
     }
 
+    // The slot's maps are the working copies now. Kept before the map load below,
+    // which may erase the one it lands on (a random encounter is not persisted).
+    mapStateGuardCaptureAll();
+
     const char* automapFileName = _strmfe(_str1, "AUTOMAP.DB", "SAV");
     snprintf(_str0, sizeof(_str0), "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, automapFileName);
     snprintf(_str1, sizeof(_str1), "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
@@ -1168,6 +1177,12 @@ void _ResetLoadSave()
 // 0x480040
 int MapDirErase(const char* relativePath, const char* extension)
 {
+    // The working copies erased on purpose (a new world, a load): the guard lets go
+    // of them too, or it would put the old world's maps back under the new one.
+    if (compat_stricmp(relativePath, "MAPS\\") == 0 && compat_stricmp(extension, "SAV") == 0) {
+        mapStateGuardForgetAll();
+    }
+
     char path[COMPAT_MAX_PATH];
     snprintf(path, sizeof(path), "%s*.%s", relativePath, extension);
 

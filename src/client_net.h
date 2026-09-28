@@ -37,6 +37,10 @@ bool clientApplyStreamFile(const char* path);
 void clientViewerSetActive(bool active);
 bool clientViewerActive();
 
+// True when this process was started to join a server (F2_CLIENT_CONNECT), and
+// true already during game init, before clientViewerActive() can be.
+bool clientViewerRequested();
+
 enum AccountState {
     kAccountUnanswered = 0,
     kAccountKnown = 1,

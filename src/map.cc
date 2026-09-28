@@ -26,6 +26,7 @@
 #include "light.h"
 #include "loadsave.h"
 #include "map_render.h"
+#include "map_state_guard.h"
 #include "memory.h"
 #include "object.h"
 #include "palette.h"
@@ -590,6 +591,10 @@ int mapLoadByName(char* fileName)
     int rc;
 
     compat_strupr(fileName);
+
+    // Whether this map is loaded as visited or as new is decided by a file being
+    // there. One erased behind the server's back goes back first.
+    mapStateGuardRestoreMissing();
 
     rc = -1;
 
@@ -1461,6 +1466,11 @@ int _MapDirEraseFile_(const char* a1, const char* a2)
 {
     char path[COMPAT_MAX_PATH];
 
+    // Erased on purpose (a random encounter is not persisted): not one to put back.
+    if (compat_stricmp(a1, "MAPS\\") == 0) {
+        mapStateGuardForget(a2);
+    }
+
     snprintf(path, sizeof(path), "%s\\%s%s",
         settings.system.master_patches_path.c_str(), a1, a2);
     if (compat_remove(path) != 0) {
@@ -1611,6 +1621,15 @@ int _map_save_in_game(bool a1)
         _strmfe(gMapHeader.name, name, "SAV");
         if (_map_save() == -1) {
             return -1;
+        }
+
+        // Keep what was just written (map_state_guard.h). A file that cannot be read
+        // back was erased in the moment since; write it once more.
+        if (!mapStateGuardCapture(gMapHeader.name)) {
+            if (_map_save() == -1 || !mapStateGuardCapture(gMapHeader.name)) {
+                fprintf(stderr, "f2_server: the state of %s was written but cannot be read back\n",
+                    gMapHeader.name);
+            }
         }
 
         strcpy(gMapHeader.name, name);

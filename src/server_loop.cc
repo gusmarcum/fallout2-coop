@@ -106,6 +106,16 @@ bool clientViewerActive()
     return gClientViewerActive;
 }
 
+// The same question, answerable from the first line of main: the flag above only
+// goes up when the viewer loop starts, which is after game init has already run.
+// A process started with F2_CLIENT_CONNECT never becomes anything but a viewer
+// (main.cc), so the environment is the answer.
+bool clientViewerRequested()
+{
+    static const bool requested = getenv("F2_CLIENT_CONNECT") != nullptr;
+    return requested;
+}
+
 // Control-plane claim query, installed by f2_server (server_control.cc). Null on
 // every client/probe/golden path → serverClaimantConnected() reports false.
 static bool (*gClaimantQuery)() = nullptr;

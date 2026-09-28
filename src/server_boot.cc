@@ -15,6 +15,7 @@
 #include "map.h"
 #include "map_defs.h"
 #include "map_render.h"
+#include "map_state_guard.h"
 #include "message.h"
 #include "object.h"
 #include "party_member.h"
@@ -508,6 +509,10 @@ static int serverSpawnExtraActors()
 
 int serverBootSubsystems(int argc, char** argv)
 {
+    // From here on this process owns a world, and the folder it keeps that world's
+    // visited maps in is shared with every game client started there (bugs/032).
+    mapStateGuardEnable();
+
     return serverInitSubsystems(argc, argv) != 0 ? -1 : 0;
 }
 

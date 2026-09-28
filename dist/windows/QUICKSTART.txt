@@ -1,4 +1,4 @@
-Fallout 2 Co-op v1.3.1 (https://github.com/gusmarcum/fallout2-coop)
+Fallout 2 Co-op v1.3.2 (https://github.com/gusmarcum/fallout2-coop)
 
 You need your own Fallout 2 (Steam or GOG, US 1.02d) and Windows 10 or 11,
 64-bit. Everyone must run the same release of this project with identical game
@@ -6,7 +6,8 @@ files.
 
 HOST
 1. Copy your Fallout 2 folder somewhere new, for example D:\Games\Fallout2Coop.
-   That copy is the co-op world.
+   That copy is the co-op world. Use it for co-op only: never start the
+   original game from it.
 2. Extract this zip into that folder, next to master.dat.
 3. Double-click start-server.cmd. The first time, press Enter for a new game.
    After that, Enter continues the newest co-op save.

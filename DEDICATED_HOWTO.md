@@ -440,6 +440,16 @@ does; the console says how many stale files it found. A loaded world restores th
 its slot. If a save ever fails, run with `F2_SERVER_DEBUG_LOG=1` and read the LOADSAVE step
 in `f2_server-debug.log`; the slot is left as it was before the attempt.
 
+`data\MAPS\*.SAV` is the running world's record of every map the party has visited, one
+file per map, and each save carries a copy of all of them. Every Fallout 2 program erases
+those files when it starts. A co-op client started to join a server leaves them alone, and
+the server keeps its own copy and puts back any that go missing, naming them on the console
+(`... were ERASED from data\MAPS by another program ...`). Still, do not start the original
+game, or a client older than v1.3.2, in a folder a server is running from. With
+`F2_TRACE_WORLD=1` the console says for every map load whether it came `from saved .SAV
+(state kept)` or as a `fresh .MAP`. `tools/map_state_proof.py` walks the whole path on a
+sandbox copy (bugs/032).
+
 With any server running that has a `CMD` port:
 ```sh
 printf 'save 8\n' | nc -q1 127.0.0.1 9201

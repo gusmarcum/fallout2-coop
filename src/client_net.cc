@@ -1584,6 +1584,17 @@ private:
 
         gDude = mine;
 
+        // The hit point counter rolls the SHOWN value toward _dudeHpAuth (rollDudeHp),
+        // and that authority belongs to a body, not to the screen: it was last seeded
+        // from whichever actor gDude aimed at. On a join the roster arrives AFTER the
+        // blob, so that actor was the host, and a returning player's counter rolled
+        // from their own hit points to the host's and sat there until their next
+        // wound or heal (bugs/033). The body changed, so the authority is its hit
+        // points; the repaint a few lines down then draws the right number and the
+        // roll has nothing to do.
+        _dudeHpAuth = gDude->data.critter.hp;
+        _dudeHpSeeded = true;
+
         // The inventory screen does NOT read gDude — it operates through its own
         // _inven_dude anchor, set only by _inven_reset_dude(). Every rebaseline
         // runs one of those from _obj_load_dude, and it lands BEFORE this rebind,
