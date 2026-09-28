@@ -12,6 +12,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6)
 [![Licence](https://img.shields.io/badge/licence-Sustainable%20Use-blue)](LICENSE.md)
 ![Enclave Approved](https://img.shields.io/badge/Enclave-approved-004d1a)
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20the%20project-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/gusmarcum)
 
 [Download](#download) · [What this project adds](#what-this-project-adds) · [Quick start](#quick-start) · [Keys](#keys-in-the-client) · [Server settings](#server-settings) · [Admin console](#admin-console) · [Building](#building-on-windows) · [Changelog](CHANGELOG.md)
 
@@ -413,6 +414,16 @@ suites pass on every commit of this repository.
   how the server, the client and the wire fit together.
 - [`bugs/`](bugs): the live-play bug notes, one file per report.
 - [`tools/`](tools): sandbox proof scripts and repair tools.
+
+## Support the project
+
+Fallout 2 Co-op is free and will stay free. Every release and the full source are open to
+everyone, and a donation unlocks nothing. If the project has given you and your friends a
+good session and you would like to support the time that goes into it, you can leave a tip
+on [Ko-fi](https://ko-fi.com/gusmarcum).
+
+Reports from real play sessions help just as much: open an
+[issue](https://github.com/gusmarcum/fallout2-coop/issues) when something breaks.
 
 ## Contributors
 
