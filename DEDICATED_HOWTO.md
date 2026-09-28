@@ -147,6 +147,7 @@ enabled. `=0` disables. Any other value also enables, so `=1` is harmless and ex
 | `F2_MOVIES=0` | nothing any more: the switch is retired, cutscenes always play (§2.6) |
 | `F2_NO_MODAL_PRESENT=1` | keeping the world animating behind an open modal (note: this one is a `=1` switch) |
 | `F2_NO_ATTACK_HEADER=1` | the "X throws the Spear at you." line before combat damage lines |
+| `F2_PARTY_XP=0` | party experience: every award paying every connected player in full, once. Off, an award pays the earner alone, as it did before |
 
 > ►► Anything added later follows the same rule: features ship ON, and the only sanctioned
 > variable is a kill switch. The **headless golden probe** is the one context where features
@@ -329,6 +330,7 @@ printf 'stress 20 0x010000EE 42\n' | nc -q1 127.0.0.1 9201
 | `revive <slot>` | bring a dead player back at 1 HP (`0` = host, `1..` = extras) |
 | `kill <slot>` | kill a player through the ordinary death path (tests the revive / party-wipe rules) |
 | `xp <slot> <amount>` | award experience to ONE seat (`0` = host, `1..` = extras). **Levels up as it goes** — a grant that crosses several thresholds levels several times, each awarding HP, skill points and (on the cadence) an owed perk. Negative amounts allowed (clamped at the floor); the reply reports the level before/after |
+| `partyxp <slot> <amount>` | award experience the way PLAY does, as if that seat had earned it: every connected player is paid in full, once (the earner alone with `F2_PARTY_XP=0`). The reply lists each share. `xp` above is never shared, which makes it the verb for closing a gap between two characters that already exists |
 | `sheet [slot]` | read a seat's sheet: level, XP, unspent skill points, whether a perk pick is owed, tagged skills, traits. All seats if no slot |
 | `rest <minutes> [slot]` | pass time for **everyone** (one clock) and heal every player, at vanilla's rate. Honours the map's own "you cannot rest here" gate; reports the clock and HP either side. The debug `rest` verb answers through `debugPrint`, which the server drops — use this one when you want to *see* the result |
 | `sp <slot> <points>` | **set** a seat's unspent skill points. The one cheat of the group — it hands out the level-up currency so the spend path can be exercised without grinding XP |

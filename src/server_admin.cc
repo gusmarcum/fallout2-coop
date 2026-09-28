@@ -721,6 +721,7 @@ static void writeHelp(const std::function<void(const char* text)>& reply, bool w
     reply("  revive <slot>         revive a dead player at 1 HP (no-op if not dead)");
     reply("  kill <slot>           kill a player (tests the revive and party-wipe rules)");
     reply("  xp <slot> <amount>    award experience to one seat (levels come with it)");
+    reply("  partyxp <slot> <amt>  award it the way play does: everyone playing is paid");
     reply("  sheet [slot]          level/xp/unspent points/owed perk/tags/traits per seat");
     reply("  rest <minutes> [slot] pass time for EVERYONE and heal every player");
     reply("  ending                play the ending slides + credits on every client");
@@ -1342,6 +1343,58 @@ bool serverAdminLine(const char* line,
         reply(msg);
         fprintf(stderr, "f2_server: admin xp slot=%d amount=%d gained=%d level=%d->%d\n",
             slot, amount, gained, levelBefore, levelAfter);
+        return true;
+    }
+    if (strcmp(verb, "partyxp") == 0) {
+        // `partyxp <slot> <amount>`: pay an award the way PLAY pays one, as if
+        // <slot> had earned it (stat.h, party experience). `xp` above addresses one
+        // seat and is never shared; this one asks the same question every award
+        // site asks, so it answers "who would be paid right now" on a live world
+        // without anybody having to find a rat first. One line per recipient on the
+        // console, which is what tools/party_xp_proof.py reads.
+        if (!worldLoaded) {
+            reply("partyxp: no world loaded");
+            return true;
+        }
+        char slotText[32];
+        const char* amountText = splitVerb(rest != nullptr ? rest : "", slotText, sizeof(slotText));
+        if (slotText[0] == '\0' || amountText == nullptr || amountText[0] == '\0') {
+            reply("usage: partyxp <earner slot> <amount>   (paid to everyone who is playing)");
+            return true;
+        }
+
+        int slot = atoi(slotText);
+        Object* earner = slot >= 0 && slot < playerActorCount() ? playerActorAt(slot) : nullptr;
+        if (earner == nullptr) {
+            snprintf(msg, sizeof(msg), "partyxp: no character in slot %d (0..%d)", slot, playerActorCount() - 1);
+            reply(msg);
+            return true;
+        }
+
+        int amount = (int)strtol(amountText, nullptr, 0);
+        if (amount == 0) {
+            reply("partyxp: amount 0, nothing to award");
+            return true;
+        }
+
+        // The same pay-out play uses, so what this proves about who is paid, and
+        // how many times, is true of every award site.
+        PartyXpShare shares[kMaxPlayerActors];
+        int shareCount = pcPartyXpAward(amount, earner, "partyxp", shares);
+        fprintf(stderr, "f2_server: admin partyxp earner=slot %d amount=%d shared=%d recipients=%d\n",
+            slot, amount, pcPartyXpActive() ? 1 : 0, shareCount);
+
+        snprintf(msg, sizeof(msg), "partyxp: %d xp earned by slot %d (%s), paid to %d player%s%s",
+            amount, slot, critterGetName(earner), shareCount, shareCount == 1 ? "" : "s",
+            pcPartyXpActive() ? "" : " (sharing is off: the earner alone)");
+        reply(msg);
+        for (int index = 0; index < shareCount; index++) {
+            snprintf(msg, sizeof(msg), "partyxp:   slot %d (%s) +%d, now %d xp, level %d",
+                playerActorSlotOf(shares[index].actor), critterGetName(shares[index].actor),
+                shares[index].gained, pcGetStat(PC_STAT_EXPERIENCE, shares[index].actor),
+                pcGetStat(PC_STAT_LEVEL, shares[index].actor));
+            reply(msg);
+        }
         return true;
     }
 

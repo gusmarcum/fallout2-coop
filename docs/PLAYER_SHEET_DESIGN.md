@@ -463,3 +463,70 @@ sheet row (`client_net.cc onPlayerSheet` → `indicatorBarRefresh`).
 Still host-only, and correctly so: the interface REPAINTS in `pcAddExperienceWithOptions` (they act
 on this process's single interface bar) and the `levelup` chime, which has no addressed sfx seam
 yet — see the coverage doc's "addressing mechanism for personal sfx/fades".
+
+--------------------------------------------------------------------------------
+## 10. PARTY EXPERIENCE (owner ruling 2026-09-27)
+
+Owner: *"give xp to everyone currently playing instead of the person who finished the
+quest etc. it needs to behave as though the party is one entity and awards the xp for every
+person"*, and the follow-up: *"it does not duplicate xp for the main person either rather
+it only awards the people who have not been awarded"*.
+
+Sections 4 and 8 made experience per actor: the killer's bucket, the skill user's row, the
+thief's row. That was correct and it is still what the code falls back to, but in play it
+meant the player who talked to the quest giver levelled and the player standing next to
+them did not. On the live save this was measured on, the host stood at level 20 and the
+second player at level 14 (a copy of a real two-player save).
+
+### 10.1 The rule
+- **Every award from play is paid in full to every player who is playing.** Nothing is
+  split. Each share goes through `pcAddExperienceWithOptions` for its own actor, so Swift
+  Learner, the level-up award (hit points, skill points, the owed perk), the "you have
+  gone up a level" line and the streamed sheet row all stay per player.
+- **Playing means a connected session AND a body in the world.** The session alone would
+  pay someone who joined in the middle of a fight they were never in. The body alone would
+  pay the host's character while the host is away, because slot 0 never leaves the world.
+- **A downed player is paid.** A teammate revives them, and leaving them out is exactly
+  how two characters drift apart. They keep the higher maximum from a level-up but a
+  corpse is not healed; `critterRevive` sets the hit points.
+- **A dead party banks nothing.** Vanilla's "a dead earner banks nothing" applied to the
+  party as one: a kill pay-out is skipped only when everyone who would be paid is dead.
+- **If nobody is connected the earner keeps the award**, so experience is never dropped.
+
+### 10.2 Paid once
+`pcPartyXpAward` (stat.cc) is THE pay-out. Every sharing site calls it and nothing else. It
+pays once per recipient, the earner included: the earner's own award is not made first and
+then topped up for the others, it is one of the shares. The sites only word the lines.
+
+| Site | Earner named by | Line |
+|---|---|---|
+| kills, end of fight [combat.cc `_combat_over`] | nobody: every bucket is one purse | vanilla line, one copy addressed to each |
+| kills out of combat [actions.cc `_report_explosion`] | `sourceObj` | same |
+| `give_exp_points` [interpreter_extra.cc] | `scriptContextDude` | the script's own `display_msg`, already a broadcast |
+| skill use [skill.cc] | `obj` | vanilla for the user, "from NAME honing a skill" for the rest |
+| stealing [item.cc] | `looter` (the cap is the thief's own Steal) | vanilla for the thief, "from NAME's successful theft" for the rest |
+| encounter spotted [worldmap.cc] | best Outdoorsman | vanilla line, one copy addressed to each |
+
+The section 4 ruling stands: the call site still names the earner. What changed is who is
+paid.
+
+### 10.3 Not shared, on purpose
+Here and Now (it is that character's perk), the operator's `xp <slot> <amount>` (it
+addresses one seat, and it is how an operator closes a gap that already exists), the
+probe's `xp`. Karma, reputation and kill counts are not experience and are untouched.
+Companions still level with the host only (section 8).
+
+### 10.4 Switch, operator tools, proof
+- `F2_PARTY_XP=0` on the server restores per-actor awards, including the map-enter
+  audience. Sharing needs a dedicated server with more than one player actor, so
+  single-player, a viewer and the headless probe never take the shared path and every
+  golden is byte for byte what it was.
+- Every award prints one console line with every share on it:
+  `[xp] kills 130 by the party -> Host +130 (xp 228877, level 21), Friend +130 (...)`.
+- `partyxp <slot> <amount>` pays an award the way play does, as if that seat earned it.
+- `python tools/party_xp_proof.py <f2_server.exe> <game dir> <slot> <net port> <cmd port>`
+  on a save with two player actors. It asserts exact amounts on both sheets and that each
+  pay-out names each player one time, across: an award by either player, a level-up, a
+  skill use, a downed teammate, an explosion kill, a whole fight, a real quest script
+  (`give_xp` in a death proc), a player who left and came back, a party wipe, and the
+  switch.

@@ -25,6 +25,7 @@
 #include "random.h"
 #include "scripts.h"
 #include "player_sheet.h" // playerSheetMarkDirty — stream runtime sheet changes
+#include "server_loop.h" // serverSessionForSlot / serverFeatureEnabled: who shares an award
 #include "server_players.h" // playerActorSlotOf — per-actor PC-stat rows
 #include "skill.h"
 #include "svga.h"
@@ -970,6 +971,97 @@ int pcAddExperience(int xp, int* xpGained, Object* subject)
     return pcAddExperienceWithOptions(xp, true, xpGained, subject);
 }
 
+bool pcPartyXpActive()
+{
+    // A launch-time switch, read once like the other feature gates: on for a
+    // dedicated server, off under the headless probe, F2_PARTY_XP=0 turns it off.
+    static bool enabled = serverFeatureEnabled("F2_PARTY_XP");
+
+    // The live half is not cached. Extra actors are registered while the server
+    // runs (spawn at login), so a world that starts solo begins sharing the
+    // moment a second character exists.
+    return enabled && serverDedicatedActive() && playerActorCount() > 1;
+}
+
+int pcPartyXpRecipients(Object* earner, Object** recipients)
+{
+    if (!pcPartyXpActive()) {
+        recipients[0] = earner;
+        return 1;
+    }
+
+    // "Playing right now" is a connected session AND a body in the world, both.
+    // The session alone would pay someone who joined in the middle of a fight
+    // they were never in (the presence drain holds their body back until it
+    // ends). The body alone would pay the host's character while the host is
+    // away, because slot 0 never leaves the world.
+    int count = 0;
+    for (int slot = 0; slot < playerActorCount(); slot++) {
+        Object* actor = playerActorAt(slot);
+        if (actor == nullptr || !playerActorOnline(slot) || serverSessionForSlot(slot) == 0) {
+            continue;
+        }
+        recipients[count++] = actor;
+    }
+
+    if (count == 0) {
+        recipients[count++] = earner != nullptr ? earner : gDude;
+    }
+
+    return count;
+}
+
+int pcPartyXpAward(int xp, Object* earner, const char* what, PartyXpShare* shares)
+{
+    Object* recipients[kMaxPlayerActors];
+    int count = pcPartyXpRecipients(earner, recipients);
+
+    int paid = 0;
+    for (int index = 0; index < count; index++) {
+        // Once each. The list is built from the slots, so it cannot name anyone
+        // twice as it stands; this is what keeps that true if it ever grows a
+        // second source of names.
+        bool already = false;
+        for (int before = 0; before < paid; before++) {
+            if (shares[before].actor == recipients[index]) {
+                already = true;
+                break;
+            }
+        }
+        if (already) {
+            continue;
+        }
+
+        int gained = 0;
+        if (pcAddExperience(xp, &gained, recipients[index]) != 0) {
+            continue;
+        }
+
+        shares[paid].actor = recipients[index];
+        shares[paid].gained = gained;
+        paid++;
+    }
+
+    // One line per award on the server console: what it was, who earned it and
+    // what every player was paid. It is how an operator sees at a glance that an
+    // award reached everyone and reached nobody twice.
+    if (serverDedicatedActive()) {
+        char line[512];
+        // No earner in hand is the end-of-fight purse: every killer's bucket in one.
+        int used = snprintf(line, sizeof(line), "[xp] %s %d by %s ->", what != nullptr ? what : "award", xp,
+            earner != nullptr ? critterGetName(earner) : "the party");
+        for (int index = 0; index < paid && used > 0 && used < (int)sizeof(line); index++) {
+            Object* actor = shares[index].actor != nullptr ? shares[index].actor : gDude;
+            used += snprintf(line + used, sizeof(line) - used, "%s %s +%d (xp %d, level %d)",
+                index > 0 ? "," : "", critterGetName(actor), shares[index].gained,
+                pcGetStat(PC_STAT_EXPERIENCE, actor), pcGetStat(PC_STAT_LEVEL, actor));
+        }
+        fprintf(stderr, "%s%s\n", line, pcPartyXpActive() ? "" : " (not shared)");
+    }
+
+    return paid;
+}
+
 // 0x4AFAB8
 int pcAddExperienceWithOptions(int xp, bool a2, int* xpGained, Object* subject)
 {
@@ -1069,8 +1161,15 @@ int pcAddExperienceWithOptions(int xp, bool a2, int* xpGained, Object* subject)
             int bonusHp = critterGetBonusStat(earner, STAT_MAXIMUM_HIT_POINTS);
             critterSetBonusStat(earner, STAT_MAXIMUM_HIT_POINTS, bonusHp + hpPerLevel);
 
+            // A downed player levels with the party (pcPartyXpRecipients) and keeps
+            // the higher maximum, but a corpse is not healed: hit points on a body
+            // that still carries DAM_DEAD read as alive to anything that tests the
+            // number alone. critterRevive sets the hit points when a teammate gets
+            // them up.
             int maxHpAfter = critterGetStat(earner, STAT_MAXIMUM_HIT_POINTS);
-            critterAdjustHitPoints(earner, maxHpAfter - maxHpBefore);
+            if (!critterIsDead(earner)) {
+                critterAdjustHitPoints(earner, maxHpAfter - maxHpBefore);
+            }
 
             if (isHost) {
                 presenter()->hudHitPoints(false);

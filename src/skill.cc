@@ -648,19 +648,31 @@ static void _show_skill_use_messages(Object* obj, int skill, Object* target, int
 
     int xpToAdd = successCount * baseExperience;
 
-    int before = pcGetStat(PC_STAT_EXPERIENCE, obj);
+    // Everyone this award pays, once each (stat.h, party experience). Not shared,
+    // that is `obj` alone and this is the single award it always was.
+    PartyXpShare shares[kMaxPlayerActors];
+    int shareCount = pcPartyXpAward(xpToAdd, obj, "skill", shares);
 
-    // The award is the actor's and so is the line — addressed, so an extra player
-    // honing a skill hears about it on their own screen instead of paying the host's.
-    if (pcAddExperience(xpToAdd, nullptr, obj) == 0 && successCount > 0 && playerActorIs(obj)) {
-        MessageListItem messageListItem;
-        messageListItem.num = 505; // You earn %d XP for honing your skills
-        if (messageListGetItem(&gSkillsMessageList, &messageListItem)) {
-            int after = pcGetStat(PC_STAT_EXPERIENCE, obj);
+    for (int index = 0; index < shareCount; index++) {
+        Object* recipient = shares[index].actor;
 
-            char text[60];
-            snprintf(text, sizeof(text), messageListItem.text, after - before);
-            presenter()->consoleMessageStyled(obj->netId, kMsgChannelReward, text);
+        // The award is the actor's and so is the line — addressed, so an extra player
+        // honing a skill hears about it on their own screen instead of paying the host's.
+        if (recipient == obj) {
+            MessageListItem messageListItem;
+            messageListItem.num = 505; // You earn %d XP for honing your skills
+            if (messageListGetItem(&gSkillsMessageList, &messageListItem)) {
+                char text[60];
+                snprintf(text, sizeof(text), messageListItem.text, shares[index].gained);
+                presenter()->consoleMessageStyled(obj->netId, kMsgChannelReward, text);
+            }
+        } else {
+            // A teammate's share. The vanilla line would tell them they honed a
+            // skill they never touched, so theirs names who did.
+            char text[128];
+            snprintf(text, sizeof(text), "You earn %d XP from %s honing a skill.",
+                shares[index].gained, critterGetName(obj));
+            presenter()->consoleMessageStyled(recipient->netId, kMsgChannelReward, text);
         }
     }
 }

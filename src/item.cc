@@ -26,6 +26,7 @@
 #include "map.h"
 #include "memory.h"
 #include "message.h"
+#include "msg_channel.h" // kMsgChannelReward: a teammate's share of steal XP
 #include "object.h"
 #include "party_member.h"
 #include "perk.h"
@@ -3829,8 +3830,38 @@ bool lootStealExperience(Object* looter, Object* target, int stealingXp, int* xp
 
     // `looter` was already a parameter and was already ignored — the same
     // one-line class as the skill-use site (PLAYER_SHEET_DESIGN.md §4).
-    pcAddExperience(stealingXp, xpGainedPtr, looter);
-    return true;
+    //
+    // The cap above is the thief's own Steal skill, and the amount it leaves is
+    // what everyone is paid, once each (stat.h, party experience). Not shared,
+    // the only recipient is the looter and this is the single award it always was.
+    PartyXpShare shares[kMaxPlayerActors];
+    int shareCount = pcPartyXpAward(stealingXp, looter, "steal", shares);
+
+    bool looterPaid = false;
+    for (int index = 0; index < shareCount; index++) {
+        Object* recipient = shares[index].actor;
+        if (recipient == looter) {
+            // The caller words the thief's own line from xpGainedPtr.
+            if (xpGainedPtr != nullptr) {
+                *xpGainedPtr = shares[index].gained;
+            }
+            looterPaid = true;
+            continue;
+        }
+
+        char text[128];
+        snprintf(text, sizeof(text), "You gain %d experience points from %s's successful theft.",
+            shares[index].gained, critterGetName(looter));
+        presenter()->consoleMessageStyled(recipient->netId, kMsgChannelReward, text);
+    }
+
+    // The thief left before the pay-out: the party was paid, and there is no line
+    // to word for someone who is not there to read it.
+    if (!looterPaid && xpGainedPtr != nullptr) {
+        *xpGainedPtr = 0;
+    }
+
+    return looterPaid;
 }
 
 // Ledger H-10 (extracted from the inventory UI's barter screen): barter
