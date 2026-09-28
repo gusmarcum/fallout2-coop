@@ -1629,6 +1629,9 @@ static int mainClientViewer(const char* connectSpec)
     bool oocBusy = false;
     bool handSwitchPending = false;
     unsigned int handSwitchSince = 0;
+    // Whether the last frame was in combat: the chat box is closed when a fight
+    // STARTS, not for as long as it lasts (see the chat block in the loop).
+    bool sayWasInCombat = false;
 
     while (viewerKeepRunning()) {
         sharedFpsLimiter.mark();
@@ -1723,17 +1726,27 @@ static int mainClientViewer(const char* connectSpec)
         // modal of its own (viewer-modal design of record: a new screen copies
         // DIALOG's flag+dispatch shape, never barter's blocking loop). Order matters:
         //
-        // 1. COMBAT FORCE-CLOSES IT, before any key is read. Combat entry clears the
-        //    screen of UI, and an open box would otherwise keep eating the keys that
-        //    drive the fight — including the RETURN that ends combat. The draft is
-        //    discarded: it was written for a peacetime room.
+        // 1. THE START OF A FIGHT FORCE-CLOSES IT, before any key is read. Combat entry
+        //    clears the screen of UI, and a box left open from peacetime would otherwise
+        //    keep eating the keys that drive the fight, the RETURN that ends combat
+        //    included. The draft is discarded: it was written for a peacetime room.
+        //    On the edge, not for as long as the fight lasts: this test used to run on
+        //    every frame of a fight, so the box that 'T' opens in combat (rule 3) was
+        //    closed again by the very next frame and nobody could talk mid-fight
+        //    (bugs/034). A box opened DURING the fight is the player's own doing and
+        //    stays until they send or cancel it.
         // 2. While it IS open it gets first refusal on every key, so typing cannot
         //    leak into the gameplay dispatch below ("a" toggling combat mid-sentence).
         // 3. RETURN opens it, but only OUT of combat and only when no dialog owns the
         //    screen — in combat RETURN already means "attempt to end combat", and that
         //    binding is load-bearing (it is also what the interface-bar button posts).
-        if (conn.inCombat() && clientSayActive()) {
-            clientSayCancel();
+        //    'T' opens it anywhere.
+        {
+            bool inCombatNow = conn.inCombat();
+            if (inCombatNow && !sayWasInCombat && clientSayActive()) {
+                clientSayCancel();
+            }
+            sayWasInCombat = inCombatNow;
         }
         // Death prompt: the server refuses every action from a dead actor, but the
         // viewer never said so or offered a way out. Latch on the transition only.
