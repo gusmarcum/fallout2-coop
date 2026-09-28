@@ -354,7 +354,7 @@ command per line. It answers once a client is connected; `help` lists everything
 | `gvar <index> [value]` | read or set a global script variable (quest flags) |
 | `party` | list the party as the server sees it |
 | `partyadd <pid>` | re-attach a companion standing on the current map (89 = John Cassidy) |
-| `spawn <pid> [count] [tile] [script]` | spawn an NPC; `tile` -1 = beside the host; `script` is its scripts.lst number, needed for it to talk (Vic: `spawn 0x0100003E 1 -1 50`) |
+| `spawn <pid> [count] [tile] [script]` | spawn an NPC; `tile` `near` = right beside the host, -1 = a random reachable spot within 30 hexes of a player; `script` is its scripts.lst number, needed for it to talk (Vic: `spawn 0x0100003E 1 near 50`) |
 | `despawnall` | remove every NPC spawned by this server run |
 | `stat <slot> [stat] [value]` | read or set a seat's base SPECIAL (st pe en ch in ag lk); no stat = all seven, base and current |
 | `ending` | play the ending slides and credits on every connected client |

@@ -324,7 +324,7 @@ printf 'stress 20 0x010000EE 42\n' | nc -q1 127.0.0.1 9201
 | `say <chan> <text>` / `saydemo` | push a styled line to every viewer's log / style eyeball test |
 | `movie <0-16>` | project a movie to every viewer (`4` = vault-suit intro) |
 | `timeskip <minutes>` | advance the game clock like a script does |
-| `spawn <pid> [n] [tile]` | place n critters of pid |
+| `spawn <pid> [n] [tile] [script]` | place n critters of pid. `tile` absent or `-1` = a random reachable spot within 30 hexes of a player, `near` = right beside the host (the first free hex around them), a number = that tile as given. `script` = scripts.lst line to attach |
 | `stress <n> [pid] [seed]` | spawn n hostiles near the players and aggro them (default pid `0x010000EE` = Raider; the seed is printed — reuse it to replay) |
 | `despawnall` | destroy everything `spawn`/`stress` created |
 | `revive <slot>` | bring a dead player back at 1 HP (`0` = host, `1..` = extras) |

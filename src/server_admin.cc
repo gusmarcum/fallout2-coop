@@ -715,7 +715,7 @@ static void writeHelp(const std::function<void(const char* text)>& reply, bool w
     reply("  movie <0-16>          project a movie to every viewer (4 = VSUIT)");
     reply("  movdone               release a parked movie barrier from the console");
     reply("  timeskip <minutes>    advance the game clock like a script does");
-    reply("  spawn <pid> [n] [tile]  place n critters of pid (default 1, random tile)");
+    reply("  spawn <pid> [n] [tile]  place n critters of pid (default 1, random tile; `near` = beside the host)");
     reply("  stress <n> [pid] [seed] spawn n hostiles near the players and aggro them");
     reply("  despawnall            destroy everything spawn/stress created");
     reply("  revive <slot>         revive a dead player at 1 HP (no-op if not dead)");
@@ -1887,6 +1887,12 @@ bool serverAdminLine(const char* line,
         // = random near the players. pid takes 0x-hex or decimal (strtol base 0).
         // script = scripts.lst line number (1-based) to attach, for NPCs whose proto
         // carries none (see spawnAttachScript); 0/absent = the proto's own, if any.
+        //
+        // tile `near`: right beside the host, the first free hex in a growing ring
+        // around them (the placement a joining player gets). The random placement
+        // is anywhere reachable within 30 hexes, which is right for a crowd and
+        // wrong for "put one here so I can look at it": on a busy map the critter
+        // lands out of sight behind a building.
         if (!worldLoaded) {
             reply("spawn: no world loaded");
             return true;
@@ -1903,7 +1909,9 @@ bool serverAdminLine(const char* line,
 
         int pid = static_cast<int>(strtol(pidText, nullptr, 0));
         int count = nText[0] != '\0' ? atoi(nText) : 1;
-        int wantTile = tileText[0] != '\0' ? atoi(tileText) : -1;
+        // Tested before atoi: a word reads as 0 there, and 0 is a real tile.
+        bool besideHost = strcmp(tileText, "near") == 0;
+        int wantTile = tileText[0] != '\0' && !besideHost ? atoi(tileText) : -1;
         int scriptNumber = scriptText[0] != '\0' ? atoi(scriptText) : 0;
         if (scriptNumber < 0) {
             reply("spawn: script must be a scripts.lst line number (1-based)");
@@ -1924,14 +1932,23 @@ bool serverAdminLine(const char* line,
         int placed = 0;
         int lastTile = -1;
         int unreachable = 0; // only counted on the random path; an explicit tile is honored
+        Object* host = playerActorAt(0);
         for (int i = 0; i < count; i++) {
-            int tile = wantTile != -1 && hexGridTileIsValid(wantTile)
-                ? wantTile
-                : stressRandomFreeTile(gElevation, rng, unreachable);
+            int tile;
+            int elevation = gElevation;
+            if (besideHost) {
+                // Each one placed blocks its hex, so the next lands on the next free one.
+                tile = host != nullptr ? playerActorFindFreeTileNear(host->tile, host->elevation) : -1;
+                elevation = host != nullptr ? host->elevation : gElevation;
+            } else {
+                tile = wantTile != -1 && hexGridTileIsValid(wantTile)
+                    ? wantTile
+                    : stressRandomFreeTile(gElevation, rng, unreachable);
+            }
             if (tile == -1) {
                 break;
             }
-            Object* spawned = stressSpawnOne(pid, tile, gElevation);
+            Object* spawned = stressSpawnOne(pid, tile, elevation);
             if (spawned == nullptr) {
                 continue;
             }
