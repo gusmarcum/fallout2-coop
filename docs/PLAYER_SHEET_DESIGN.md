@@ -344,6 +344,7 @@ What shipped, and where it lives:
   header holds the four reasons the layer exists; read that before changing a leaf.
 - Wire verbs `sheetopen`/`sheetclose`/`skillup`/`skilldown`/`perkpick`/`tagpick`/`mutpick`
   (`server_control.cc`), exempt from the dead-actor and busy gates via one shared predicate.
+  `sheetcancel` joined them on 2026-09-30 (§9.5, bugs/044).
 - Admin verbs `sheet`/`sp`/`skillup`/`skilldown`/`perkpick` (`server_admin.cc`) — the same
   rulings, addressed by slot, so the path is testable without two machines.
 - The client editor emits intents instead of mutating (`character_editor.cc`), and repaints
@@ -440,8 +441,16 @@ spends emit verbs; `characterEditorSheetIsServerOwned()` (= `clientViewerActive(
 predicate every converted leaf branches on. Three notes worth keeping:
 - ►► **The rollback had to GO, not just be bypassed.** It restored the snapshot taken when the
   screen OPENED, so leaving it in place would have wiped the rows the server streamed in while
-  the screen was up. "Done" and "Cancel" now both just close; every spend was already committed
-  one at a time on the authority that owns it.
+  the screen was up. Every spend is committed one at a time on the authority that owns it.
+- ►► **Cancel is a request to the server (2026-09-30, GitHub issue 12, bugs/044).** "Done" and
+  "Cancel" used to both just close, so Cancel kept everything. The server's edit session now
+  logs the visit's spends, and `sheetcancel` (sent before `sheetclose` when the PLAYER leaves
+  with Cancel, Esc or C, vanilla's rc 1) walks them back newest first, each by its exact inverse:
+  points sold back or bought again, perks off with the pick handed back, Tag!/Mutate! answers
+  undone, Educated's and Lifegiver's additions taken back as measured at the pick. Nothing that
+  happened to the row outside the screen is touched, which a snapshot could not promise. Here
+  and Now stays (a level cannot be handed back) and the player is told. A screen the game closed
+  itself (the service ticker's forced close) or a quit sends no cancel.
 - **No optimistic display and no hold-to-repeat.** A press sends one intent; the number moves
   when the row comes back (`clientViewerConsumeSheetDirty` in the editor's main loop). Auto-repeat
   would fire a verb per frame into a per-beat line cap and the extra presses would vanish

@@ -5774,10 +5774,53 @@ static void showPendingYesNoPrompt()
     }
 }
 
+// The screens a player may keep open through a fight: they cost nothing in vanilla
+// (character sheet, preferences, skilldex) and hold nothing the fight can change under
+// them. A fight that STARTS while one is open still closes it; one opened DURING the
+// fight stays until the player closes it (bugs/035).
+static const int kViewerFreeInCombatMask = GameMode::kEditor | GameMode::kPreferences
+    | GameMode::kSkilldex;
+
+// Whether the ticker's last call saw the viewer in combat, and whether the fight began
+// while the screen that is open now was already up. Both are updated at the top of
+// every tick, screen or no screen, so the edge is seen from the main loop as well.
+static bool gTickerSawCombat = false;
+static bool gCombatStartedUnderScreen = false;
+
+// Set whenever the ticker closes a screen the player did not close. The character
+// sheet reads it: its ESC is vanilla's Cancel, which now walks the visit's spends back
+// (GitHub issue 12), and a fight or a map change closing the screen under the player
+// must not throw away what they spent.
+static bool gViewerScreenForcedClose = false;
+
+static void viewerForceCloseScreen(const char* site)
+{
+    wmencTagEscInjection(site);
+    gViewerScreenForcedClose = true;
+    enqueueInputEvent(KEY_ESCAPE);
+}
+
+bool clientViewerTakeForcedScreenClose()
+{
+    bool forced = gViewerScreenForcedClose;
+    gViewerScreenForcedClose = false;
+    return forced;
+}
+
 static void viewerServiceTicker()
 {
     if (gViewerConn == nullptr) {
         return;
+    }
+    {
+        bool screenUp = (GameMode::getCurrentGameMode() & kViewerModalMask) != 0;
+        bool fightNow = gViewerConn->inCombat();
+        if (!screenUp || !fightNow) {
+            gCombatStartedUnderScreen = false;
+        } else if (!gTickerSawCombat) {
+            gCombatStartedUnderScreen = true;
+        }
+        gTickerSawCombat = fightNow;
     }
     // ►►►► THE ENCOUNTER PROMPT OPENS HERE, ABOVE THE MODAL GATE, AND NOWHERE ELSE.
     // Above the gate because the prompt can land whether or not a modal is up (during
@@ -5797,8 +5840,7 @@ static void viewerServiceTicker()
         return; // not in a modal — the main loop pumps the wire itself
     }
     if (!gViewerConn->pump()) {
-        wmencTagEscInjection("ticker: pump() failed / server gone");
-        enqueueInputEvent(KEY_ESCAPE); // server gone — close the modal, main loop handles it
+        viewerForceCloseScreen("ticker: pump() failed / server gone"); // main loop handles it
         return;
     }
     if (gViewerConn->blobDeferred()) {
@@ -5823,16 +5865,15 @@ static void viewerServiceTicker()
             gWorldmapStreaming = false; // the loop's own exit test; no keystroke involved
             return;
         }
-        wmencTagEscInjection("ticker: blobDeferred (non-worldmap modal)");
-        enqueueInputEvent(KEY_ESCAPE); // mapLoad must not free gDude under an open modal
+        // mapLoad must not free gDude under an open modal
+        viewerForceCloseScreen("ticker: blobDeferred (non-worldmap modal)");
         return;
     }
     if (gViewerConn->wipePending() && (GameMode::getCurrentGameMode() & GameMode::kWorldmap) == 0) {
         // Everyone is dead: the death screen plays from the main loop, so a local
         // modal (a dead player browsing their pack) must come down first. The
         // worldmap is excluded for the reason the branch below gives.
-        wmencTagEscInjection("ticker: party wipe pending");
-        enqueueInputEvent(KEY_ESCAPE);
+        viewerForceCloseScreen("ticker: party wipe pending");
         return;
     }
     if (gPendingWorldmapEnter && (GameMode::getCurrentGameMode() & GameMode::kWorldmap) == 0) {
@@ -5843,8 +5884,7 @@ static void viewerServiceTicker()
         // syncing only once P2 closed it). gPendingWorldmapEnter is consumed only in the
         // main loop, so it stays set while this modal blocks — same treatment as combat
         // entry below. Excludes the worldmap's own modal, which must not ESC itself.
-        wmencTagEscInjection("ticker: gPendingWorldmapEnter");
-        enqueueInputEvent(KEY_ESCAPE);
+        viewerForceCloseScreen("ticker: gPendingWorldmapEnter");
         return;
     }
     if (gViewerConn->inCombat()) {
@@ -5879,9 +5919,17 @@ static void viewerServiceTicker()
         if (mode == GameMode::kWorldmap) {
             sanctioned = true;
         }
+        // ►►►► AND NOT A FREE SCREEN THE PLAYER OPENED DURING THE FIGHT (bugs/035). This
+        // branch runs on every frame of a fight, so a character sheet or Options opened
+        // mid-fight (vanilla allows both, they cost nothing) was closed again by the next
+        // frame: GitHub issues 3 and 11, "shows for a couple of frames then disappears".
+        // Same defect class as the chat box in bugs/034. The start of a fight still
+        // closes one that was already up (gCombatStartedUnderScreen), as before.
+        if (mode != 0 && (mode & ~kViewerFreeInCombatMask) == 0 && !gCombatStartedUnderScreen) {
+            sanctioned = true;
+        }
         if (!sanctioned) {
-            wmencTagEscInjection("ticker: inCombat() force-close");
-            enqueueInputEvent(KEY_ESCAPE);
+            viewerForceCloseScreen("ticker: inCombat() force-close");
             return; // closing anyway — don't animate a world we are about to leave
         }
     }
@@ -6260,6 +6308,11 @@ void clientViewerSheetOpen()
 void clientViewerSheetClose()
 {
     clientViewerSheetSend("sheetclose");
+}
+
+void clientViewerSheetCancel()
+{
+    clientViewerSheetSend("sheetcancel");
 }
 
 void clientViewerSkillUp(int skill)

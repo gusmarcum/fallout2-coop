@@ -1818,7 +1818,11 @@ static int mainClientViewer(const char* connectSpec)
             // such as autorun, sound, brightness, text speed, and mouse sensitivity.
             // kPreferences is in kViewerModalMask, so the wire continues pumping
             // inside this blocking vanilla dialog and combat/map changes can close it.
+            clientViewerTakeForcedScreenClose(); // clear a stale mark from another screen
+            unsigned int optionsOpenedAt = getTicks();
             doPreferences(false);
+            debugPrint("options: closed after %u ms by %s\n", getTicksSince(optionsOpenedAt),
+                clientViewerTakeForcedScreenClose() ? "the game" : "the player");
         } else if (keyCode == KEY_F6 || keyCode == KEY_F7) {
             // Vanilla's quicksave / quickload keys (game_ui.cc), as wire verbs: the
             // server owns the world, so it writes the quick slot and reloads it for
@@ -2110,7 +2114,11 @@ static int mainClientViewer(const char* connectSpec)
             // free — vanilla prices the inventory screen, not this one — and the
             // skill it arms is answered honestly on use: msg 902 for the seven
             // combat-forbidden skills, a real toggle for Sneak.
+            clientViewerTakeForcedScreenClose(); // clear a stale mark from another screen
+            unsigned int skilldexOpenedAt = getTicks();
             int rc = skilldexOpen();
+            debugPrint("skilldex: closed after %u ms by %s\n", getTicksSince(skilldexOpenedAt),
+                clientViewerTakeForcedScreenClose() ? "the game" : "the player");
             int mode = viewerSkillModeForSkilldexRc(rc);
             // The ticker may have applied dude-inv deltas while the modal blocked — reap
             // deferred frees + let the main loop drain a deferred blob (uniform with 'I').

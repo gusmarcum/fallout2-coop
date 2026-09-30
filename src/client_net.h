@@ -261,6 +261,12 @@ void clientViewerElevatorCancel();
 // channel, so clientViewerConsumeSheetDirty tells an open screen to repaint.
 void clientViewerSheetOpen();
 void clientViewerSheetClose();
+// The screen's Cancel: the server walks back what this visit spent (issue 12). Sent
+// before the close, and only when the PLAYER cancelled (see the next function).
+void clientViewerSheetCancel();
+// True once after the service ticker closed a screen the player did not close (a
+// fight starting under it, a map change, a lost server). Taking it clears it.
+bool clientViewerTakeForcedScreenClose();
 void clientViewerSkillUp(int skill);
 void clientViewerSkillDown(int skill);
 void clientViewerPerkPick(int perk);

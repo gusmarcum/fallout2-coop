@@ -70,6 +70,16 @@ enum SheetEditResult {
 void sheetEditSessionOpen(Object* actor);
 void sheetEditSessionClose(Object* actor);
 
+// CANCEL: walk back every spend this screen session made, newest first, the way
+// vanilla's Cancel restores the sheet it opened with (GitHub issue 12). Skill points
+// come back, perks come off and their owed picks are handed back, with Tag!,
+// Mutate!, Lifegiver and Educated's own extras undone too. The one exception is Here
+// and Now: its level cannot be handed back, so it stays, and `keptHereAndNow` says
+// so. Everything that happened to the character OUTSIDE the screen (a level earned
+// meanwhile, a heal, a drug wearing off) is left alone, which a snapshot restore
+// would not do: the world does not pause while a co-op sheet is open.
+int sheetEditCancel(Object* actor, bool* keptHereAndNow);
+
 // Open one only if none is open, PRESERVING an existing baseline. For drivers that
 // have no character screen to bracket the edits (the admin console): calling the
 // plain open before each verb would re-snapshot the baseline every time, which

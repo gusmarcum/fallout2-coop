@@ -2095,6 +2095,7 @@ static bool serverControlIsSheetVerb(const char* verb)
 {
     return strcmp(verb, "sheetopen") == 0
         || strcmp(verb, "sheetclose") == 0
+        || strcmp(verb, "sheetcancel") == 0
         || strcmp(verb, "skillup") == 0
         || strcmp(verb, "skilldown") == 0
         || strcmp(verb, "perkpick") == 0
@@ -3495,6 +3496,25 @@ void serverControlLine(int sessionId, const char* line)
         }
         fprintf(stderr, "f2_server: control %s slot=%d\n",
             verb, serverControlSlotForSession(sessionId));
+        return;
+    }
+
+    // -- sheetcancel: the character screen's Cancel (GitHub issue 12) -----------
+    // Sent before `sheetclose` when the player leaves with Cancel, Esc or C, which
+    // in vanilla restore the sheet the screen opened with. The spends went out one
+    // point at a time as they were clicked, so Cancel is the server walking them
+    // back (sheetEditCancel). A screen the game closed itself sends no cancel.
+    if (strcmp(verb, "sheetcancel") == 0) {
+        bool keptHereAndNow = false;
+        int rc = sheetEditCancel(actor, &keptHereAndNow);
+        if (rc != kSheetEditOk) {
+            serverControlRefuse(sessionId, "%s", sheetEditReason(rc));
+        } else if (keptHereAndNow) {
+            serverControlRefuse(sessionId, "Here and Now cannot be taken back; everything else was.");
+        }
+        fprintf(stderr, "f2_server: control sheetcancel slot=%d rc=%d keptHereAndNow=%d sp=%d\n",
+            serverControlSlotForSession(sessionId), rc, keptHereAndNow ? 1 : 0,
+            pcGetStat(PC_STAT_UNSPENT_SKILL_POINTS, actor));
         return;
     }
 
