@@ -587,14 +587,17 @@ void commandDispatch(const Command& command)
     } else if (strcmp(command.name, "pickup") == 0) {
         // Pick up the nearest ground item on the dude's elevation
         // (excludes containers — those open the loot modal). Drives
-        // the actionPickUp serverLoopActive() decouple.
+        // the actionPickUp serverLoopActive() decouple. pickup:PID takes the
+        // nearest item of that pid instead (0 = any, as the goldens use it), so a
+        // proof can aim at the one item it placed (tools/issue_wire_proof.py reach).
         Object* best = nullptr;
         int bestDistance = INT_MAX;
         Object* candidate = objectFindFirst();
         while (candidate != nullptr) {
             if (PID_TYPE(candidate->pid) == OBJ_TYPE_ITEM
                 && candidate->elevation == gDude->elevation
-                && itemGetType(candidate) != ITEM_TYPE_CONTAINER) {
+                && itemGetType(candidate) != ITEM_TYPE_CONTAINER
+                && (command.arg <= 0 || candidate->pid == command.arg)) {
                 int distance = objectGetDistanceBetween(gDude, candidate);
                 if (distance < bestDistance) {
                     bestDistance = distance;

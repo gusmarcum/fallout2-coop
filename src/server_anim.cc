@@ -514,15 +514,44 @@ struct DeferredWalk {
 };
 static DeferredWalk gDeferredWalk;
 
+// ►►►► WHAT COMES AFTER A DEFERRED WALK WAITS FOR THE WALK (GitHub issue 13, bugs/042).
+// Vanilla runs an approach as one sequence: walk (capped at the AP left), then a FORCED
+// _is_next_to that ends the sequence when the walk fell short, then the outcome
+// (_obj_pickup, _obj_use, ...). This backend applies state-bearing callbacks when they
+// are REGISTERED, but in a record section the walk is only stashed above and applied at
+// the commit, after the sequence. So the outcome fired from where the walker stood, and
+// _is_next_to, not a state callback, was never asked: an NPC short of a thrown spear by
+// twenty hexes had it in hand before it took a step ("telekinetic powers").
+//
+// So in a record section, the state callbacks of the walker's own sequence are HELD here,
+// with _is_next_to as a gate between them, and run by the commit after the real walk, in
+// order, stopping at a gate the walker does not pass: vanilla's order and vanilla's rule,
+// judged on the walk that actually happened. Nothing changes outside record sections.
+struct DeferredCallback {
+    void* a1;
+    void* a2;
+    void* proc;
+    bool gate; // _is_next_to(a1, a2): stop here unless a1 is next to a2
+};
+static std::vector<DeferredCallback> gDeferredCallbacks;
+
+// A record-section sequence whose _is_next_to failed with no walk pending (a walker
+// with no AP left, or no path): its remaining state callbacks are skipped, as vanilla
+// ends the sequence there. Reset by reg_anim_begin/end.
+static bool gSeqNotNextTo = false;
+
 static int serverAnimMoveToTileApply(Object* owner, int tile, int elevation, int actionPoints, bool run);
 static int serverAnimMoveToObjectApply(Object* owner, Object* destination, int actionPoints, bool run);
 // Defined with the sequence bookkeeping at the bottom of the file; the move leaves above
 // need it to abandon a sequence they cannot realize.
 static int serverAnimSeqFail();
 
+static void serverAnimApplyCallbackState(void* a1, void* a2, void* proc);
+
 static void serverAnimCommitDeferredWalk()
 {
     if (!gDeferredWalk.pending) {
+        gDeferredCallbacks.clear();
         return;
     }
     DeferredWalk w = gDeferredWalk;
@@ -531,6 +560,27 @@ static void serverAnimCommitDeferredWalk()
         serverAnimMoveToObjectApply(w.owner, w.target, w.actionPoints, w.run);
     } else {
         serverAnimMoveToTileApply(w.owner, w.tile, w.elevation, w.actionPoints, w.run);
+    }
+
+    // The walk has happened: now the sequence's held callbacks, in order, stopping at a
+    // reach check the walker does not pass (see gDeferredCallbacks).
+    std::vector<DeferredCallback> callbacks;
+    callbacks.swap(gDeferredCallbacks);
+    for (const DeferredCallback& callback : callbacks) {
+        if (callback.gate) {
+            Object* walker = (Object*)callback.a1;
+            Object* target = (Object*)callback.a2;
+            if (walker != nullptr && target != nullptr && objectGetDistanceBetween(walker, target) > 1) {
+                if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                    fprintf(stderr, "[anim-cb] net=%d is not next to net=%d after its walk (tile %d, target tile %d):"
+                                    " the rest of the sequence is dropped\n",
+                        walker->netId, target->netId, walker->tile, target->tile);
+                }
+                break;
+            }
+            continue;
+        }
+        serverAnimApplyCallbackState(callback.a1, callback.a2, callback.proc);
     }
 }
 
@@ -739,6 +789,7 @@ static int serverAnimMoveToTile(Object* owner, int tile, int elevation, int acti
         // owner->ap is the PRE-walk pool (the walk is deferred — it hasn't charged AP yet).
         int preWalkAp = FID_TYPE(owner->fid) == OBJ_TYPE_CRITTER ? owner->data.critter.combat.ap : -1;
         presRecordMoveToTile(owner, tile, elevation, run ? ANIM_RUNNING : ANIM_WALK, actionPoints, preWalkAp, 0);
+        gDeferredCallbacks.clear(); // a new walk: nothing held belongs to it yet
         gDeferredWalk = DeferredWalk{ true, owner, false, tile, nullptr, elevation, actionPoints, run };
         if (getenv("F2_TRACE_EVENTS") != nullptr) {
             fprintf(stderr, "[cmove-rec] net=%d toTile=%d ap=%d run=%d\n",
@@ -838,6 +889,7 @@ static int serverAnimMoveToObject(Object* owner, Object* destination, int action
     if (presRecordActive()) {
         int preWalkAp = FID_TYPE(owner->fid) == OBJ_TYPE_CRITTER ? owner->data.critter.combat.ap : -1;
         presRecordMoveToObject(owner, destination, run ? ANIM_RUNNING : ANIM_WALK, actionPoints, preWalkAp, 0);
+        gDeferredCallbacks.clear(); // a new walk: nothing held belongs to it yet
         gDeferredWalk = DeferredWalk{ true, owner, true, 0, destination, 0, actionPoints, run };
         if (getenv("F2_TRACE_EVENTS") != nullptr) {
             fprintf(stderr, "[cmove-rec] net=%d toObj=%d ap=%d run=%d\n",
@@ -969,6 +1021,10 @@ static int serverAnimSeqFail()
 int reg_anim_begin(int requestOptions)
 {
     gSeqLeafFailed = false;
+    gSeqNotNextTo = false;
+    if (!gDeferredWalk.pending) {
+        gDeferredCallbacks.clear(); // never let a previous sequence's held callbacks leak in
+    }
     if (presRecordActive()) {
         presRecordSeqBegin(requestOptions);
     }
@@ -993,6 +1049,7 @@ int reg_anim_end()
     // must not inherit a stale poison from the previous bracket.
     bool failed = gSeqLeafFailed;
     gSeqLeafFailed = false;
+    gSeqNotNextTo = false;
     return failed ? -1 : 0;
 }
 
@@ -1150,6 +1207,21 @@ int animationRegisterTakeOutWeapon(Object* owner, int weaponAnimationCode, int d
 //
 // Applied UNCONDITIONALLY, not only while recording: a non-recording server owes
 // the same world state. Recording changes what is PRESENTED, never what is TRUE.
+//
+// (In a record section with a walk stashed, the walker's own callbacks are held and
+// applied by the commit instead, after the walk and behind its reach check: see
+// gDeferredCallbacks. The state that lands is the same; it lands after the walk.)
+static bool serverAnimIsStateCallback(void* proc)
+{
+    return proc != nullptr
+        && (proc == (void*)(AnimationCallback*)_obj_use
+            || proc == (void*)(AnimationCallback*)_obj_pickup
+            || proc == (void*)(AnimationCallback*)_obj_use_container
+            || proc == (void*)(AnimationCallback*)scriptsRequestLooting
+            || proc == actionTalkToCallbackPtr()
+            || proc == protoInstanceDoorCloseCallbackPtr());
+}
+
 static void serverAnimApplyCallbackState(void* a1, void* a2, void* proc)
 {
     if (proc == nullptr) {
@@ -1166,12 +1238,7 @@ static void serverAnimApplyCallbackState(void* a1, void* a2, void* proc)
     // [[record-purity-ap-asymmetry]]. The drop must be applied where BOTH paths
     // converge; deriving the death anim there is the open part of that work.
 
-    if (proc == (void*)(AnimationCallback*)_obj_use
-        || proc == (void*)(AnimationCallback*)_obj_pickup
-        || proc == (void*)(AnimationCallback*)_obj_use_container
-        || proc == (void*)(AnimationCallback*)scriptsRequestLooting
-        || proc == actionTalkToCallbackPtr()
-        || proc == protoInstanceDoorCloseCallbackPtr()) {
+    if (serverAnimIsStateCallback(proc)) {
         // Announce it. These callbacks silently no-opped for the entire life of the
         // server, so the FIRST question is not "is the fix correct" but "does this
         // path get reached at all in real play". A player's own clicks do NOT come
@@ -1190,10 +1257,30 @@ static void serverAnimApplyCallbackState(void* a1, void* a2, void* proc)
     }
 }
 
+// A state callback in a record section: held for the commit when it belongs to the
+// walker of the stashed walk, skipped when the sequence already failed its reach check,
+// applied now otherwise (see gDeferredCallbacks).
+static void serverAnimRegisterStateCallback(void* a1, void* a2, void* proc)
+{
+    if (presRecordActive() && serverAnimIsStateCallback(proc)) {
+        if (gSeqNotNextTo) {
+            if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                fprintf(stderr, "[anim-cb] skipped: the sequence's reach check already failed\n");
+            }
+            return;
+        }
+        if (gDeferredWalk.pending && gDeferredWalk.owner == (Object*)a1) {
+            gDeferredCallbacks.push_back(DeferredCallback { a1, a2, proc, false });
+            return;
+        }
+    }
+    serverAnimApplyCallbackState(a1, a2, proc);
+}
+
 int animationRegisterCallback(void* a1, void* a2, AnimationCallback* proc, int delay)
 {
     if (presRecordActive()) presRecordCallback(a1, a2, (void*)proc);
-    serverAnimApplyCallbackState(a1, a2, (void*)proc);
+    serverAnimRegisterStateCallback(a1, a2, (void*)proc);
     return 0;
 }
 
@@ -1207,7 +1294,18 @@ int animationRegisterCallback3(void* a1, void* a2, void* a3, AnimationCallback3*
 int animationRegisterCallbackForced(void* a1, void* a2, AnimationCallback* proc, int delay)
 {
     if (presRecordActive()) presRecordCallback(a1, a2, (void*)proc);
-    serverAnimApplyCallbackState(a1, a2, (void*)proc);
+    // The forced reach check of an approach (actionPickUp, the use and loot paths). In a
+    // record section it is JUDGED: after the stashed walk when there is one, now when
+    // there is none (see gDeferredCallbacks, GitHub issue 13).
+    if (presRecordActive() && (void*)proc == actionIsNextToCallbackPtr()) {
+        if (gDeferredWalk.pending && gDeferredWalk.owner == (Object*)a1) {
+            gDeferredCallbacks.push_back(DeferredCallback { a1, a2, (void*)proc, true });
+        } else if (a1 != nullptr && a2 != nullptr && objectGetDistanceBetween((Object*)a1, (Object*)a2) > 1) {
+            gSeqNotNextTo = true;
+        }
+        return 0;
+    }
+    serverAnimRegisterStateCallback(a1, a2, (void*)proc);
     return 0;
 }
 
