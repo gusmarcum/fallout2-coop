@@ -1210,6 +1210,24 @@ static bool viewerKeepRunning()
     return _game_user_wants_to_quit == 0;
 }
 
+// Does switching the active hand to `newHand` play an animation? The server answers
+// the switch with a put-away (a weapon is out) and/or a take-out (the new hand holds a
+// weapon), and with nothing at all when neither applies (serverControlSwapHand's own
+// test, mirrored). Read off our own mirror: the drawn weapon is the weapon-animation
+// nibble of the dude's fid, the hands are the dude's item slots.
+static bool viewerHandSwitchAnimates(int newHand)
+{
+    if (gDude == nullptr) {
+        return true; // no mirror to ask: keep the old wait
+    }
+    Object* held = newHand == HAND_RIGHT ? critterGetItem2(gDude) : critterGetItem1(gDude);
+    int newCode = (held != nullptr && itemGetType(held) == ITEM_TYPE_WEAPON)
+        ? weaponGetAnimationCode(held)
+        : 0;
+    int oldCode = (gDude->fid & 0xF000) >> 12;
+    return oldCode != 0 || newCode != 0;
+}
+
 // The worldmap trip ended in a map load (the server said so with the end event).
 // Vanilla loads the new map underneath the worldmap screen and only then takes the
 // screen away; the viewer cannot, so it holds on black instead of revealing the map it
@@ -1637,6 +1655,9 @@ static int mainClientViewer(const char* connectSpec)
     bool oocBusy = false;
     bool handSwitchPending = false;
     unsigned int handSwitchSince = 0;
+    // Whether the pending switch plays a put-away or take-out at all. Only one that
+    // does blocks input: an empty hand to an empty hand has nothing to wait for.
+    bool handSwitchAnimates = true;
     // Whether the last frame was in combat: the chat box is closed when a fight
     // STARTS, not for as long as it lasts (see the chat block in the loop).
     bool sayWasInCombat = false;
@@ -1897,11 +1918,22 @@ static int mainClientViewer(const char* connectSpec)
                 char cmd[16];
                 snprintf(cmd, sizeof(cmd), "hand %d", newHand);
                 conn.sendLine(cmd);
+                // ►► NOTHING TO WAIT FOR WHEN NEITHER HAND HOLDS A WEAPON. The wait below
+                // is released by the switch's put-away/take-out replay, and the server
+                // records one only when there is something to put away or take out
+                // (serverControlSwapHand, the same test as here). Punch to kick has
+                // neither, so the wait sat out its whole timeout with the watch cursor
+                // up and nothing moving (GitHub issue 7).
+                handSwitchAnimates = viewerHandSwitchAnimates(newHand);
                 if (conn.inCombat()) {
-                    actionPending = true;
-                    actionPendingSince = getTicks();
+                    if (handSwitchAnimates) {
+                        actionPending = true;
+                        actionPendingSince = getTicks();
+                    }
                     conn.recomputeCombatOutlines();
                 } else {
+                    // The latch still runs without an animation, so a refusal can put
+                    // the hand back; it just does not block input (oocBusy).
                     handSwitchPending = true;
                     handSwitchSince = getTicks();
                     clientViewerTakeRefusal(); // clear any stale refusal edge before we wait
@@ -2589,7 +2621,10 @@ static int mainClientViewer(const char* connectSpec)
                 handSwitchPending = false;
             }
         }
-        oocBusy = !conn.inCombat() && (handSwitchPending || animationIsBusy(gDude));
+        // The idle fidget does not count (animationIsBusyIgnoringFidgets): vanilla lets a
+        // click cancel a head scratch, and the move click below does exactly that.
+        oocBusy = !conn.inCombat()
+            && ((handSwitchPending && handSwitchAnimates) || animationIsBusyIgnoringFidgets(gDude));
         // Softlock diagnostic (F2_TRACE_EVENTS): if the wait cursor holds for a long
         // stretch, name WHICH component keeps combatBusy latched — a stuck myTurn flip,
         // an un-idle replay/door, a queue that won't drain, an unanswered action, or the

@@ -625,6 +625,48 @@ int animationIsBusy(Object* a1)
     return 0;
 }
 
+// ►► THE IDLE FIDGET IS NOT AN ACTION. _dude_fidget registers it INSIGNIFICANT, and
+// vanilla never waits on such a sequence: the next request for the same critter ends it
+// (_check_registry), which is how a click cancels a head scratch. animationIsBusy only
+// skips a ONE-step ANIM_STAND, and the dude's own fidget is two steps (its sound, then
+// the animation), so the co-op viewer's out-of-combat gate read the head scratch as
+// busy: wait cursor, every click eaten until it finished (GitHub issue 15). The click
+// that gets through now cancels it the vanilla way (main.cc, reg_anim_clear before `mv`).
+int animationIsBusyIgnoringFidgets(Object* a1)
+{
+    if (gAnimationDescriptionCurrentIndex >= ANIMATION_DESCRIPTION_LIST_CAPACITY || a1 == nullptr) {
+        return 0;
+    }
+
+    for (int animationSequenceIndex = 0; animationSequenceIndex < ANIMATION_SEQUENCE_LIST_CAPACITY; animationSequenceIndex++) {
+        AnimationSequence* animationSequence = &(gAnimationSequences[animationSequenceIndex]);
+        if (animationSequenceIndex == gAnimationSequenceCurrentIndex || animationSequence->field_0 == -1000) {
+            continue;
+        }
+        if ((animationSequence->flags & ANIM_SEQ_INSIGNIFICANT) != 0) {
+            continue;
+        }
+        for (int animationDescriptionIndex = 0; animationDescriptionIndex < animationSequence->length; animationDescriptionIndex++) {
+            AnimationDescription* animationDescription = &(animationSequence->animations[animationDescriptionIndex]);
+            if (a1 != animationDescription->owner) {
+                continue;
+            }
+
+            if (animationDescription->kind == ANIM_KIND_CALLBACK) {
+                continue;
+            }
+
+            if (animationSequence->length == 1 && animationDescription->anim == ANIM_STAND) {
+                continue;
+            }
+
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 // 0x413F5C
 int animationRegisterMoveToObject(Object* owner, Object* destination, int actionPoints, int delay)
 {
