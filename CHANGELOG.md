@@ -49,7 +49,7 @@ version load unchanged.
   now reach every player once the map has loaded.
 - **Only the player who arms a charge reads "You set the timer"
   ([issue #5](https://github.com/gusmarcum/fallout2-coop/issues/5)).** The others read
-  "<name> sets the timer." instead.
+  "\<name> sets the timer." instead.
 - **Healing in the inventory shows at once
   ([issue #9](https://github.com/gusmarcum/fallout2-coop/issues/9)).** The hit point
   counter and the inventory's own hit point line only changed once the inventory closed.
