@@ -914,7 +914,25 @@ void _obj_arm_explosive(Object* explosive, int seconds)
     // You set the timer.
     messageListItem.num = 589;
     if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
-        presenter()->consoleMessage(messageListItem.text);
+        if (playerActorCount() > 1 && gDude != nullptr) {
+            // ►► CO-OP: "You set the timer" belongs to the one who set it. As a broadcast
+            // it told every player that THEY had just armed a charge (GitHub issue 5).
+            // The server arms under the actor's scope (server_control.cc
+            // useitem_armexplosive), so gDude is the one holding the charge; the rest of
+            // the party reads it in the third person, which is also the warning they need.
+            presenter()->consoleMessageFor(gDude->netId, messageListItem.text);
+
+            char line[160];
+            snprintf(line, sizeof(line), "%s sets the timer.", critterGetName(gDude));
+            for (int slot = 0; slot < playerActorCount(); slot++) {
+                Object* other = playerActorAt(slot);
+                if (other != nullptr && other != gDude) {
+                    presenter()->consoleMessageFor(other->netId, line);
+                }
+            }
+        } else {
+            presenter()->consoleMessage(messageListItem.text);
+        }
     }
 
     // SFALL
