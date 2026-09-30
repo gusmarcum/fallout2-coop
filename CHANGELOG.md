@@ -4,6 +4,80 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.4.0 (2026-09-30)
+
+Fixes for eleven player reports. One of them changes how the character sheet behaves: Esc
+and C now cancel, as they do in the original game (see Changed). Saves from every earlier
+version load unchanged.
+
+### Changed
+
+- **Cancel on the character sheet takes back what the visit spent
+  ([issue #12](https://github.com/gusmarcum/fallout2-coop/issues/12)).** Every skill point
+  and perk goes to the server the moment it is clicked, so Cancel had nothing left to undo
+  and kept everything. The server now remembers what was spent since the sheet opened, and
+  Cancel walks it back: skill points, perks (the pick comes back to be made again), Tag!'s
+  fourth skill, Mutate!'s trait, Educated's points and Lifegiver's hit points. Done keeps
+  everything. As in the original game, **Esc and C are Cancel too: to keep what you spent,
+  close the sheet with Done.** Here and Now cannot be taken back, since it pays out a whole
+  level, and the game says so. A sheet the game closes itself (a fight starting, a map
+  change) keeps what was spent.
+
+### Fixed
+
+- **Screens opened during a fight stay open
+  ([issue #11](https://github.com/gusmarcum/fallout2-coop/issues/11), and the follow-up on
+  [issue #3](https://github.com/gusmarcum/fallout2-coop/issues/3)).** The character sheet,
+  Options and the skilldex closed a couple of frames after they opened in combat: the rule
+  that a fight closes open screens was checked on every frame of the fight, not when it
+  starts. A fight that starts while one of them is open still closes it.
+- **A created character keeps the sex and age picked on the creation screen
+  ([issue #14](https://github.com/gusmarcum/fallout2-coop/issues/14)).** The creation
+  screen never sent them, so every character arrived male and 25. A female character now
+  arrives female, in the female body. The joining player's client and the server both need
+  this version for it; an older client still joins as before.
+- **An enemy only picks up a weapon it has walked to
+  ([issue #13](https://github.com/gusmarcum/fallout2-coop/issues/13)).** An unarmed enemy
+  took a thrown spear from twenty hexes away, before it had taken a step: the server handed
+  it the item as soon as the pickup was queued. It now walks first and takes the item only
+  if it arrives; if it cannot get there this turn, it keeps walking on its next one, as in
+  the original game.
+- **The Temple of Trials says what it paid
+  ([issue #6](https://github.com/gusmarcum/fallout2-coop/issues/6)).** Lines a map prints as
+  the party arrives, such as Arroyo's "You passed the trials of Arroyo." and the experience
+  line, were dropped with everything else the server holds back while it loads a map. They
+  now reach every player once the map has loaded.
+- **Only the player who arms a charge reads "You set the timer"
+  ([issue #5](https://github.com/gusmarcum/fallout2-coop/issues/5)).** The others read
+  "<name> sets the timer." instead.
+- **Healing in the inventory shows at once
+  ([issue #9](https://github.com/gusmarcum/fallout2-coop/issues/9)).** The hit point
+  counter and the inventory's own hit point line only changed once the inventory closed.
+  Both now count while it is open.
+- **Resting shows and heals
+  ([issue #10](https://github.com/gusmarcum/fallout2-coop/issues/10)).** The hit point
+  counter and the pipboy's date and clock now update while the pipboy is open. Rest heals
+  once for every 180 minutes, counted in rounded-down steps, so a single three hour rest
+  counts 169. The original game carries that count over to the next rest; the server
+  started it again for every rest, so rests of three hours or less never healed. The count
+  now carries over, and from the second three hour rest on, resting heals.
+- **Swapping between empty hands is instant
+  ([issue #7](https://github.com/gusmarcum/fallout2-coop/issues/7)).** Punch to kick
+  waited a second for an animation that never plays. The wait now only happens when a
+  weapon is drawn or put away.
+- **The idle head scratch no longer blocks input
+  ([issue #15](https://github.com/gusmarcum/fallout2-coop/issues/15)).** It counted as an
+  action, so the wait cursor showed and clicks were ignored until it finished. A click now
+  cancels it, as in the original game.
+
+### Added
+
+- **Proofs for these fixes.** [`tools/issue_wire_proof.py`](tools/issue_wire_proof.py)
+  checks the server side of issues 5, 6, 10, 12, 13 and 14 with scripted players, and
+  [`tools/client_screen_proof.py`](tools/client_screen_proof.py) gains checks for issues 3,
+  7, 9, 10, 11, 12, 14 and 15 that run the real game client with a recorded keyboard. Each
+  can show its defect on an older build.
+
 ## v1.3.2 (2026-09-28)
 
 Three fixes, all from player reports. The first one matters to every world: maps the party
