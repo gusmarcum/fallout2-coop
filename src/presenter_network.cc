@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -1326,13 +1327,52 @@ public:
     // -- PRESENTATION cues --------------------------------------------------
     // These gate on suppression too, which narrate does NOT bother to do. It
     // matters here: mapLoad runs the MAP_ENTER scripts (map.cc:786/832) INSIDE the
-    // suppression window, and those scripts emit console/float text. Withholding
-    // the lifecycle flood while shipping its chatter would put a joining client's
-    // message log out of step with its world.
+    // suppression window, and those scripts emit console/float text.
+    //
+    // ►► MESSAGE-LOG LINES ARE HELD, NOT DROPPED. A float over a critter is tied to
+    // the world being torn down, but a log line is text the player is owed, and some
+    // of the game's most important ones are printed from exactly there: the Arroyo
+    // village map-enter pays the Temple of Trials XP and prints "You gain 300
+    // experience points", the Temple line and the reputation line on its first run.
+    // Dropped, the rewards arrived with no word at all (GitHub issue 6; the Feargus
+    // well pays out mid-map, which is why that one showed). The lines wait here and
+    // go out in order, unchanged, when the window closes (emissionsResumed): after
+    // the "drop your world" transition and just before the new world's baseline, and
+    // the viewer's log outlives the map switch.
+    struct HeldConsoleLine {
+        int actorNetId;
+        int channel;
+        std::string text;
+    };
+    std::vector<HeldConsoleLine> _heldConsole;
+    static constexpr size_t kMaxHeldConsoleLines = 64;
+
+    void holdConsoleLine(int actorNetId, int channel, const char* text)
+    {
+        if (text == nullptr || _heldConsole.size() >= kMaxHeldConsoleLines) {
+            return;
+        }
+        _heldConsole.push_back(HeldConsoleLine { actorNetId, channel, std::string(text) });
+    }
+
+    void emissionsResumed() override
+    {
+        if (_heldConsole.empty()) {
+            return;
+        }
+        std::vector<HeldConsoleLine> lines;
+        lines.swap(_heldConsole);
+        for (const HeldConsoleLine& line : lines) {
+            consoleMessageStyled(line.actorNetId, line.channel, line.text.c_str());
+        }
+    }
 
     void consoleMessage(const char* text) override
     {
-        if (presenterEmissionsSuppressed()) return;
+        if (presenterEmissionsSuppressed()) {
+            holdConsoleLine(0, kMsgChannelDefault, text);
+            return;
+        }
         beginEvent(EVENT_CONSOLE, 0);
         putString(text);
         endEvent();
@@ -1340,7 +1380,10 @@ public:
 
     void consoleMessageFor(int actorNetId, const char* text) override
     {
-        if (presenterEmissionsSuppressed()) return;
+        if (presenterEmissionsSuppressed()) {
+            holdConsoleLine(actorNetId, kMsgChannelDefault, text);
+            return;
+        }
         // Unaddressed → emit the LEGACY layout byte-for-byte (no trailing field).
         // Every existing broadcast call site keeps its exact wire bytes, so the
         // netstream goldens are untouched by this addition.
@@ -1356,7 +1399,10 @@ public:
 
     void consoleMessageStyled(int actorNetId, int channel, const char* text) override
     {
-        if (presenterEmissionsSuppressed()) return;
+        if (presenterEmissionsSuppressed()) {
+            holdConsoleLine(actorNetId, channel, text);
+            return;
+        }
 
         // SECOND trailing field, on the same principle as the address above: the
         // default channel emits the SHORTER legacy layout, so every message that

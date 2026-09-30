@@ -30,7 +30,11 @@ bool presenterEmissionsSuppressed()
 
 void presenterSetEmissionsSuppressed(bool suppressed)
 {
+    bool resuming = gSuppressPresenterEmissions && !suppressed;
     gSuppressPresenterEmissions = suppressed;
+    if (resuming) {
+        gPresenter->emissionsResumed();
+    }
 }
 
 // -- WORLD-NARRATION POINT OF VIEW (see presenter.h for the why) -------------

@@ -876,6 +876,11 @@ public:
 
     // Modal error box (legacy showMesageBox / _win_msg fatal errors).
     virtual void errorBox(const char* text) {}
+
+    // The emission-suppression window has just closed (presenterSetEmissionsSuppressed
+    // false). A presenter that held anything back while it was open sends it now; the
+    // network presenter holds message-log lines (presenter_network.cc).
+    virtual void emissionsResumed() {}
 };
 
 // Current presenter; never null (defaults to the built-in null presenter).
