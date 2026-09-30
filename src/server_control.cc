@@ -2252,24 +2252,25 @@ void serverControlLine(int sessionId, const char* line)
     }
 
     if (strcmp(verb, "create") == 0) {
-        // `create <S> <P> <E> <C> <I> <A> <L> [tag1 tag2 tag3] [trait1 trait2]`
-        // — the character this session wants to BE. Held until `login <name>`
-        // commits it, and only honoured when that name is NEW (below).
+        // `create <S> <P> <E> <C> <I> <A> <L> [tag1 tag2 tag3] [trait1 trait2]
+        // [sex age]` — the character this session wants to BE. Held until
+        // `login <name>` commits it, and only honoured when that name is NEW (below).
         //
         // Parsed here rather than via the top-level sscanf, which only captures
         // three ints. Missing trailing fields keep their defaults, so a client
-        // may send SPECIAL alone.
+        // may send SPECIAL alone. Sex and age came last (GitHub issue 14): a client
+        // from before them sends twelve numbers and gets the old male, 25.
         PlayerCreateSpec spec;
         playerCreateSpecDefaults(&spec);
 
-        int v[12];
-        for (int i = 0; i < 12; i++) {
+        int v[14];
+        for (int i = 0; i < 14; i++) {
             v[i] = -1;
         }
 
-        int n2 = sscanf(line, "%*s %d %d %d %d %d %d %d %d %d %d %d %d",
+        int n2 = sscanf(line, "%*s %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
             &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6],
-            &v[7], &v[8], &v[9], &v[10], &v[11]);
+            &v[7], &v[8], &v[9], &v[10], &v[11], &v[12], &v[13]);
         if (n2 < 7) {
             fprintf(stderr, "f2_server: create from session %d rejected "
                             "(need 7 SPECIAL values, got %d)\n",
@@ -2286,6 +2287,12 @@ void serverControlLine(int sessionId, const char* line)
         for (int i = 0; i < TRAITS_MAX_SELECTED_COUNT && 10 + i < n2; i++) {
             spec.traits[i] = v[10 + i];
         }
+        if (12 < n2) {
+            spec.gender = v[12];
+        }
+        if (13 < n2) {
+            spec.age = v[13];
+        }
 
         // Validate NOW so the client is told immediately, rather than discovering
         // at spawn time that its character was silently rejected.
@@ -2296,9 +2303,10 @@ void serverControlLine(int sessionId, const char* line)
 
         gPendingCreateSpecs[sessionId] = spec;
         fprintf(stderr, "f2_server: create spec held for session %d "
-                        "(S%d P%d E%d C%d I%d A%d L%d)\n",
+                        "(S%d P%d E%d C%d I%d A%d L%d, %s, age %d)\n",
             sessionId, spec.special[0], spec.special[1], spec.special[2],
-            spec.special[3], spec.special[4], spec.special[5], spec.special[6]);
+            spec.special[3], spec.special[4], spec.special[5], spec.special[6],
+            spec.gender == GENDER_FEMALE ? "female" : "male", spec.age);
         return;
     }
 

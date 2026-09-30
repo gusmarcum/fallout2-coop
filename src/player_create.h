@@ -26,6 +26,11 @@ struct PlayerCreateSpec {
     int tagged[NUM_TAGGED_SKILLS];
     // Optional traits (TRAIT_*), -1 for none.
     int traits[TRAITS_MAX_SELECTED_COUNT];
+    // GENDER_MALE / GENDER_FEMALE, and the age picked on the creation screen. The
+    // defaults are the reset row's (male, 25), which is what every character got
+    // before these two were sent at all (GitHub issue 14).
+    int gender;
+    int age;
 };
 
 // Fill `spec` with the vanilla starting defaults (all SPECIAL 5, no tags, no

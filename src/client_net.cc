@@ -1582,7 +1582,19 @@ private:
             return;
         }
 
+        Object* previousDude = gDude;
         gDude = mine;
+
+        // The paper doll's unarmored body (_art_vault_guy_num) is derived from gDude's
+        // sex, and the blob load derived it while gDude was still the host. A player of
+        // the other sex than the host kept the host's doll until the next map (GitHub
+        // issue 14). Re-derive only when the sex actually differs, so nobody else's
+        // look is touched here.
+        if (previousDude != nullptr
+            && critterGetBaseStat(previousDude, STAT_GENDER) != critterGetBaseStat(gDude, STAT_GENDER)) {
+            _proto_dude_update_gender();
+            objectSetFrame(gDude, 0, nullptr);
+        }
 
         // The hit point counter rolls the SHOWN value toward _dudeHpAuth (rollDudeHp),
         // and that authority belongs to a body, not to the screen: it was last seeded
@@ -4390,6 +4402,7 @@ private:
         if (stream == nullptr) {
             return;
         }
+        int genderBefore = gDude != nullptr ? critterGetBaseStat(gDude, STAT_GENDER) : -1;
         int applyRc = playerSheetBlockRead(stream);
         // TEMP DIAGNOSTIC [psht]: the other two cuts of "only shows up if I reconnect".
         // Paired with the server's [psht] emit line: a server emit with NO line here
@@ -4412,6 +4425,18 @@ private:
             // [[no-re-derivation-path-bug-class]]
             if (gDude != nullptr && slot == playerActorSlotOf(gDude)) {
                 indicatorBarRefresh();
+                // ►► AND THE LOCAL LOOK, WHEN THE ROW CHANGED OUR SEX. The inventory's
+                // paper doll draws an unarmored body from _art_vault_guy_num, which is
+                // derived from our own sex (_proto_dude_update_gender) on a map load and
+                // on the movie ledger sync, not when the row arrives. A character created
+                // female (GitHub issue 14) arrives in this row just after the join, so
+                // her doll stayed male until the next map. Same re-derive and frame reset
+                // as onMovieSeenState.
+                if (critterGetBaseStat(gDude, STAT_GENDER) != genderBefore) {
+                    _proto_dude_update_gender();
+                    objectSetFrame(gDude, 0, nullptr);
+                    tileWindowRefresh();
+                }
             }
         }
         fileClose(stream);

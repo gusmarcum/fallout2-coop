@@ -1396,11 +1396,19 @@ static int mainClientViewer(const char* connectSpec)
                 int trait2 = -1;
                 traitsGetSelected(&trait1, &trait2);
 
+                // Sex and age ride at the end, after the traits (GitHub issue 14:
+                // they were never sent, so every character arrived male and 25).
+                // BASE values: the displayed age adds the years of game time passed.
+                // An older server reads the first twelve numbers and ignores these.
+                int gender = critterGetBaseStat(gDude, STAT_GENDER);
+                int age = critterGetBaseStat(gDude, STAT_AGE);
+
                 snprintf(createFromUi, sizeof(createFromUi),
-                    "%d %d %d %d %d %d %d %d %d %d %d %d",
+                    "%d %d %d %d %d %d %d %d %d %d %d %d %d %d",
                     special[0], special[1], special[2], special[3],
                     special[4], special[5], special[6],
-                    tagged[0], tagged[1], tagged[2], trait1, trait2);
+                    tagged[0], tagged[1], tagged[2], trait1, trait2,
+                    gender, age);
                 debugPrint("client-viewer: created character -> create %s\n", createFromUi);
             } else {
                 // Cancelled: join as whatever the account already is (or a clone

@@ -19,6 +19,13 @@ namespace fallout {
 // in that order, so the index IS the stat id offset.
 static constexpr int kSpecialCount = 7;
 
+// The creation screen's age range (character_editor.cc's age picker) and the reset
+// row's age. Narrower than the stat's own limits on purpose: this is what a real
+// creation screen can send.
+static constexpr int kPlayerCreateMinAge = 16;
+static constexpr int kPlayerCreateMaxAge = 35;
+static constexpr int kPlayerCreateDefaultAge = 25;
+
 void playerCreateSpecDefaults(PlayerCreateSpec* spec)
 {
     if (spec == nullptr) {
@@ -36,6 +43,9 @@ void playerCreateSpecDefaults(PlayerCreateSpec* spec)
     for (int i = 0; i < TRAITS_MAX_SELECTED_COUNT; i++) {
         spec->traits[i] = -1;
     }
+
+    spec->gender = GENDER_MALE;
+    spec->age = kPlayerCreateDefaultAge;
 }
 
 bool playerCreateSpecValidate(const PlayerCreateSpec* spec)
@@ -88,6 +98,17 @@ bool playerCreateSpecValidate(const PlayerCreateSpec* spec)
                 return false;
             }
         }
+    }
+
+    if (spec->gender != GENDER_MALE && spec->gender != GENDER_FEMALE) {
+        debugPrint("player_create: gender %d is neither male nor female\n", spec->gender);
+        return false;
+    }
+
+    if (spec->age < kPlayerCreateMinAge || spec->age > kPlayerCreateMaxAge) {
+        debugPrint("player_create: age %d out of range %d..%d\n",
+            spec->age, kPlayerCreateMinAge, kPlayerCreateMaxAge);
+        return false;
     }
 
     return true;
@@ -170,6 +191,16 @@ int playerCreateApply(int slot, const PlayerCreateSpec* spec)
         }
     }
 
+    // Sex and age, which the reset above had put back to male, 25: that reset is
+    // all a created character ever got, whatever the creation screen said (GitHub
+    // issue 14). Plain base stats, no trait touches either.
+    if (critterSetBaseStat(actor, STAT_GENDER, spec->gender) != 0
+        || critterSetBaseStat(actor, STAT_AGE, spec->age) != 0) {
+        debugPrint("player_create: slot %d gender %d / age %d REJECTED\n",
+            slot, spec->gender, spec->age);
+        return -1;
+    }
+
     // Tags take the subject explicitly, so they land on this actor's row rather
     // than the host's globals.
     int tagged[NUM_TAGGED_SKILLS];
@@ -184,6 +215,19 @@ int playerCreateApply(int slot, const PlayerCreateSpec* spec)
     critterUpdateDerivedStats(actor);
     critterAdjustHitPoints(actor, 10000);
 
+    // The body art is gendered (the vault suit and the tribal look both have a
+    // female variant), and the row was seeded with the HOST's look. The looks are
+    // re-derived on every baseline, but the next one can be a whole map away, so a
+    // female character would walk around in the male suit until then. Only when she
+    // is female: a male character keeps the seeded look exactly as before.
+    if (spec->gender == GENDER_FEMALE) {
+        if (slot == 0) {
+            _proto_dude_update_gender(); // slot 0 is gDude, vanilla's own derive
+        } else {
+            protoPlayerActorsUpdateLook();
+        }
+    }
+
     if (getenv("F2_TRACE_EVENTS") != nullptr) {
         // READ BACK what actually landed. The applier writes through resolvers
         // that dispatch on the actor's pid, so "did the write reach THIS slot's
@@ -193,8 +237,9 @@ int playerCreateApply(int slot, const PlayerCreateSpec* spec)
         for (int i = 0; i < kSpecialCount; i++) {
             fprintf(stderr, " %d", critterGetStat(actor, STAT_STRENGTH + i));
         }
-        fprintf(stderr, " maxhp=%d hp=%d\n",
-            critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS), critterGetHitPoints(actor));
+        fprintf(stderr, " maxhp=%d hp=%d gender=%d age=%d fid=0x%X\n",
+            critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS), critterGetHitPoints(actor),
+            critterGetBaseStat(actor, STAT_GENDER), critterGetBaseStat(actor, STAT_AGE), actor->fid);
     }
 
     return 0;
