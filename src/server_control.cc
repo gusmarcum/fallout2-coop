@@ -3596,9 +3596,13 @@ void serverControlLine(int sessionId, const char* line)
             presenter()->consoleMessageStyled(other->netId, kMsgChannelSystem, line);
         }
 
-        // The heal-cadence accumulator is per SESSION (the pipboy resets it when the
-        // screen opens), so reset it here — this verb IS the session.
-        restHealReset();
+        // ►► THE HEAL COUNT IS NOT RESET HERE. Rest heals one step per 180 rest minutes
+        // (restHealCheck), and the per-frame accrual rounds down, so a 3 hour rest counts
+        // 169 of them. Vanilla keeps the count for as long as the pipboy stays open, so
+        // the next click tips it over. This verb used to reset it on every request,
+        // which made each click a fresh session: 3 hour rests never healed, however many
+        // times they were clicked (GitHub issue 10). The count now carries from one rest
+        // to the next, and a heal still consumes it. Owner ruling: vanilla's rounding.
 
         RestOutcome outcome;
         {
