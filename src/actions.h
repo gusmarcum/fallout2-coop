@@ -36,6 +36,9 @@ void* actionShowDeathCallbackPtr();
 
 // See server_anim.cc's state-bearing-callback allowlist.
 void* actionTalkToCallbackPtr();
+// The forced reach check (_is_next_to) that guards an approach's outcome; the server
+// recorder judges it after the approach walk (server_anim.cc, GitHub issue 13).
+void* actionIsNextToCallbackPtr();
 void actionPresReplayShowDeath(Object* obj, int anim);
 // Recorder-match pointer for the ranged projectile-hide callback, folded into
 // PRES_OP_HIDE_FORCED (no dedicated tag) — see actions.cc.

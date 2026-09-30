@@ -111,6 +111,9 @@ int _register_priority(int a1);
 int reg_anim_clear(Object* a1);
 int reg_anim_end();
 int animationIsBusy(Object* a1);
+// animationIsBusy minus the sequences registered INSIGNIFICANT, i.e. the idle fidget.
+// For the co-op viewer's out-of-combat input gate (issue 15).
+int animationIsBusyIgnoringFidgets(Object* a1);
 // Diagnostic twin of animationIsBusy: writes the sequences that count as busy for
 // `obj` (sequence, slot, kind, anim) into `out`. Empty string when nothing does.
 void animationDescribeBusy(Object* obj, char* out, size_t cap);

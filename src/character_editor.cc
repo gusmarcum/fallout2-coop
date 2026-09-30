@@ -1231,16 +1231,35 @@ int characterEditorShow(bool isCreationMode)
 // could spend a skill point or take a perk at all. Now that the server applies them,
 // a rollback would be actively wrong: it restores the snapshot taken when the screen
 // OPENED, and would therefore wipe the rows the server streamed in while it was up.
-// "Done" and "Cancel" both simply close the screen; whatever was spent is already
-// committed, one point at a time, on the authority that owns it.
+// Whatever was spent is committed, one point at a time, on the authority that owns it.
 //
-// The open/close pair brackets the server's edit session, whose only job is to hold
-// the undo baseline "-" may walk back to (sheet_intent.h #4).
+// ►► CANCEL IS THEREFORE A REQUEST, NOT A LOCAL ROLLBACK. Vanilla's Cancel, Esc and C
+// (rc == 1) restore the sheet the screen opened with; "Done" and "Cancel" used to both
+// simply close it here, so Cancel kept every point and perk (GitHub issue 12). Now a
+// player's Cancel asks the server to walk this visit's spends back (sheetcancel),
+// which it does from its own record of them, and the rows it streams back repaint the
+// sheet. Two closes are NOT the player's Cancel and keep what was spent: the game
+// closing the screen itself (a fight starting under it, a map change, the service
+// ticker's ESC) and quitting the game.
+//
+// The open/close pair brackets the server's edit session: the undo baseline "-" may
+// walk back to (sheet_intent.h #4), and the spends Cancel undoes.
 int characterEditorShowViewOnly()
 {
     clientViewerSheetOpen();
+    clientViewerTakeForcedScreenClose(); // clear a stale mark from another screen
+    unsigned int openedAt = getTicks();
     int rc = characterEditorShow(0);
+    bool forced = clientViewerTakeForcedScreenClose();
+    bool cancelled = rc == 1 && !forced && _game_user_wants_to_quit == 0;
+    if (cancelled) {
+        clientViewerSheetCancel();
+    }
     clientViewerSheetClose();
+    // Says how long the screen was up and who closed it: "it opens for a couple of
+    // frames and disappears" (GitHub issues 3 and 11) is read straight off this line.
+    debugPrint("character sheet: closed after %u ms by %s%s\n", getTicksSince(openedAt),
+        forced ? "the game" : "the player", cancelled ? " (Cancel: spends walked back)" : "");
     return rc;
 }
 

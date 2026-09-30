@@ -493,10 +493,26 @@ int pipboyOpen(int intent)
     mouseGetPositionInWindow(gPipboyWindow, &gPipboyPreviousMouseX, &gPipboyPreviousMouseY);
     gPipboyLastEventTimestamp = getTicks();
 
+    // Co-op: the game minute the date and clock at the top were last drawn for.
+    unsigned int clockShownMinute = gameTimeGetTime() / 600;
+
     while (true) {
         sharedFpsLimiter.mark();
 
         int keyCode = inputGetInput();
+
+        // Co-op: the server owns the clock and it keeps running while this screen is
+        // up; a rest asked for here moves it by hours, and the answer arrives on the
+        // wire afterwards (clientViewerRest). Vanilla drew the date and clock at open
+        // and again from its own rest loop, which a viewer never runs, so the clock
+        // stood still until the pipboy was reopened (GitHub issue 10). Redraw them
+        // whenever the game minute changes.
+        if (clientViewerActive() && gameTimeGetTime() / 600 != clockShownMinute) {
+            clockShownMinute = gameTimeGetTime() / 600;
+            pipboyDrawNumber(gameTimeGetHour(), 4, PIPBOY_WINDOW_TIME_X, PIPBOY_WINDOW_TIME_Y);
+            pipboyDrawDate();
+            windowRefresh(gPipboyWindow);
+        }
 
         if (intent == PIPBOY_OPEN_INTENT_REST) {
             keyCode = 504;

@@ -2,6 +2,9 @@
 
 #include <stdio.h>
 
+#include <vector>
+
+#include "critter.h"
 #include "game.h"
 #include "perk.h"
 #include "player_sheet.h"
@@ -13,6 +16,31 @@
 #include "trait_defs.h"
 
 namespace fallout {
+
+// One spend the open screen made, kept so Cancel can walk it back (sheetEditCancel).
+enum SheetSpendKind {
+    kSheetSpendSkillUp,
+    kSheetSpendSkillDown,
+    kSheetSpendPerk,
+};
+
+struct SheetSpend {
+    int kind;
+    // The skill, or the perk.
+    int index;
+    // Tag!: the skill its follow-up tagged, -1 until it is answered.
+    int tagSkill;
+    // Mutate!: the trait pair before its swap, valid once `mutated`.
+    int traitsBefore[TRAITS_MAX_SELECTED_COUNT];
+    bool mutated;
+    // What the pick itself added on top of the perk (perkChoiceApply: Educated's
+    // points, Lifegiver's maximum and current hit points), MEASURED rather than assumed:
+    // at the 99-point cap Educated's +2 is swallowed, and taking back 2 anyway would
+    // cost the player points they never got.
+    int pointsGiven;
+    int maxHpGiven;
+    int hpGiven;
+};
 
 // One open character screen, per player actor. Transient SERVER state: never
 // persisted, never on the wire, never on an Object — a reconnect simply opens a
@@ -27,7 +55,60 @@ struct SheetEditSession {
     // be used to re-tag a skill or swap a trait at will.
     int pendingChoice;
     int pendingPerk;
+    // Every spend since the screen opened, oldest first (sheetEditCancel).
+    std::vector<SheetSpend> spends;
 };
+
+// Log a spend on the open session. Nothing is logged without one: the admin
+// console's spends (sheetEditSessionEnsure) have no screen to cancel.
+static void sheetSpendLog(SheetEditSession* session, int kind, int index)
+{
+    if (session == nullptr || !session->open) {
+        return;
+    }
+    SheetSpend spend;
+    spend.kind = kind;
+    spend.index = index;
+    spend.tagSkill = -1;
+    for (int i = 0; i < TRAITS_MAX_SELECTED_COUNT; i++) {
+        spend.traitsBefore[i] = -1;
+    }
+    spend.mutated = false;
+    spend.pointsGiven = 0;
+    spend.maxHpGiven = 0;
+    spend.hpGiven = 0;
+    session->spends.push_back(spend);
+}
+
+// The newest logged pick of `perk`, or null.
+static SheetSpend* sheetSpendLastPerk(SheetEditSession* session, int perk)
+{
+    if (session == nullptr) {
+        return nullptr;
+    }
+    for (size_t i = session->spends.size(); i-- > 0;) {
+        SheetSpend& spend = session->spends[i];
+        if (spend.kind == kSheetSpendPerk && spend.index == perk) {
+            return &spend;
+        }
+    }
+    return nullptr;
+}
+
+// Drop the newest logged pick of `perk`: it was undone by other means (an escaped
+// Tag!/Mutate! follow-up already took it back off).
+static void sheetSpendForgetLastPerk(SheetEditSession* session, int perk)
+{
+    if (session == nullptr) {
+        return;
+    }
+    for (size_t i = session->spends.size(); i-- > 0;) {
+        if (session->spends[i].kind == kSheetSpendPerk && session->spends[i].index == perk) {
+            session->spends.erase(session->spends.begin() + i);
+            return;
+        }
+    }
+}
 
 static SheetEditSession gSessions[kMaxPlayerActors];
 
@@ -60,6 +141,9 @@ void sheetEditSessionOpen(Object* actor)
         session->skillBaseline[skill] = skillGetValue(actor, skill);
     }
     session->open = true;
+    // A new screen, a new Cancel: what an earlier screen spent is not this one's to
+    // take back. (A perk still owing its follow-up is handled by pendingChoice.)
+    session->spends.clear();
 
     // A pending follow-up choice deliberately SURVIVES a reopen: the perk is
     // already applied, so dropping the obligation here would strand an actor with
@@ -84,6 +168,7 @@ void sheetEditSessionClose(Object* actor)
     }
 
     session->open = false;
+    session->spends.clear();
 }
 
 int sheetEditSkillUp(Object* actor, int skill)
@@ -112,6 +197,7 @@ int sheetEditSkillUp(Object* actor, int skill)
         // path is closing the character screen, which the authority does not have.
         pcLevelUpBadgeRefresh(actor);
         playerSheetMarkDirty(actor);
+        sheetSpendLog(sessionFor(actor), kSheetSpendSkillUp, skill);
         return kSheetEditOk;
     case -3:
         return kSheetEditAtCap;
@@ -151,6 +237,7 @@ int sheetEditSkillDown(Object* actor, int skill)
         // A refund re-lights the badge: there is a point to spend again.
         pcLevelUpBadgeRefresh(actor);
         playerSheetMarkDirty(actor);
+        sheetSpendLog(session, kSheetSpendSkillDown, skill);
         return kSheetEditOk;
     case -2:
         return kSheetEditAtBaseline;
@@ -196,10 +283,18 @@ int sheetEditPerkPick(Object* actor, int perk, int* pendingChoice)
         ranksBefore[index] = perkGetRank(actor, index);
     }
 
+    int pointsBefore = pcGetStat(PC_STAT_UNSPENT_SKILL_POINTS);
+    int maxHpBonusBefore = critterGetBonusStat(actor, STAT_MAXIMUM_HIT_POINTS);
+    int hpBefore = critterGetHitPoints(actor);
+
     int pending = PERK_CHOICE_PENDING_NONE;
     if (perkChoiceApply(actor, perk, ranksBefore, &pending) == -1) {
         return kSheetEditPrereq;
     }
+
+    int pointsGiven = pcGetStat(PC_STAT_UNSPENT_SKILL_POINTS) - pointsBefore;
+    int maxHpGiven = critterGetBonusStat(actor, STAT_MAXIMUM_HIT_POINTS) - maxHpBonusBefore;
+    int hpGiven = critterGetHitPoints(actor) - hpBefore;
 
     perkOwedPickAdd(actor, -1); // spend ONE — the actor may still owe more
     // The pick is spent — and Educated may have just added points, so re-derive
@@ -210,6 +305,13 @@ int sheetEditPerkPick(Object* actor, int perk, int* pendingChoice)
     if (session != nullptr) {
         session->pendingChoice = pending;
         session->pendingPerk = perk;
+    }
+    sheetSpendLog(session, kSheetSpendPerk, perk);
+    SheetSpend* spend = sheetSpendLastPerk(session, perk);
+    if (spend != nullptr) {
+        spend->pointsGiven = pointsGiven;
+        spend->maxHpGiven = maxHpGiven;
+        spend->hpGiven = hpGiven;
     }
 
     if (pendingChoice != nullptr) {
@@ -233,6 +335,7 @@ static int sheetEditChoiceCancel(Object* actor, SheetEditSession* session, int p
     session->pendingChoice = PERK_CHOICE_PENDING_NONE;
     session->pendingPerk = -1;
     playerSheetMarkDirty(actor);
+    sheetSpendForgetLastPerk(session, perk); // already undone: Cancel must not undo it twice
     return kSheetEditOk;
 }
 
@@ -269,6 +372,11 @@ int sheetEditTagPick(Object* actor, int skill)
     // so the scope is what puts the tag on this actor's row rather than the host's.
     skillsTagPerkApply(tagged, skill);
 
+    SheetSpend* tagSpend = sheetSpendLastPerk(session, PERK_TAG);
+    if (tagSpend != nullptr) {
+        tagSpend->tagSkill = skill;
+    }
+
     session->pendingChoice = PERK_CHOICE_PENDING_NONE;
     session->pendingPerk = -1;
     playerSheetMarkDirty(actor);
@@ -295,6 +403,7 @@ int sheetEditMutatePick(Object* actor, int dropTrait, int gainTrait)
 
     int traits[TRAITS_MAX_SELECTED_COUNT];
     traitsGetSelected(&(traits[0]), &(traits[1]), actor);
+    const int traitsBefore[TRAITS_MAX_SELECTED_COUNT] = { traits[0], traits[1] };
 
     // Addressed by TRAIT ID, not by the dialog's line number: the perk dialog sorts
     // its list alphabetically, so a line index would make the protocol depend on the
@@ -333,10 +442,123 @@ int sheetEditMutatePick(Object* actor, int dropTrait, int gainTrait)
     // no derived-stat table to recompute here — the next critterGetStat sees them.
     traitsSetSelected(traits[0], traits[1], actor);
 
+    SheetSpend* mutateSpend = sheetSpendLastPerk(session, PERK_MUTATE);
+    if (mutateSpend != nullptr) {
+        for (int i = 0; i < TRAITS_MAX_SELECTED_COUNT; i++) {
+            mutateSpend->traitsBefore[i] = traitsBefore[i];
+        }
+        mutateSpend->mutated = true;
+    }
+
     session->pendingChoice = PERK_CHOICE_PENDING_NONE;
     session->pendingPerk = -1;
     playerSheetMarkDirty(actor);
 
+    return kSheetEditOk;
+}
+
+// Take one logged perk pick back off (sheetEditCancel), inside the actor's scope.
+// The perk's own stat effects go with perkRemove; the extras perkChoiceApply and
+// the follow-ups added on top are undone here by hand, each the exact inverse.
+static void sheetSpendUndoPerk(Object* actor, const SheetSpend& spend)
+{
+    int perk = spend.index;
+
+    if (perk == PERK_TAG && spend.tagSkill != -1) {
+        int tagged[NUM_TAGGED_SKILLS];
+        skillsGetTagged(tagged, NUM_TAGGED_SKILLS, actor);
+        for (int i = 0; i < NUM_TAGGED_SKILLS; i++) {
+            if (tagged[i] == spend.tagSkill) {
+                tagged[i] = -1;
+            }
+        }
+        skillsSetTagged(tagged, NUM_TAGGED_SKILLS, actor);
+    } else if (perk == PERK_MUTATE && spend.mutated) {
+        traitsSetSelected(spend.traitsBefore[0], spend.traitsBefore[1], actor);
+    } else if (perk == PERK_LIFEGIVER) {
+        // perkChoiceApply raised the maximum and healed by as much (4 and 4), as
+        // measured at the pick. Never take the last hit point.
+        int maxHp = critterGetBonusStat(actor, STAT_MAXIMUM_HIT_POINTS);
+        critterSetBonusStat(actor, STAT_MAXIMUM_HIT_POINTS, maxHp - spend.maxHpGiven);
+        int hp = critterGetHitPoints(actor);
+        int drop = hp - 1 < spend.hpGiven ? hp - 1 : spend.hpGiven;
+        if (drop > 0) {
+            critterAdjustHitPoints(actor, -drop);
+        }
+    } else if (perk == PERK_EDUCATED) {
+        // perkChoiceApply added unspent points (2, or fewer at the cap), as measured at
+        // the pick. The skill walk-back ran first (newest spend first), so any of them
+        // spent on the screen are back by now.
+        int sp = pcGetStat(PC_STAT_UNSPENT_SKILL_POINTS);
+        pcSetStat(PC_STAT_UNSPENT_SKILL_POINTS, sp >= spend.pointsGiven ? sp - spend.pointsGiven : 0);
+    }
+
+    perkRemove(actor, perk);
+    perkOwedPickAdd(actor, 1); // the pick goes back to be made again
+}
+
+int sheetEditCancel(Object* actor, bool* keptHereAndNow)
+{
+    if (keptHereAndNow != nullptr) {
+        *keptHereAndNow = false;
+    }
+
+    if (actor == nullptr) {
+        return kSheetEditNoActor;
+    }
+
+    SheetEditSession* session = sessionFor(actor);
+    if (session == nullptr || !session->open) {
+        return kSheetEditNoSession;
+    }
+
+    // A perk still owing its Tag!/Mutate! answer comes off the way escaping that
+    // follow-up takes it off, which also forgets its log entry.
+    if (session->pendingChoice != PERK_CHOICE_PENDING_NONE && session->pendingPerk != -1) {
+        sheetEditChoiceCancel(actor, session, session->pendingPerk);
+    }
+
+    ServerActorScope scope(actor);
+
+    // Newest first, each the inverse of what was done: a point bought is sold back
+    // (skillSub refunds what "-" would), a point walked back is bought again, a perk
+    // comes off. So each step undoes the state the one after it was made in.
+    for (size_t i = session->spends.size(); i-- > 0;) {
+        const SheetSpend& spend = session->spends[i];
+        switch (spend.kind) {
+        case kSheetSpendSkillUp:
+            if (skillSub(actor, spend.index) != 0) {
+                fprintf(stderr, "f2_server: sheet cancel could not sell back a point in skill %d\n", spend.index);
+            }
+            break;
+        case kSheetSpendSkillDown:
+            if (skillAdd(actor, spend.index) != 0) {
+                fprintf(stderr, "f2_server: sheet cancel could not buy back a point in skill %d\n", spend.index);
+            }
+            break;
+        case kSheetSpendPerk:
+            if (spend.index == PERK_HERE_AND_NOW) {
+                // A level cannot be handed back: the level-up it paid out (points,
+                // hit points, maybe a perk) is the player's to keep or spend.
+                if (keptHereAndNow != nullptr) {
+                    *keptHereAndNow = true;
+                }
+                break;
+            }
+            sheetSpendUndoPerk(actor, spend);
+            break;
+        }
+    }
+    session->spends.clear();
+
+    // The undo floor for "-" is where the screen opened, which is where it is again.
+    for (int skill = 0; skill < SKILL_COUNT; skill++) {
+        session->skillBaseline[skill] = skillGetValue(actor, skill);
+    }
+
+    critterUpdateDerivedStats(actor);
+    pcLevelUpBadgeRefresh(actor);
+    playerSheetMarkDirty(actor);
     return kSheetEditOk;
 }
 

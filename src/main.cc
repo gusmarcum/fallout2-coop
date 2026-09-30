@@ -1210,6 +1210,24 @@ static bool viewerKeepRunning()
     return _game_user_wants_to_quit == 0;
 }
 
+// Does switching the active hand to `newHand` play an animation? The server answers
+// the switch with a put-away (a weapon is out) and/or a take-out (the new hand holds a
+// weapon), and with nothing at all when neither applies (serverControlSwapHand's own
+// test, mirrored). Read off our own mirror: the drawn weapon is the weapon-animation
+// nibble of the dude's fid, the hands are the dude's item slots.
+static bool viewerHandSwitchAnimates(int newHand)
+{
+    if (gDude == nullptr) {
+        return true; // no mirror to ask: keep the old wait
+    }
+    Object* held = newHand == HAND_RIGHT ? critterGetItem2(gDude) : critterGetItem1(gDude);
+    int newCode = (held != nullptr && itemGetType(held) == ITEM_TYPE_WEAPON)
+        ? weaponGetAnimationCode(held)
+        : 0;
+    int oldCode = (gDude->fid & 0xF000) >> 12;
+    return oldCode != 0 || newCode != 0;
+}
+
 // The worldmap trip ended in a map load (the server said so with the end event).
 // Vanilla loads the new map underneath the worldmap screen and only then takes the
 // screen away; the viewer cannot, so it holds on black instead of revealing the map it
@@ -1396,11 +1414,19 @@ static int mainClientViewer(const char* connectSpec)
                 int trait2 = -1;
                 traitsGetSelected(&trait1, &trait2);
 
+                // Sex and age ride at the end, after the traits (GitHub issue 14:
+                // they were never sent, so every character arrived male and 25).
+                // BASE values: the displayed age adds the years of game time passed.
+                // An older server reads the first twelve numbers and ignores these.
+                int gender = critterGetBaseStat(gDude, STAT_GENDER);
+                int age = critterGetBaseStat(gDude, STAT_AGE);
+
                 snprintf(createFromUi, sizeof(createFromUi),
-                    "%d %d %d %d %d %d %d %d %d %d %d %d",
+                    "%d %d %d %d %d %d %d %d %d %d %d %d %d %d",
                     special[0], special[1], special[2], special[3],
                     special[4], special[5], special[6],
-                    tagged[0], tagged[1], tagged[2], trait1, trait2);
+                    tagged[0], tagged[1], tagged[2], trait1, trait2,
+                    gender, age);
                 debugPrint("client-viewer: created character -> create %s\n", createFromUi);
             } else {
                 // Cancelled: join as whatever the account already is (or a clone
@@ -1629,6 +1655,9 @@ static int mainClientViewer(const char* connectSpec)
     bool oocBusy = false;
     bool handSwitchPending = false;
     unsigned int handSwitchSince = 0;
+    // Whether the pending switch plays a put-away or take-out at all. Only one that
+    // does blocks input: an empty hand to an empty hand has nothing to wait for.
+    bool handSwitchAnimates = true;
     // Whether the last frame was in combat: the chat box is closed when a fight
     // STARTS, not for as long as it lasts (see the chat block in the loop).
     bool sayWasInCombat = false;
@@ -1810,7 +1839,11 @@ static int mainClientViewer(const char* connectSpec)
             // such as autorun, sound, brightness, text speed, and mouse sensitivity.
             // kPreferences is in kViewerModalMask, so the wire continues pumping
             // inside this blocking vanilla dialog and combat/map changes can close it.
+            clientViewerTakeForcedScreenClose(); // clear a stale mark from another screen
+            unsigned int optionsOpenedAt = getTicks();
             doPreferences(false);
+            debugPrint("options: closed after %u ms by %s\n", getTicksSince(optionsOpenedAt),
+                clientViewerTakeForcedScreenClose() ? "the game" : "the player");
         } else if (keyCode == KEY_F6 || keyCode == KEY_F7) {
             // Vanilla's quicksave / quickload keys (game_ui.cc), as wire verbs: the
             // server owns the world, so it writes the quick slot and reloads it for
@@ -1885,11 +1918,22 @@ static int mainClientViewer(const char* connectSpec)
                 char cmd[16];
                 snprintf(cmd, sizeof(cmd), "hand %d", newHand);
                 conn.sendLine(cmd);
+                // ►► NOTHING TO WAIT FOR WHEN NEITHER HAND HOLDS A WEAPON. The wait below
+                // is released by the switch's put-away/take-out replay, and the server
+                // records one only when there is something to put away or take out
+                // (serverControlSwapHand, the same test as here). Punch to kick has
+                // neither, so the wait sat out its whole timeout with the watch cursor
+                // up and nothing moving (GitHub issue 7).
+                handSwitchAnimates = viewerHandSwitchAnimates(newHand);
                 if (conn.inCombat()) {
-                    actionPending = true;
-                    actionPendingSince = getTicks();
+                    if (handSwitchAnimates) {
+                        actionPending = true;
+                        actionPendingSince = getTicks();
+                    }
                     conn.recomputeCombatOutlines();
                 } else {
+                    // The latch still runs without an animation, so a refusal can put
+                    // the hand back; it just does not block input (oocBusy).
                     handSwitchPending = true;
                     handSwitchSince = getTicks();
                     clientViewerTakeRefusal(); // clear any stale refusal edge before we wait
@@ -2102,7 +2146,11 @@ static int mainClientViewer(const char* connectSpec)
             // free — vanilla prices the inventory screen, not this one — and the
             // skill it arms is answered honestly on use: msg 902 for the seven
             // combat-forbidden skills, a real toggle for Sneak.
+            clientViewerTakeForcedScreenClose(); // clear a stale mark from another screen
+            unsigned int skilldexOpenedAt = getTicks();
             int rc = skilldexOpen();
+            debugPrint("skilldex: closed after %u ms by %s\n", getTicksSince(skilldexOpenedAt),
+                clientViewerTakeForcedScreenClose() ? "the game" : "the player");
             int mode = viewerSkillModeForSkilldexRc(rc);
             // The ticker may have applied dude-inv deltas while the modal blocked — reap
             // deferred frees + let the main loop drain a deferred blob (uniform with 'I').
@@ -2573,7 +2621,10 @@ static int mainClientViewer(const char* connectSpec)
                 handSwitchPending = false;
             }
         }
-        oocBusy = !conn.inCombat() && (handSwitchPending || animationIsBusy(gDude));
+        // The idle fidget does not count (animationIsBusyIgnoringFidgets): vanilla lets a
+        // click cancel a head scratch, and the move click below does exactly that.
+        oocBusy = !conn.inCombat()
+            && ((handSwitchPending && handSwitchAnimates) || animationIsBusyIgnoringFidgets(gDude));
         // Softlock diagnostic (F2_TRACE_EVENTS): if the wait cursor holds for a long
         // stretch, name WHICH component keeps combatBusy latched — a stuck myTurn flip,
         // an un-idle replay/door, a queue that won't drain, an unanswered action, or the

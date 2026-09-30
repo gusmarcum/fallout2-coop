@@ -663,6 +663,13 @@ void* actionTalkToCallbackPtr()
     return (void*)(AnimationCallback*)_talk_to;
 }
 
+// Same export for _is_next_to: the server recorder recognises it by pointer and judges
+// it after the approach walk, instead of letting the outcome behind it fire regardless.
+void* actionIsNextToCallbackPtr()
+{
+    return (void*)(AnimationCallback*)_is_next_to;
+}
+
 // The STATE half of _show_death, callable from both sides of the record seam.
 //
 // The range is the two ANNIHILATION deaths (the decompile spelled these 30/31;
@@ -1637,26 +1644,40 @@ int actionPickUp(Object* critter, Object* item)
         if (presRecordOpCount() > 2) {
             presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), critter->netId);
         }
-        presRecordCommitDeferred(); // the MoveToObject walk to the item
-        // Apply the pickup outcome authoritatively — the recorded _obj_pickup /
-        // _check_scenery_ap_cost callbacks DROP under record (the server never runs a
-        // recorded reg_anim's callbacks), so the state must be applied here.
+        int itemTileBefore = item->tile;
+        // ►►►► THE WALK, AND THEN THE PICKUP ONLY IF THE WALK REACHED IT (GitHub issue 13,
+        // bugs/042). The recorder applies the registered _obj_pickup itself, and it used to
+        // do so the moment it was REGISTERED, before this commit had moved the critter at
+        // all and without asking the forced _is_next_to between them: an NPC twenty hexes
+        // off took a thrown spear from under the player's feet. The recorder now holds the
+        // walker's callbacks for this commit and runs them after the walk, stopping at an
+        // _is_next_to the walker does not pass (server_anim.cc, gDeferredCallbacks). Short
+        // of the item, nothing is taken; rc stays the registration's, as in vanilla, so the
+        // AI records the item as its next-turn goal (_ai_retrieve_object) and walks on.
         //
+        // This used to apply _obj_pickup a SECOND time here, from before the recorder ran
+        // state callbacks at all. itemAdd refused the duplicate, but the item's pickup
+        // script ran twice; gone.
+        presRecordCommitDeferred();
+        bool taken = item->owner == critter;
+        bool traceP = getenv("F2_TRACE_EVENTS") != nullptr;
+        if (traceP) {
+            fprintf(stderr, "[cpickup] critter=%d item_net=%d %s (critter tile %d, item was at tile %d, distance now %d)\n",
+                critter->netId, item->netId, taken ? "taken" : "NOT taken: the walk did not reach it",
+                critter->tile, itemTileBefore, taken ? 0 : objectGetDistanceBetween(critter, item));
+        }
         // ►► KNOWN PRE-EXISTING ASYMMETRY, do not "fix" by honoring this return.
         // This path registers an approach walk before charging; the non-record
         // path above charges without walking. The two therefore disagree about
         // the critter's AP at this point. While both sides IGNORE the refusal the
-        // divergence stays invisible (the pickup happens either way), which is
-        // why the record-purity gate has always passed. Honoring it on either
-        // side alone makes record mode observable in the sim and fails that gate
-        // (verified 2026-07-20). Making pickup respect AP properly means removing
-        // the walk asymmetry first — banked, not done here.
-        _check_scenery_ap_cost(critter, item);
-        bool traceP = getenv("F2_TRACE_EVENTS") != nullptr;
-        if (traceP) fprintf(stderr, "[cpickup] critter=%d item_net=%d item_tile=%d ops=%d\n",
-            critter->netId, item->netId, item->tile, presRecordOpCount());
-        int pr = _obj_pickup(critter, item);
-        if (traceP) fprintf(stderr, "[cpickup] done rc=%d item_tile_now=%d\n", pr, item->tile);
+        // divergence stays invisible, which is why the record-purity gate has
+        // always passed. Honoring it on either side alone makes record mode
+        // observable in the sim and fails that gate (verified 2026-07-20). Making
+        // pickup respect AP properly means removing the walk asymmetry first —
+        // banked, not done here. Charged only for a pickup that happened.
+        if (taken) {
+            _check_scenery_ap_cost(critter, item);
+        }
     }
 
     return rc;
