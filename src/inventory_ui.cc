@@ -632,6 +632,8 @@ void inventoryOpen()
     if (clientViewerActive()) {
         debugPrint("inventory: screen up (window %d)\n", gInventoryWindow);
     }
+    // The hit points the summary last printed (wire viewer, see the loop).
+    int summaryHitPoints = critterGetHitPoints(_stack[0]);
 
     for (;;) {
         sharedFpsLimiter.mark();
@@ -679,6 +681,17 @@ void inventoryOpen()
             // sit in the buffer, invisible, until some unrelated event blits the
             // window (the tell is a sprite that partially appears as the mouse
             // cursor's own dirty-rect drags across it).
+            windowRefresh(gInventoryWindow);
+        }
+
+        // Wire viewer: the summary prints the hit points, and those now roll toward the
+        // server's number while this screen is up (viewerServiceTicker's HUD tick). Eat
+        // a healing item here and the heal lands a moment later, after the item is
+        // already gone, so the reconcile above repainted the OLD number: repaint
+        // whenever the number moves (GitHub issue 9).
+        if (clientViewerActive() && critterGetHitPoints(_stack[0]) != summaryHitPoints) {
+            summaryHitPoints = critterGetHitPoints(_stack[0]);
+            inventoryRenderSummary();
             windowRefresh(gInventoryWindow);
         }
 

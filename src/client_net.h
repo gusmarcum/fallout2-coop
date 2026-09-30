@@ -99,6 +99,11 @@ public:
     // end-of-combat chrome once the queue drains. No-op headless / when disconnected.
     void presentationTick();
 
+    // Roll the hit point counter one step toward the server's number, and nothing else.
+    // For the screens that switch the world view off (inventory, pipboy, character sheet),
+    // where presentationTick does not run. No-op headless / when disconnected.
+    void hudTick();
+
     // Recompute vanilla combat outlines from the current turn + mouse mode (viewer
     // only, #8). Idempotent; the render loop calls it after a combat mouse-mode switch
     // (crosshair ⇄ move/view toggles the target highlight). Combat/turn/move-driven

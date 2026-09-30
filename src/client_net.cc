@@ -5236,6 +5236,7 @@ public:
     bool inCombat() const { return _decoder.inCombat(); }
     bool myTurn() const { return _decoder.myTurn(); }
     void presentationPump() { _decoder.presentationPump(); }
+    void hudPump() { _decoder.rollDudeHp(); }
     void recomputeCombatOutlines() { _decoder.recomputeCombatOutlines(); }
     bool everBoundToSlot() const { return _decoder.everBoundToSlot(); }
     bool combatPresentationBusy() const { return _decoder.combatPresentationBusy(); }
@@ -5511,6 +5512,13 @@ void ClientConnection::presentationTick()
 {
     if (_impl->stream != nullptr) {
         _impl->stream->presentationPump();
+    }
+}
+
+void ClientConnection::hudTick()
+{
+    if (_impl->stream != nullptr) {
+        _impl->stream->hudPump();
     }
 }
 
@@ -5955,6 +5963,29 @@ static void viewerServiceTicker()
     // :402) and _object_animate (animation.cc) refresh their OWN dirty rects, which is
     // exactly how vanilla's ticker animated the world with no main-loop help. The modal's
     // window composites above those rects. Kill switch F2_NO_MODAL_PRESENT=1.
+    //
+    // ►► THE HIT POINT COUNTER IS NOT THE WORLD, and it keeps counting on every screen.
+    // The screens that switch the world off (inventory, pipboy, character sheet,
+    // skilldex, options) skip the presentation tick below, and the counter's roll lived
+    // only there: eat a healing item in the inventory, or rest in the pipboy, and the
+    // number stood still until the screen closed (GitHub issues 9 and 10).
+    if (isoIsDisabled()) {
+        gViewerConn->hudTick();
+    }
+    // F2_VIEWER_SHOT_EVERY covers the screens too. The main loop's capture (main.cc)
+    // stops while one is open, and a proof of what a screen shows needs its pictures
+    // (tools/client_screen_proof.py invhp, clock). Every Nth tick of an open screen.
+    {
+        static int shotEvery = -1;
+        static int screenTicks = 0;
+        if (shotEvery == -1) {
+            const char* value = getenv("F2_VIEWER_SHOT_EVERY");
+            shotEvery = value != nullptr ? atoi(value) : 0;
+        }
+        if (shotEvery > 0 && (++screenTicks % shotEvery) == 0) {
+            takeScreenshot();
+        }
+    }
     if (getenv("F2_NO_MODAL_PRESENT") != nullptr) {
         return;
     }
