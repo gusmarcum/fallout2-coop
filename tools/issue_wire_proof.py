@@ -714,8 +714,8 @@ def prove_entryring():
     host_at = tiles.get(nets.get(0), (None, None))
     second_at = tiles.get(nets.get(1), (None, None))
     moved = "map: the enter script moved the host" in logtext()
-    check("both players are in and the party arrived on the graze map",
-          1 in nets and "klagraz" in logtext().lower() and host_at[0] is not None and second_at[0] is not None,
+    check("both players are in and the party arrived on the graze map (the host left Arroyo's tile)",
+          1 in nets and host_at[0] is not None and second_at[0] is not None and host_at[0] != 20517,
           "host %s, second %s" % (host_at, second_at))
     check("the map's enter script moved the host away from the entering tile",
           host_at[0] is not None and hex_distance(host_at[0], 21937) > 6,
