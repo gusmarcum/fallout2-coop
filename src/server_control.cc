@@ -506,7 +506,21 @@ static int interactionCarriedQty(Object* actor, int pid)
     return total;
 }
 
+// The player whose interaction is firing is named for the presenter for the length of
+// the outcome: a console line printed meanwhile (a door script's "You failed to pick the
+// lock", the engine's "That door is locked") is that player's, and everyone else used to
+// read it as their own (GitHub issue 25). playerInteractionActor, server_players.h.
+static void interactionFireBody(int verb, Object* actor, Object* target, int arg);
+
 static void interactionFire(int verb, Object* actor, Object* target, int arg)
+{
+    Object* previous = playerInteractionActor();
+    playerInteractionActorSet(actor);
+    interactionFireBody(verb, actor, target, arg);
+    playerInteractionActorSet(previous);
+}
+
+static void interactionFireBody(int verb, Object* actor, Object* target, int arg)
 {
     // ►► The outcome USED TO BE ENTIRELY SILENT — no line on success, none on
     // failure — so "the latch fired and actionPickUp declined" looked exactly like

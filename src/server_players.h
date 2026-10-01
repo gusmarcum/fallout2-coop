@@ -271,6 +271,13 @@ void playerActorDied(Object* actor);
 // LATCH and emit, never re-enter combat, touch the roster, or block.
 void playerActorSetDiedHook(void (*hook)(Object* actor));
 
+// The player whose interaction outcome is firing right now (server_control.cc's
+// interactionFire), or null. Read by the network presenter: a console line printed while
+// it fires is that player's, and everyone else gets it under that player's name (GitHub
+// issue 25). Lives here, in core, because the presenter cannot link server-only symbols.
+Object* playerInteractionActor();
+void playerInteractionActorSet(Object* actor);
+
 } // namespace fallout
 
 #endif /* FALLOUT_SERVER_PLAYERS_H_ */

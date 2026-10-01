@@ -454,4 +454,17 @@ void playerActorDied(Object* actor)
     }
 }
 
+// See the header: whose interaction outcome is firing (GitHub issue 25).
+static Object* gPlayerInteractionActor = nullptr;
+
+Object* playerInteractionActor()
+{
+    return gPlayerInteractionActor;
+}
+
+void playerInteractionActorSet(Object* actor)
+{
+    gPlayerInteractionActor = actor;
+}
+
 } // namespace fallout

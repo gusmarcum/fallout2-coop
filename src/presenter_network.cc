@@ -21,7 +21,8 @@
 #include "msg_channel.h"
 #include "presenter.h"
 #include "server_loop.h" // serverDedicatedActive — feature A marks only on the real server
-#include "server_players.h" // serverActorBusyMarkByNetId — the action-gate busy mark
+#include "server_players.h" // serverActorBusyMarkByNetId — the action-gate busy mark; playerInteractionActor (issue 25)
+#include "critter.h" // critterGetName — that player's name on everyone else's copy
 #include "sim_clock.h"
 #include "wire_defs.h"
 
@@ -1371,6 +1372,25 @@ public:
     {
         if (presenterEmissionsSuppressed()) {
             holdConsoleLine(0, kMsgChannelDefault, text);
+            return;
+        }
+        // ►► A LINE PRINTED WHILE ONE PLAYER'S INTERACTION FIRES IS THAT PLAYER'S. A door
+        // script's "You failed to pick the lock" and the engine's "That door is locked"
+        // are plain broadcasts, so every player read them as their own (GitHub issue
+        // 25). The player gets the line as written; the others get it under that
+        // player's name, "Player2: You failed to pick the lock.", which says who and
+        // what without rewording text a script owns. Nothing changes with one player.
+        Object* actor = playerInteractionActor();
+        if (actor != nullptr && playerActorCount() > 1) {
+            consoleMessageFor(actor->netId, text);
+            char line[640];
+            snprintf(line, sizeof(line), "%s: %s", critterGetName(actor), text);
+            for (int slot = 0; slot < playerActorCount(); slot++) {
+                Object* other = playerActorAt(slot);
+                if (other != nullptr && other != actor) {
+                    consoleMessageFor(other->netId, line);
+                }
+            }
             return;
         }
         beginEvent(EVENT_CONSOLE, 0);
