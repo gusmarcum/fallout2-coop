@@ -844,11 +844,18 @@ int main(int argc, char** argv)
                 }
                 return unlimitedTicks || tick + 1 < ticks;
             },
-            // simGate: FREEZE the sim only when a keepalive server sits with no
-            // clients — "no player == freeze time". A CMD-only server (no wire)
-            // and every non-keepalive run keep advancing exactly as before.
+            // simGate: FREEZE the sim while a keepalive server has nobody BOUND to a
+            // body — "no player == freeze time". It used to freeze only with no client
+            // CONNECTED, and a session that is connected but not yet logged in (the
+            // pre-join account query, the creation screen, the load) thawed the world
+            // with every body unpiloted: a fight the host's body was in ran on with the
+            // host's turns auto-ending, and a player rejoining next to hostiles took
+            // eight to ten of their turns before the join finished (GitHub issue 16).
+            // The inbound drain still runs on a frozen beat, so the login that binds the
+            // first slot is served and thaws the world. A CMD-only server (no wire) and
+            // every non-keepalive run keep advancing exactly as before.
             [&]() -> bool {
-                return !(keepAlive && haveNet && netSink.clientCount() == 0);
+                return !(keepAlive && haveNet && !serverControlHasClaimant());
             });
 
         // Clear the dialog pump before the netSink (which a real pump body will
