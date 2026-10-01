@@ -3503,7 +3503,8 @@ void serverControlLine(int sessionId, const char* line)
     // Sent before `sheetclose` when the player leaves with Cancel, Esc or C, which
     // in vanilla restore the sheet the screen opened with. The spends went out one
     // point at a time as they were clicked, so Cancel is the server walking them
-    // back (sheetEditCancel). A screen the game closed itself sends no cancel.
+    // back (sheetEditCancel). A screen the game closed under the player (a fight
+    // starting, a map change) sends it too since the v1.4.0 follow-up: only Done keeps.
     if (strcmp(verb, "sheetcancel") == 0) {
         bool keptHereAndNow = false;
         int rc = sheetEditCancel(actor, &keptHereAndNow);

@@ -1238,9 +1238,11 @@ int characterEditorShow(bool isCreationMode)
 // simply close it here, so Cancel kept every point and perk (GitHub issue 12). Now a
 // player's Cancel asks the server to walk this visit's spends back (sheetcancel),
 // which it does from its own record of them, and the rows it streams back repaint the
-// sheet. Two closes are NOT the player's Cancel and keep what was spent: the game
-// closing the screen itself (a fight starting under it, a map change, the service
-// ticker's ESC) and quitting the game.
+// sheet. A close the game forces (a fight starting under the screen, a map change: the
+// service ticker's ESC) is a Cancel too: the player was still planning when the screen
+// went away, and keeping a half-made plan was the complaint after v1.4.0 (GitHub issue
+// 12, follow-up). Only Done keeps. Quitting the game with the screen open keeps what was
+// spent as well; the server may not hear a cancel from a client that is going away.
 //
 // The open/close pair brackets the server's edit session: the undo baseline "-" may
 // walk back to (sheet_intent.h #4), and the spends Cancel undoes.
@@ -1251,7 +1253,7 @@ int characterEditorShowViewOnly()
     unsigned int openedAt = getTicks();
     int rc = characterEditorShow(0);
     bool forced = clientViewerTakeForcedScreenClose();
-    bool cancelled = rc == 1 && !forced && _game_user_wants_to_quit == 0;
+    bool cancelled = (rc == 1 || forced) && _game_user_wants_to_quit == 0;
     if (cancelled) {
         clientViewerSheetCancel();
     }
