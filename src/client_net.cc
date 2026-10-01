@@ -4422,6 +4422,7 @@ private:
             return;
         }
         int genderBefore = gDude != nullptr ? critterGetBaseStat(gDude, STAT_GENDER) : -1;
+        int levelBefore = gDude != nullptr ? pcGetStat(PC_STAT_LEVEL, gDude) : -1;
         int applyRc = playerSheetBlockRead(stream);
         // TEMP DIAGNOSTIC [psht]: the other two cuts of "only shows up if I reconnect".
         // Paired with the server's [psht] emit line: a server emit with NO line here
@@ -4444,6 +4445,17 @@ private:
             // [[no-re-derivation-path-bug-class]]
             if (gDude != nullptr && slot == playerActorSlotOf(gDude)) {
                 indicatorBarRefresh();
+                // ►► THE LEVEL-UP SOUND, FOR OUR OWN LEVEL. Vanilla plays it where the
+                // level is awarded; on the dedicated server that is stat.cc, which has no
+                // speakers and used to play it for the host alone, as a broadcast, so the
+                // host's level-up sounded on every screen and nobody else's ever did
+                // (GitHub issue 21). The row that just arrived says whether OUR level
+                // rose; the sound is ours to play.
+                if (levelBefore >= 0 && pcGetStat(PC_STAT_LEVEL, gDude) > levelBefore) {
+                    soundPlayFile("levelup");
+                    debugPrint("client_net: level-up sound (level %d -> %d)\n",
+                        levelBefore, pcGetStat(PC_STAT_LEVEL, gDude));
+                }
                 // ►► AND THE LOCAL LOOK, WHEN THE ROW CHANGED OUR SEX. The inventory's
                 // paper doll draws an unarmored body from _art_vault_guy_num, which is
                 // derived from our own sex (_proto_dude_update_gender) on a map load and
