@@ -2644,9 +2644,22 @@ private:
             Inventory* inv = &obj->data.inventory;
             int origLen = inv->length;
             std::vector<char> claimed(origLen, 0);
+            // ►► THE WIRE'S EQUIP FLAGS LAND HERE TOO (GitHub issue 27). This reconcile
+            // matched by pid and copied the quantity and ammo, never the in-hand and
+            // worn flags, so on an observer's screen another player's worn armor and
+            // held weapons were plain items in the list: the screens hide a critter's
+            // equipped gear by those flags (equipmentDetach), and the mirror had none.
+            // Containers and corpses carry no equipped gear, so nothing changes there.
+            const unsigned int kEquip = OBJECT_IN_ANY_HAND | OBJECT_WORN;
+            for (int i = 0; i < origLen; i++) {
+                if (inv->items[i].item != nullptr) {
+                    inv->items[i].item->flags &= ~kEquip;
+                }
+            }
             for (const WireItem& wi : invItems) {
                 if (wi.pid < 0) continue;
                 int qty = wi.quantity > 0 ? wi.quantity : 1;
+                unsigned int equip = wi.flags & kEquip;
                 int m = -1;
                 for (int i = 0; i < origLen; i++) {
                     if (!claimed[i] && inv->items[i].item != nullptr
@@ -2658,11 +2671,13 @@ private:
                 if (m >= 0) {
                     claimed[m] = 1;
                     inv->items[m].quantity = qty;
+                    inv->items[m].item->flags |= equip;
                     applyWireItemAmmo(inv->items[m].item, wi.ammoQuantity, wi.ammoTypePid);
                 } else {
                     Object* item = nullptr;
                     if (objectCreateWithPid(&item, wi.pid) == 0 && item != nullptr) {
                         _obj_disconnect(item, nullptr); // inventory-only, not in the world
+                        item->flags |= equip;
                         applyWireItemAmmo(item, wi.ammoQuantity, wi.ammoTypePid);
                         mirrorInventoryAppend(obj, item, qty); // never itemAdd: its merge frees the matched slot
                     }
@@ -2695,6 +2710,16 @@ private:
             // screen repaint some OTHER container's changes as if they were its own.
             if (gViewerLootTargetNetId != 0 && obj->netId == gViewerLootTargetNetId) {
                 gLootTargetInvDirty = true;
+            }
+            if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                int worn = 0;
+                int held = 0;
+                for (int i = 0; i < inv->length; i++) {
+                    if (inv->items[i].item == nullptr) continue;
+                    if ((inv->items[i].item->flags & OBJECT_WORN) != 0) worn++;
+                    if ((inv->items[i].item->flags & OBJECT_IN_ANY_HAND) != 0) held++;
+                }
+                fprintf(stderr, "[inv-full] net=%d items=%d worn=%d held=%d\n", obj->netId, inv->length, worn, held);
             }
         } else if (hasInventory && obj != gDude) {
             // Reconcile EQUIP FLAGS in place — do NOT free/recreate items. An AI critter
