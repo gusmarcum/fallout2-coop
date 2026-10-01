@@ -1551,6 +1551,24 @@ int actionPickUp(Object* critter, Object* item)
         return -1;
     }
 
+    if (recording && critter->data.critter.combat.ap <= 0) {
+        // ►► NO ACTION POINTS, NO SEQUENCE (GitHub issue 13, follow-up). Vanilla abandons
+        // the approach outright when the critter has nothing left to walk with
+        // (animationRegisterMoveToObject: actionPoints == 0 -> _anim_cleanup, and this
+        // function returns -1): nothing is shown and nothing is taken. The recorder's move
+        // leaf refuses WITHOUT poisoning the sequence (server_anim.cc, record-purity), so
+        // the crouch and its sound were still recorded and shipped: an unarmed AI that had
+        // just spent every point walking toward a weapon crouched at it once per attempt
+        // of its ten-attempt loop, from where it stood, with the weapon still on the
+        // ground ("a weird pickup animation loop for like 20 iterations"). Answer as
+        // vanilla does, before anything is recorded.
+        if (getenv("F2_TRACE_EVENTS") != nullptr) {
+            fprintf(stderr, "[cpickup] critter=%d item_net=%d NOT attempted: no action points left\n",
+                critter->netId, item->netId);
+        }
+        return -1;
+    }
+
     if (recording) {
         presRecordAmbientBegin();
     }
@@ -1641,7 +1659,9 @@ int actionPickUp(Object* critter, Object* item)
 
     if (recording) {
         presRecordAmbientEnd();
-        if (presRecordOpCount() > 2) {
+        // A sequence a leaf abandoned (rc -1: a mover with no walk art) shows nothing in
+        // vanilla; ship the recording only for a sequence that stood.
+        if (rc == 0 && presRecordOpCount() > 2) {
             presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), critter->netId);
         }
         int itemTileBefore = item->tile;

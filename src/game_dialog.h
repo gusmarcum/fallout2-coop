@@ -52,6 +52,7 @@ int gameDialogAddMessageOptionWithProcIdentifier(int messageListId, int messageI
 int gameDialogAddTextOptionWithProcIdentifier(int messageListId, const char* text, const char* a3, int reaction);
 int gameDialogAddMessageOptionWithProc(int messageListId, int messageId, int proc, int reaction);
 int gameDialogAddTextOptionWithProc(int messageListId, const char* text, int proc, int reaction);
+int gameDialogAddBakedOption(const char* text, int reaction);
 bool gameDialogGetOptionText(int index, char* out, size_t size);
 
 // Seed the reply/options statics from the wire (viewer dialog render, A3). The

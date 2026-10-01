@@ -506,7 +506,21 @@ static int interactionCarriedQty(Object* actor, int pid)
     return total;
 }
 
+// The player whose interaction is firing is named for the presenter for the length of
+// the outcome: a console line printed meanwhile (a door script's "You failed to pick the
+// lock", the engine's "That door is locked") is that player's, and everyone else used to
+// read it as their own (GitHub issue 25). playerInteractionActor, server_players.h.
+static void interactionFireBody(int verb, Object* actor, Object* target, int arg);
+
 static void interactionFire(int verb, Object* actor, Object* target, int arg)
+{
+    Object* previous = playerInteractionActor();
+    playerInteractionActorSet(actor);
+    interactionFireBody(verb, actor, target, arg);
+    playerInteractionActorSet(previous);
+}
+
+static void interactionFireBody(int verb, Object* actor, Object* target, int arg)
 {
     // ►► The outcome USED TO BE ENTIRELY SILENT — no line on success, none on
     // failure — so "the latch fired and actionPickUp declined" looked exactly like
@@ -3503,7 +3517,8 @@ void serverControlLine(int sessionId, const char* line)
     // Sent before `sheetclose` when the player leaves with Cancel, Esc or C, which
     // in vanilla restore the sheet the screen opened with. The spends went out one
     // point at a time as they were clicked, so Cancel is the server walking them
-    // back (sheetEditCancel). A screen the game closed itself sends no cancel.
+    // back (sheetEditCancel). A screen the game closed under the player (a fight
+    // starting, a map change) sends it too since the v1.4.0 follow-up: only Done keeps.
     if (strcmp(verb, "sheetcancel") == 0) {
         bool keptHereAndNow = false;
         int rc = sheetEditCancel(actor, &keptHereAndNow);

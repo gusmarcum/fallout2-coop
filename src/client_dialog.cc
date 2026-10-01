@@ -7,6 +7,7 @@
 #include "art.h"
 #include "client_barter.h"
 #include "client_net.h"
+#include "debug.h"
 #include "game_dialog.h"
 #include "kb.h"
 #include "object.h"
@@ -206,7 +207,10 @@ void clientDialogRenderPendingNode()
         int optionReaction = i < gPendingOptionReactions.size()
             ? gPendingOptionReactions[i]
             : GAME_DIALOG_REACTION_NEUTRAL;
-        gameDialogAddTextOptionWithProc(-1, gPendingOptions[i].c_str(), 0, optionReaction);
+        // The wire text is final (the server resolved it, prefix included); adding it as
+        // a text option prefixed it again, two bullets per option (GitHub issue 23).
+        gameDialogAddBakedOption(gPendingOptions[i].c_str(), optionReaction);
+        debugPrint("client_dialog: option %d \"%.60s\"\n", (int)i, gPendingOptions[i].c_str());
     }
 
     // Trigger the vanilla render pipeline now that reply/option globals are seeded.

@@ -2644,9 +2644,22 @@ private:
             Inventory* inv = &obj->data.inventory;
             int origLen = inv->length;
             std::vector<char> claimed(origLen, 0);
+            // ►► THE WIRE'S EQUIP FLAGS LAND HERE TOO (GitHub issue 27). This reconcile
+            // matched by pid and copied the quantity and ammo, never the in-hand and
+            // worn flags, so on an observer's screen another player's worn armor and
+            // held weapons were plain items in the list: the screens hide a critter's
+            // equipped gear by those flags (equipmentDetach), and the mirror had none.
+            // Containers and corpses carry no equipped gear, so nothing changes there.
+            const unsigned int kEquip = OBJECT_IN_ANY_HAND | OBJECT_WORN;
+            for (int i = 0; i < origLen; i++) {
+                if (inv->items[i].item != nullptr) {
+                    inv->items[i].item->flags &= ~kEquip;
+                }
+            }
             for (const WireItem& wi : invItems) {
                 if (wi.pid < 0) continue;
                 int qty = wi.quantity > 0 ? wi.quantity : 1;
+                unsigned int equip = wi.flags & kEquip;
                 int m = -1;
                 for (int i = 0; i < origLen; i++) {
                     if (!claimed[i] && inv->items[i].item != nullptr
@@ -2658,11 +2671,13 @@ private:
                 if (m >= 0) {
                     claimed[m] = 1;
                     inv->items[m].quantity = qty;
+                    inv->items[m].item->flags |= equip;
                     applyWireItemAmmo(inv->items[m].item, wi.ammoQuantity, wi.ammoTypePid);
                 } else {
                     Object* item = nullptr;
                     if (objectCreateWithPid(&item, wi.pid) == 0 && item != nullptr) {
                         _obj_disconnect(item, nullptr); // inventory-only, not in the world
+                        item->flags |= equip;
                         applyWireItemAmmo(item, wi.ammoQuantity, wi.ammoTypePid);
                         mirrorInventoryAppend(obj, item, qty); // never itemAdd: its merge frees the matched slot
                     }
@@ -2696,6 +2711,16 @@ private:
             if (gViewerLootTargetNetId != 0 && obj->netId == gViewerLootTargetNetId) {
                 gLootTargetInvDirty = true;
             }
+            if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                int worn = 0;
+                int held = 0;
+                for (int i = 0; i < inv->length; i++) {
+                    if (inv->items[i].item == nullptr) continue;
+                    if ((inv->items[i].item->flags & OBJECT_WORN) != 0) worn++;
+                    if ((inv->items[i].item->flags & OBJECT_IN_ANY_HAND) != 0) held++;
+                }
+                fprintf(stderr, "[inv-full] net=%d items=%d worn=%d held=%d\n", obj->netId, inv->length, worn, held);
+            }
         } else if (hasInventory && obj != gDude) {
             // Reconcile EQUIP FLAGS in place — do NOT free/recreate items. An AI critter
             // that wields its gun mid-fight (the case that matters) already carries that
@@ -2720,14 +2745,33 @@ private:
                 unsigned int equip = wi.flags & (OBJECT_IN_ANY_HAND | OBJECT_WORN);
                 // Apply ammo to the matching item even when it is not equipped — a
                 // remote critter's carried spare weapon can change ammo too. (This
-                // branch stays equip-flags-only for item lifecycle: no free/recreate,
-                // just scalar writes on items the mirror already holds.)
+                // branch never frees: no recreate, just scalar writes on items the
+                // mirror already holds, plus the one addition below.)
+                bool held = false;
                 for (int i = 0; i < inv->length; i++) {
                     if (inv->items[i].item != nullptr && inv->items[i].item->pid == wi.pid) {
                         if (equip != 0) inv->items[i].item->flags |= equip;
                         applyWireItemAmmo(inv->items[i].item, wi.ammoQuantity, wi.ammoTypePid);
+                        held = true;
                         break;
                     }
+                }
+                if (held) continue;
+                // ►► A STACK THE MIRROR NEVER HAD: a weapon the critter took off the ground
+                // in the fight (GitHub issue 13, follow-up). It was left out as "acceptable
+                // v1", and it was not: the viewer drew the critter bare-handed while it
+                // swung the spear, and its corpse never listed the spear for looting, as a
+                // corpse is reconciled in full only by a delta that carries its inventory,
+                // and nothing changes in a pack at the moment of death. ADDING an object
+                // frees nothing, so the lifetime hazard that keeps this branch from
+                // rebuilding does not apply; the dead-corpse path above makes items the
+                // same way.
+                Object* item = nullptr;
+                if (objectCreateWithPid(&item, wi.pid) == 0 && item != nullptr) {
+                    _obj_disconnect(item, nullptr); // inventory-only, not in the world
+                    item->flags |= equip;
+                    applyWireItemAmmo(item, wi.ammoQuantity, wi.ammoTypePid);
+                    mirrorInventoryAppend(obj, item, wi.quantity > 0 ? wi.quantity : 1);
                 }
             }
             if (getenv("F2_TRACE_EVENTS") != nullptr) {
@@ -4403,6 +4447,7 @@ private:
             return;
         }
         int genderBefore = gDude != nullptr ? critterGetBaseStat(gDude, STAT_GENDER) : -1;
+        int levelBefore = gDude != nullptr ? pcGetStat(PC_STAT_LEVEL, gDude) : -1;
         int applyRc = playerSheetBlockRead(stream);
         // TEMP DIAGNOSTIC [psht]: the other two cuts of "only shows up if I reconnect".
         // Paired with the server's [psht] emit line: a server emit with NO line here
@@ -4425,6 +4470,17 @@ private:
             // [[no-re-derivation-path-bug-class]]
             if (gDude != nullptr && slot == playerActorSlotOf(gDude)) {
                 indicatorBarRefresh();
+                // ►► THE LEVEL-UP SOUND, FOR OUR OWN LEVEL. Vanilla plays it where the
+                // level is awarded; on the dedicated server that is stat.cc, which has no
+                // speakers and used to play it for the host alone, as a broadcast, so the
+                // host's level-up sounded on every screen and nobody else's ever did
+                // (GitHub issue 21). The row that just arrived says whether OUR level
+                // rose; the sound is ours to play.
+                if (levelBefore >= 0 && pcGetStat(PC_STAT_LEVEL, gDude) > levelBefore) {
+                    soundPlayFile("levelup");
+                    debugPrint("client_net: level-up sound (level %d -> %d)\n",
+                        levelBefore, pcGetStat(PC_STAT_LEVEL, gDude));
+                }
                 // ►► AND THE LOCAL LOOK, WHEN THE ROW CHANGED OUR SEX. The inventory's
                 // paper doll draws an unarmored body from _art_vault_guy_num, which is
                 // derived from our own sex (_proto_dude_update_gender) on a map load and
@@ -5011,11 +5067,14 @@ public:
         std::string track = want; // backgroundSoundLoad rewrites the buffer `last` points into
         int rc = _gsound_background_play_level_music(track.c_str(), 12);
         debugPrint("client-viewer: music watchdog restarted '%s' rc=%d\n", track.c_str(), rc);
+        // A failed restart is logged, not shown. The restart often fails once while a
+        // join or a map load still has the mixer starved, and the watchdog tries again
+        // ten seconds later anyway; the message window line it used to print told
+        // players to read a debug.log the release does not write (GitHub issue 18).
         if (rc != 0 && !_musicFailNoticed) {
             _musicFailNoticed = true;
-            static char line[160];
-            snprintf(line, sizeof(line), "Music '%s' could not be restarted (see debug.log)", track.c_str());
-            displayMonitorAddMessage(line);
+            debugPrint("client-viewer: music '%s' could not be restarted (rc=%d); will keep trying\n",
+                track.c_str(), rc);
         }
     }
 

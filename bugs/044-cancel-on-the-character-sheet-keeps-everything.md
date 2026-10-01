@@ -38,9 +38,11 @@ Here and Now is the one exception: it pays out a whole level, which cannot be ha
 it stays and the player is told ("Here and Now cannot be taken back; everything else was.").
 
 The screen sends `sheetcancel` before `sheetclose` when the PLAYER leaves with Cancel, Esc or
-C (vanilla's rc 1). A screen the game closed itself (a fight starting under it, a map change,
-a lost server: the service ticker's forced close, bugs/035) and quitting the game keep what was
-spent. An older server ignores the verb, so an older server behaves as before.
+C (vanilla's rc 1). In v1.4.0 a screen the game closed itself (a fight starting under it, a
+map change: the service ticker's forced close, bugs/035) kept what was spent; since the
+follow-up (bugs/046) it cancels too, and only Done keeps. Quitting the game with the screen
+open keeps what was spent. An older server ignores the verb, so an older server behaves as
+before.
 
 ## Verification
 `python -u tools/issue_wire_proof.py cancel ...`: the second player is funded with points and
@@ -64,6 +66,9 @@ server to see that visit end.
 |---|---|---|---|
 | v1.3.2 (`--expect-defect`: 4/4) | 17 (kept, no cancel sent) | 15 | 14 |
 | fixed (4/4) | 20 (all three back) | 18 (two kept) | 17 (one kept, "closed by the game") |
+
+The last column changed with bugs/046: a close the game forces now takes the point back
+(18), and the proof expects that.
 
 The first version of the Educated undo took back a flat 2 points. At the 99-point cap the +2
 never lands, so that would have cost the player 2 points; the pick's own additions are now

@@ -1148,7 +1148,11 @@ int pcAddExperienceWithOptions(int xp, bool a2, int* xpGained, Object* subject)
                 }
             }
             pcLevelUpBadgeRefresh(earner);
-            if (isHost) {
+            // Single-player plays the sound here. The dedicated server does not: its
+            // sfxPlay is a broadcast, so the host's level-up sounded on every player's
+            // screen and nobody else's ever did (GitHub issue 21). Each viewer now plays
+            // it for its own level when its sheet row arrives (client_net.cc).
+            if (isHost && !serverDedicatedActive()) {
                 presenter()->sfxPlay("levelup");
             }
 

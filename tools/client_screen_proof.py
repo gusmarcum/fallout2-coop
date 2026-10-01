@@ -22,9 +22,10 @@ of what it draws (F2_VIEWER_SHOT_EVERY) and what the server receives from it.
   invhp  GitHub issue 9. The second player opens the inventory and keeps it open; the
          operator puts them at 1 hit point. The counter must turn red while the screen is
          still up (read off the screenshots as in `hp`).
-  clock  GitHub issue 10. The second player opens the pipboy and keeps it open; the
-         operator rests the party three hours. The date and clock at the top of the pipboy
-         must be redrawn while it is still up (the screenshots' clock area must change).
+  clock  GitHub issue 10. The second player, at 1 hit point, opens the pipboy on its alarm
+         clock and keeps it open; the operator rests the party six hours. The date and
+         clock at the top of the pipboy, and the alarm clock's own "Hit Points" line, must
+         be redrawn while it is still up (the screenshots' areas must change).
   hands  GitHub issue 7 (bugs/037). Both hands are empty. The keyboard presses B three
          times a quarter second apart, every three seconds, in peace and then in a fight.
          Every press must reach the server: the old client waited 1.2 s after each swap
@@ -37,7 +38,13 @@ of what it draws (F2_VIEWER_SHOT_EVERY) and what the server receives from it.
          keyboard opens the sheet, selects Small Guns (Tab), buys three points (Right) and
          leaves with C (vanilla's Cancel); then buys two and leaves with Enter (Done); then
          buys one and a fight starts under the open sheet. The server's row must be back
-         after the Cancel, keep the Done's two, and keep the one the fight closed on.
+         after the Cancel, keep the Done's two, and (since the v1.4.0 follow-up) be back
+         again after the fight closed the screen: only Done keeps.
+  npcloot  GitHub issue 13, follow-up. A spear lies on the ground and a fight pulls the
+         unarmed Arroyo villagers in; one of their weapon hunts takes the spear. The second
+         player's real client (event trace on) must mirror the spear in that critter's
+         hand, so it is drawn armed and its corpse lists the spear for looting. The server
+         log must show no crouch shipped for an attempt a critter had no AP for.
   createui  GitHub issue 14 (bugs/043), the screen's half. A new player rolls a character
          on the real creation screen, keyboard only: female (S, Right, Enter), 30 (A, Up
          x5, Enter), five points into Strength, three tagged skills, Done. The line the
@@ -48,7 +55,7 @@ of what it draws (F2_VIEWER_SHOT_EVERY) and what the server receives from it.
 Nothing here reads or writes a live world: point it at a sandbox copy. It empties that
 folder's save slots and working maps before it starts. Needs Pillow for hp, invhp, clock.
 
-usage: python -u client_screen_proof.py <hp|chat|sheet|invhp|clock|hands|fidget|cancelui|createui>
+usage: python -u client_screen_proof.py <hp|chat|sheet|invhp|clock|hands|fidget|cancelui|createui|npcloot>
                                         <f2_server.exe> <fallout2-ce.exe> <game dir> <net port>
                                         <cmd port> [--expect-defect] [--keep <dir>]
 """
@@ -67,10 +74,11 @@ NL = chr(10)
 RAIDER = "0x010000EE"
 KEY_T, KEY_H, KEY_E, KEY_Y, KEY_ENTER = 23, 11, 8, 28, 40  # SDL scancodes
 KEY_C, KEY_O, KEY_I, KEY_P = 6, 18, 12, 19
-KEY_A, KEY_B, KEY_G, KEY_S, KEY_TAB = 4, 5, 10, 22, 43
+KEY_A, KEY_B, KEY_G, KEY_S, KEY_TAB, KEY_Z = 4, 5, 10, 22, 43, 29
 KEY_RIGHT, KEY_LEFT, KEY_DOWN, KEY_UP = 79, 80, 81, 82
 EVENT_COMBAT_ENTER, EVENT_COMBAT_EXIT = 12, 13
 logpath = os.path.join(gamedir, "client-screen-proof-server.log")
+clientlogpath = os.path.join(gamedir, "client-screen-proof-client.log")
 tracepath = os.path.join(gamedir, "client-screen-proof-keys.txt")
 results = []
 log = None
@@ -148,6 +156,25 @@ class Host:
         self.s.sendall((line + NL).encode())
         time.sleep(wait)
 
+    def objects(self):
+        """(netId, pid, tile, elevation) of every object the join snapshot carried."""
+        data = bytes(self.buf)
+        rows = []
+        pos = 10
+        while pos + 18 <= len(data):
+            length = struct.unpack_from("<I", data, pos + 8)[0]
+            if pos + 18 + length > len(data):
+                break
+            payload = data[pos + 18:pos + 18 + length]
+            pos += 18 + length
+            ep = 0
+            while ep + 4 <= len(payload):
+                etype, _flags, elen = struct.unpack_from("<BBH", payload, ep)
+                if etype in (1, 8) and elen >= 16:
+                    rows.append(struct.unpack_from("<iiii", payload, ep + 4))
+                ep += 4 + elen
+        return rows
+
 
 def admin(line, wait=1.0):
     s = socket.create_connection(("127.0.0.1", cmdport), timeout=5)
@@ -199,8 +226,17 @@ def join(extra):
     env.update({"F2_CLIENT_CONNECT": "127.0.0.1:%d" % port, "F2_PLAYER_NAME": "Brother",
                 "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"})
     env.update(extra)
+    # The client's stderr goes to a file: with F2_TRACE_EVENTS it carries the mirror's
+    # inventory lines ([inv-apply]), which the npcloot proof reads.
     return subprocess.Popen([client_exe], cwd=gamedir, env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            stdout=subprocess.DEVNULL, stderr=open(clientlogpath, "w"))
+
+
+def client_stderr():
+    try:
+        return open(clientlogpath, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
 
 
 def leave(proc):
@@ -500,28 +536,80 @@ def clock_area(path):
 
 def prove_clock():
     global game
-    write_keys([(420, KEY_P)])  # open the pipboy once and never close it
+    # The second player joins once so the operator can put them at 1 hit point (kill +
+    # revive, the hp proof's recipe), then joins again with Z pressed at frame 420: the
+    # pipboy opens straight on its alarm clock, whose "Hit Points 1/N" line sits above the
+    # rest options, and never closes. The operator then rests six hours (one heal step).
     host = Host()
     time.sleep(2.5)
     host.send("login Tester", 3.0)
+    game = join({})
+    time.sleep(9)
+    leave(game)
+    game = None
+    admin("kill 1", 2.0)
+    out = admin("revive 1", 2.0)
+    check("the second player is put at 1 hit point", "back at 1 HP" in out, out[:80])
+
+    # P at frame 900 opens the pipboy (a second join of the same character takes the
+    # client longer to reach its main loop than the first, so later than the other
+    # proofs' presses), and a mouse click on its alarm clock button brings up the rest
+    # options with the "Hit Points" line, the way the reporter gets there. The mouse
+    # trace is relative: pin the cursor in the corner first, then move onto the button
+    # (window-relative (124, 13), the window centred on the 1280x720 screen).
+    write_keys([(900, KEY_P)])
+    with open(tracepath, "a") as trace:
+        trace.write("M 1020 -5000 -5000 0%sM 1030 %d %d 0%sM 1040 0 0 1%sM 1046 0 0 0%s"
+                    % (NL, (1280 - 640) // 2 + 124 + 8, (720 - 480) // 2 + 13 + 6, NL, NL, NL))
     drop_screenshots()
     game = join({"F2_INPUT_REPLAY": tracepath, "F2_VIEWER_SHOT_EVERY": "30"})
-    time.sleep(14)
+    time.sleep(26)
     before = screenshots()
-    out = admin("rest 180", 3.0)
-    time.sleep(5)
+    debug = client_debug_log()
+    # The fixed client says which tab is up; an older one has no such line, so the
+    # screenshots decide: the Hit Points line's strip is no longer the world drawn there
+    # before the press (the pipboy opens at frame 900, the early screenshots predate it).
+    logged = "pipboy: screen up" in debug and "pipboy: alarm clock up" in debug and "pipboy: closed" not in debug
+    drawn = len(before) >= 6 and hp_line_area(before[-1]) != hp_line_area(before[2])
+    check("the pipboy is up on its alarm clock",
+          drawn and (logged or expect_defect),
+          (re.findall(r"pipboy: [^\n]*", debug) or ["no pipboy line in the client's log (older client)"])[-1])
+    out = admin("rest 360 1", 3.0)  # slot 1: the reply reports the second player's hit points
+    time.sleep(6)
     alive = leave(game)
     game = None
     os.remove(tracepath)
     after = screenshots()
     check("the second player's client ran throughout", alive and len(before) >= 3 and len(after) > len(before) + 2,
           "%d then %d screenshots" % (len(before), len(after)))
-    check("the operator's rest passed three hours", "rest" in out.lower(), out[:90])
+    healed = re.findall(r"hp (\d+) -> (\d+)", out)
+    check("the operator's rest passed six hours and healed the second player",
+          "rest" in out.lower() and healed and int(healed[0][1]) > int(healed[0][0]), out[-60:])
     steady = clock_area(before[-1]) == clock_area(before[-2])
     check("the pipboy was up and still before the rest (its clock strip did not move)", steady)
     changed = clock_area(after[-1]) != clock_area(before[-1])
-    fixed("the pipboy redrew its date and clock after the rest, while still open", changed)
+    # The clock redraw shipped in v1.4.0 (bugs/038): a plain check on both builds.
+    check("the pipboy redrew its date and clock after the rest, while still open", changed)
+    # The alarm clock's own "Hit Points" line (GitHub issue 10, follow-up): steady before
+    # the rest, and showing the new number after it, with the pipboy still up. v1.4.0
+    # redrew it only when a rest option was clicked, so it showed the heal one rest late.
+    hp_steady = hp_line_area(before[-1]) == hp_line_area(before[-2])
+    check("the alarm clock's Hit Points line was up and still before the rest", hp_steady)
+    hp_changed = hp_line_area(after[-1]) != hp_line_area(before[-1])
+    redrawn = re.findall(r"pipboy: alarm clock hit points line redrawn: \d+/\d+", client_debug_log())
+    fixed("the alarm clock's Hit Points line shows the heal while the pipboy is still open",
+          hp_changed and (expect_defect or bool(redrawn)), (redrawn or ["no redraw line in the client's log"])[-1])
     drop_screenshots()
+
+
+def hp_line_area(path):
+    """The pipboy alarm clock's "Hit Points cur/max" line: the window is 640x480, centred
+    on the screen, and the line is drawn at y 66 from x 254 to x 604 inside it."""
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    left, top = (w - 640) // 2, (h - 480) // 2
+    return im.crop((left + 254, top + 63, left + 604, top + 79)).tobytes()
 
 
 def bursts(times, gap=1.0):
@@ -659,16 +747,22 @@ def prove_cancelui():
     debug = client_debug_log()
     check("the keyboard bought six points in Small Guns across the three visits", alive and ups == 6,
           "%d points bought; unspent before %s" % (ups, before))
-    fixed("Cancel (C) put the three points back",
-          before is not None and after_cancel == before and cancels == 1,
-          "unspent %s -> %s after Cancel; %d cancels sent" % (before, after_cancel, cancels))
+    # Cancel itself shipped in v1.4.0 (bugs/044): a plain check on both builds. The cancel
+    # count is read at the end, after the forced close below has sent its own.
+    check("Cancel (C) put the three points back",
+          before is not None and after_cancel == before and cancels >= 1,
+          "unspent %s -> %s after Cancel; %d cancels sent in all" % (before, after_cancel, cancels))
     check("Done (Enter) kept its two points",
           after_cancel is not None and after_done == after_cancel - 2, "unspent %s -> %s" % (after_cancel, after_done))
-    check("the fight that closed the open sheet kept its one point (closed by the game, no Cancel sent)",
-          after_done is not None and after_fight == after_done - 1 and cancels <= 1
-          and (expect_defect or "character sheet: closed after" in debug and "by the game" in debug),
-          "unspent %s -> %s; %s" % (after_done, after_fight, (re.findall(r"character sheet: closed after \d+ ms by the game", debug)
-                                                             or ["no close by the game logged"])[0]))
+    # Since the v1.4.0 follow-up a close the game forces is a Cancel too: the fight that
+    # closed the open sheet puts its one point back (v1.4.0 kept it: "closed by the game,
+    # no Cancel sent").
+    closed_by_game = re.findall(r"character sheet: closed after \d+ ms by the game[^\n]*", debug)
+    check("the game closed the sheet when the fight started",
+          bool(closed_by_game), (closed_by_game or ["no close by the game logged"])[0])
+    fixed("the fight that closed the open sheet put its one point back (a forced close is a Cancel)",
+          after_done is not None and after_fight == after_done and cancels == 2,
+          "unspent %s -> %s; %d cancels sent" % (after_done, after_fight, cancels))
 
 
 def prove_createui():
@@ -710,6 +804,272 @@ def prove_createui():
           len(made) == 1 and "gender=1 age=30" in made[0][2] and "fid=0x1000004" in made[0][2], repr(made[:1]))
 
 
+def prove_npcloot():
+    global game
+    # A spear on the ground, a raider set on the host past it, and the fight that pulls the
+    # unarmed Arroyo villagers in: their weapon hunts walk them to the spear and one of
+    # them takes it (bugs/042). The second player's REAL client watches with its event
+    # trace on: its mirror of that critter must list the spear in hand once the server
+    # says so, so the critter is drawn armed and its corpse, the same object, lists the
+    # spear for looting. v1.4.0's mirror ignored a stack it never had (an invisible spear,
+    # a corpse without it). The server log also says whether any critter shipped a crouch
+    # at a spear it had no AP to walk to (the follow-up's "animation loop").
+    host = Host()
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    game = join({"F2_TRACE_EVENTS": "1"})
+    time.sleep(12)
+    start = host_tile(logtext())
+    admin("give 7", 0.5)
+    admin("drop 7", 1.0)
+    dropped = re.findall(r"CONNECT net=(\d+) pid=7 tile=%d " % start, logtext())
+    spear = int(dropped[-1]) if dropped else -1
+    admin("warp 6", 1.0)
+    mark = len(logtext())
+    out = admin("spawn %s 1 %d" % (RAIDER, host_tile(logtext()) + 3), 1.5)
+    spawned = re.findall(r"\[evt\] SPAWN\s+net=(\d+) pid=16777454", logtext()[mark:])
+    raider = int(spawned[-1]) if spawned else -1
+    admin("aggro 1", 1.0)
+    # The raider pulls the unarmed Arroyo villagers into the fight, and every one of them
+    # hunts the spear: whoever walks up to it takes it. The host ends its turns.
+    taker = None
+    deadline = time.time() + 75
+    while time.time() < deadline:
+        time.sleep(2.5)
+        host.send("cendturn", 0.2)
+        found = re.findall(r"\[cpickup\] critter=(\d+) item_net=%d taken" % spear, logtext())
+        if found:
+            taker = int(found[0])
+            break
+    time.sleep(5)  # the delta with the spear in hand reaches the client
+    fight = logtext()[mark:]
+    alive = leave(game)
+    game = None
+    mirror = client_stderr()
+
+    check("a spear lay where the host stood and a raider was set on the host",
+          alive and spear > 0 and raider > 0 and "placed 1/1" in out,
+          "spear net %d, raider net %d; %s" % (spear, raider, out[:50]))
+    check("a critter's weapon hunt took the spear (server)", taker is not None,
+          "taken by net %s; attempts: %s" % (taker, "; ".join(re.findall(r"\[cpickup\] [^\n]*", fight)[-3:])))
+    skipped = len(re.findall(r"reach check already failed", fight))
+    refused = len(re.findall(r"\[cpickup\] critter=\d+ item_net=%d NOT attempted" % spear, fight))
+    crouches = len(re.findall(r"reach check already failed\n\[presseq\] SEND ops=\d+ bytes=\d+ actor=\d+", fight))
+    if refused + skipped >= 1:
+        fixed("no crouch was shipped for an attempt a critter had no AP for (v1.4.0 shipped one per attempt)",
+              skipped == 0 and crouches == 0,
+              "%d attempts refused for lack of AP; %d old-style skips, %d of them followed by a shipped sequence"
+              % (refused, skipped, crouches))
+    rows = re.findall(r"\[inv-apply\] net=%d items=(\d+) rhandPid=(-?\d+)" % (taker if taker is not None else -1), mirror)
+    fixed("the second player's mirror lists the spear in the taker's hand once it was taken",
+          taker is not None and any(hand == "7" for _n, hand in rows),
+          "mirror rows for net %s (items, right hand): %s" % (taker, rows[-6:]))
+
+
+def prove_lvlup():
+    global game
+    # Issue 21, the client's half: the second player's real client plays the level-up
+    # sound itself when its own sheet row says its level rose, and logs it.
+    host = Host()
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    game = join({})
+    time.sleep(12)
+    out = admin("xp 1 80000", 4.0)
+    alive = leave(game)
+    game = None
+    debug = client_debug_log()
+    lines = re.findall(r"client_net: level-up sound \(level \d+ -> \d+\)", debug)
+    check("the second player was given experience while in the game", alive and "xp" in out.lower(), out[:60])
+    fixed("the client played the level-up sound for its own level", len(lines) >= 1,
+          lines[-1] if lines else "no level-up sound line in the client's log")
+
+
+def prove_dialogdots():
+    global game
+    # Issue 23: an observer's dialog options opened with two bullets, the server's own
+    # prefix plus one the viewer added. The host talks to Mynoc (script 10) through the
+    # debug port; the second player's real client watches the node and logs each option
+    # text it displays.
+    host = Host()
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    game = join({})
+    time.sleep(12)
+    out = admin("dtalk 10", 4.0)
+    time.sleep(3)
+    admin("dend", 1.0)
+    alive = leave(game)
+    game = None
+    raw = open(os.path.join(gamedir, "debug.log"), "rb").read() if os.path.exists(os.path.join(gamedir, "debug.log")) else b""
+    options = re.findall(rb'client_dialog: option \d+ "([^"\n]*)"', raw)
+    check("the observer's client displayed a dialog node with options", alive and len(options) >= 1,
+          "%d options; dtalk said %r" % (len(options), out[:50]))
+    single = [o for o in options if len(o) >= 3 and o[0] == 0x95 and o[1] == 0x20 and o[2] != 0x95]
+    double = [o for o in options if len(o) >= 2 and o[0] == 0x95 and o[1] == 0x95]
+    fixed("every option on the observer's screen opens with one bullet, not two",
+          len(options) >= 1 and len(single) == len(options) and not double,
+          "%d of %d single, %d double; first %r" % (len(single), len(options), len(double), options[:1]))
+
+
+def prove_stealgear():
+    global game
+    # Issue 27: on an observer's screen, the thief's worn armor and held weapon were plain
+    # items in the steal screen's left list. A viewer rebuilds its mirror of the thief's
+    # whole pack from each inventory delta of the session, and that rebuild dropped the
+    # in-hand and worn flags the screens hide equipped gear by. Here the host holds a
+    # spear, has its Steal skill raised, walks up to Mynoc and takes his spear; the second
+    # player's real client (event trace on) logs its rebuilt mirror of the thief's pack.
+    host = Host()
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    game = join({"F2_TRACE_EVENTS": "1"})
+    time.sleep(12)
+    admin("give 7", 0.5)  # a spear...
+    admin("wield 1", 1.0)  # ...held in the right hand (the debug verb wields the first weapon carried)
+    admin("sp 0 99", 0.5)  # points for the Steal skill, so the take succeeds
+    host.send("sheetopen", 0.3)
+    for _ in range(99):
+        host.send("skillup 10", 0.02)
+    host.send("sheetclose", 1.0)
+    admin("give 51", 0.5)  # a stick of dynamite to plant: the thief's pack changes mid-session
+    text = logtext()
+    host_net = int(re.findall(r"\[actors\] srv slot=0 obj=\S+ netId=(\d+) ", text)[-1])
+    mark = len(text)
+    out = admin("spawn %s 1 %d" % (RAIDER, host_tile(text) + 2), 1.5)
+    spawned = re.findall(r"\[evt\] SPAWN\s+net=(\d+) pid=16777454", logtext()[mark:])
+    raider = int(spawned[-1]) if spawned else -1
+    steal = re.findall(r"control skillup slot=0 skill=10 rc=0 value=(\d+)", logtext())
+    host.send("skill %d 10" % raider, 6.0)  # Steal, walk-then-act
+    opened = "steal session OPEN thief=net%d" % host_net in logtext()
+    host.send("splant 51 1", 3.0)  # the thief's pack changes: the observer rebuilds its mirror of it
+    host.send("sdone", 2.0)
+    alive = leave(game)
+    game = None
+    server = logtext()
+    planted = "control splant pid=51" in server
+    caught = re.findall(r"steal session CLOSE thief=net%d caught=(\d)" % host_net, server)
+    rows = re.findall(r"\[inv-full\] net=%d items=(\d+) worn=(\d+) held=(\d+)" % host_net, client_stderr())
+    check("the host held a spear, a raider stood beside it, and a steal session opened for everyone",
+          alive and raider > 0 and opened, "raider net %d; Steal skill %s; session opened %s" % (raider, steal[-1:], opened))
+    check("the thief planted the dynamite without being caught, so the session stayed open for it",
+          planted and caught and caught[0] == "0", "plant sent %s; caught %s" % (planted, caught[:1]))
+    fixed("the observer's rebuilt mirror of the thief's pack keeps the in-hand flag of the held spear",
+          len(rows) >= 1 and int(rows[-1][2]) >= 1,
+          "mirror rows (items, worn, held): %s" % rows[-4:])
+
+
+def prove_musicline():
+    # Issue 18. The music watchdog's "Music 'X' could not be restarted (see debug.log)"
+    # line in the message window is gone: the string is no longer in the client, and
+    # the quiet log line that replaced it is.
+    raw = open(client_exe, "rb").read()
+    old = b"could not be restarted (see debug.log)"
+    new = b"could not be restarted (rc=%d); will keep trying"
+    fixed("the client no longer carries the message-window line", old not in raw and new in raw,
+          "old line present %s, log line present %s" % (old in raw, new in raw))
+    if expect_defect:
+        check("the old client carried it", old in raw)
+
+
+KEY_DOWN_ARROW = 81
+
+
+class Bot:
+    """A second wire seat that can answer a yes/no prompt (the trade proposal)."""
+
+    def __init__(self, name):
+        self.name = name
+        self.s = socket.create_connection(("127.0.0.1", port), timeout=60)
+        self.buf = bytearray()
+        threading.Thread(target=self.drain, daemon=True).start()
+
+    def drain(self):
+        while True:
+            try:
+                data = self.s.recv(65536)
+                if not data:
+                    return
+            except Exception:
+                return
+            self.buf += data
+
+    def send(self, line, wait):
+        self.s.sendall((line + NL).encode())
+        time.sleep(wait)
+
+    def events(self, wanted):
+        data = bytes(self.buf)
+        bodies = []
+        pos = 10
+        while pos + 18 <= len(data):
+            length = struct.unpack_from("<I", data, pos + 8)[0]
+            if pos + 18 + length > len(data):
+                break
+            payload = data[pos + 18:pos + 18 + length]
+            pos += 18 + length
+            ep = 0
+            while ep + 4 <= len(payload):
+                etype, _flags, elen = struct.unpack_from("<BBH", payload, ep)
+                if etype == wanted:
+                    bodies.append(payload[ep + 4:ep + 4 + elen])
+                ep += 4 + elen
+        return bodies
+
+
+def trade_list_area(path):
+    """The left list of the trade window (the trading player's pack): the window is
+    480x180 at (80, 290) inside the 640x480 dialog frame centred on the screen; the list
+    is at x 29..93, three rows of 48 from y 30."""
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    left = (w - 640) // 2 + 80
+    top = (h - 480) // 2 + 290
+    return im.crop((left + 29, top + 30, left + 93, top + 30 + 144)).tobytes()
+
+
+def prove_tradescroll():
+    global game
+    # Issue 26. The host barters with Tubby, the Den store owner (the debug port opens the
+    # conversation, `dbarter` opens the trade), and the real client watches as a second
+    # player: every viewer gets the barter screen, only the driver's keys were honoured.
+    # The observer presses the down arrow (the list's scroll button sends the same key)
+    # while the trade is up; the host carries twelve things, so its list scrolls, and the
+    # observer's copy of that list must change with the presses.
+    host = Host()
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    for pid in (7, 51, 1, 8, 9, 10, 11, 12, 13, 14, 15, 16):
+        admin("give %d" % pid, 0.2)
+    write_keys([(at, KEY_DOWN_ARROW) for at in range(2400, 5400, 60)])
+    drop_screenshots()
+    game = join({"F2_INPUT_REPLAY": tracepath, "F2_VIEWER_SHOT_EVERY": "30"})
+    time.sleep(10)
+    admin("entermap 6", 12.0)  # the Den, business district: Tubby's store
+    admin("movdone", 1.0)
+    admin("dtalk 47", 4.0)  # Tubby (scripts.lst line 48)
+    talking = "[dialog] SEND node" in logtext()
+    host.send("dbarter", 6.0)
+    opened = "[barter] SEND begin" in logtext()
+    before = screenshots()
+    time.sleep(45)  # the presses run from frame 2400 to 5400
+    after = screenshots()
+    host.send("bdone", 1.0)
+    host.send("dend", 1.0)
+    alive = leave(game)
+    game = None
+    os.remove(tracepath)
+    shots = after[len(before):]
+    areas = [trade_list_area(p) for p in shots]
+    changes = sum(1 for a, b in zip(areas, areas[1:]) if a != b)
+    check("the party reached the Den, the host opened a trade with Tubby, and the observer watched",
+          alive and talking and opened, "dialog %s, barter %s, %d screenshots during the trade" % (talking, opened, len(shots)))
+    fixed("the observer's copy of the trading player's list scrolled with the presses",
+          changes >= 2, "%d changes between consecutive screenshots of the list" % changes)
+    drop_screenshots()
+
+
 for path in glob.glob(os.path.join(gamedir, "data", "SAVEGAME", "SLOT*")):
     shutil.rmtree(path, ignore_errors=True)
 for path in glob.glob(os.path.join(gamedir, "data", "MAPS", "*.SAV")):
@@ -737,9 +1097,21 @@ try:
         prove_cancelui()
     elif what == "createui":
         prove_createui()
+    elif what == "npcloot":
+        prove_npcloot()
+    elif what == "lvlup":
+        prove_lvlup()
+    elif what == "dialogdots":
+        prove_dialogdots()
+    elif what == "stealgear":
+        prove_stealgear()
+    elif what == "musicline":
+        prove_musicline()
+    elif what == "tradescroll":
+        prove_tradescroll()
     else:
         raise SystemExit("unknown proof '%s' (hp, chat, sheet, invhp, clock, hands, fidget,"
-                         " cancelui or createui)" % what)
+                         " cancelui, createui or npcloot)" % what)
 finally:
     if game is not None and game.poll() is None:
         game.kill()
