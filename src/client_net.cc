@@ -5042,11 +5042,14 @@ public:
         std::string track = want; // backgroundSoundLoad rewrites the buffer `last` points into
         int rc = _gsound_background_play_level_music(track.c_str(), 12);
         debugPrint("client-viewer: music watchdog restarted '%s' rc=%d\n", track.c_str(), rc);
+        // A failed restart is logged, not shown. The restart often fails once while a
+        // join or a map load still has the mixer starved, and the watchdog tries again
+        // ten seconds later anyway; the message window line it used to print told
+        // players to read a debug.log the release does not write (GitHub issue 18).
         if (rc != 0 && !_musicFailNoticed) {
             _musicFailNoticed = true;
-            static char line[160];
-            snprintf(line, sizeof(line), "Music '%s' could not be restarted (see debug.log)", track.c_str());
-            displayMonitorAddMessage(line);
+            debugPrint("client-viewer: music '%s' could not be restarted (rc=%d); will keep trying\n",
+                track.c_str(), rc);
         }
     }
 
