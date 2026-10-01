@@ -5082,6 +5082,75 @@ void barterSetServerPump(std::function<bool()> pump)
     gBarterServerPump = std::move(pump);
 }
 
+// The trade screen's scroll keys: the player's pack (arrows), the merchant's pack
+// (ctrl+arrows), the offer table (page up/down) and the buy table (ctrl+page up/down).
+// The scroll buttons on the window send the same codes. Local view only, so every
+// viewer may use them (GitHub issue 26). Returns true when the key was one of them.
+static bool barterScrollKey(int keyCode, int win)
+{
+    if (keyCode == KEY_ARROW_UP) {
+        if (_stack_offset[_curr_stack] > 0) {
+            _stack_offset[_curr_stack] -= 1;
+            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_TRADE);
+            windowRefresh(gInventoryWindow);
+        }
+        return true;
+    }
+    if (keyCode == KEY_ARROW_DOWN) {
+        if (_stack_offset[_curr_stack] + gInventorySlotsCount < _pud->length) {
+            _stack_offset[_curr_stack] += 1;
+            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_TRADE);
+            windowRefresh(gInventoryWindow);
+        }
+        return true;
+    }
+    if (keyCode == KEY_CTRL_ARROW_UP) {
+        if (_target_stack_offset[_target_curr_stack] > 0) {
+            _target_stack_offset[_target_curr_stack] -= 1;
+            _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_TRADE);
+            windowRefresh(gInventoryWindow);
+        }
+        return true;
+    }
+    if (keyCode == KEY_CTRL_ARROW_DOWN) {
+        if (_target_stack_offset[_target_curr_stack] + gInventorySlotsCount < _target_pud->length) {
+            _target_stack_offset[_target_curr_stack] += 1;
+            _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_TRADE);
+            windowRefresh(gInventoryWindow);
+        }
+        return true;
+    }
+    if (keyCode == KEY_PAGE_UP) {
+        if (_ptable_offset > 0) {
+            _ptable_offset -= 1;
+            inventoryWindowRenderInnerInventories(win, _ptable, nullptr, -1);
+        }
+        return true;
+    }
+    if (keyCode == KEY_PAGE_DOWN) {
+        if (_ptable_offset + gInventorySlotsCount < _ptable_pud->length) {
+            _ptable_offset += 1;
+            inventoryWindowRenderInnerInventories(win, _ptable, nullptr, -1);
+        }
+        return true;
+    }
+    if (keyCode == KEY_CTRL_PAGE_UP) {
+        if (_btable_offset > 0) {
+            _btable_offset -= 1;
+            inventoryWindowRenderInnerInventories(win, nullptr, _btable, -1);
+        }
+        return true;
+    }
+    if (keyCode == KEY_CTRL_PAGE_DOWN) {
+        if (_btable_offset + gInventorySlotsCount < _btable_pud->length) {
+            _btable_offset += 1;
+            inventoryWindowRenderInnerInventories(win, nullptr, _btable, -1);
+        }
+        return true;
+    }
+    return false;
+}
+
 void inventoryOpenTrade(int win, Object* barterer, Object* playerTable, Object* bartererTable, int barterMod)
 {
     ScopedGameMode gm(GameMode::kBarter);
@@ -5869,6 +5938,14 @@ void inventoryOpenTradeViewer(Object* merchant, Object* playerTable, Object* mer
         // branch below is gated on it, so a spectator falls straight through to
         // the repaint.
         bool draggedThisFrame = false;
+        // ►► A SPECTATOR MAY SCROLL. The four lists are mirrors on every viewer and
+        // scrolling is a local view, not a move, so it was only an oversight that the
+        // driver gate below swallowed the scroll keys (the arrow buttons send them)
+        // with everything else: an observer saw the first rows of each list and no
+        // more (GitHub issue 26).
+        if (!clientBarterIsDriver()) {
+            barterScrollKey(keyCode, win);
+        }
         if (clientBarterIsDriver()) {
             if (keyCode == KEY_ESCAPE || keyCode == KEY_LOWERCASE_T) {
                 // Leave the trade. A REQUEST, never local: the window closes when
@@ -5877,50 +5954,8 @@ void inventoryOpenTradeViewer(Object* merchant, Object* playerTable, Object* mer
                 clientViewerBarterVerb("bdone", -1, 0);
             } else if (keyCode == KEY_LOWERCASE_M) {
                 clientViewerBarterVerb("bcommit", -1, 0); // the Offer button
-            } else if (keyCode == KEY_ARROW_UP) {
-                if (_stack_offset[_curr_stack] > 0) {
-                    _stack_offset[_curr_stack] -= 1;
-                    _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_TRADE);
-                    windowRefresh(gInventoryWindow);
-                }
-            } else if (keyCode == KEY_ARROW_DOWN) {
-                if (_stack_offset[_curr_stack] + gInventorySlotsCount < _pud->length) {
-                    _stack_offset[_curr_stack] += 1;
-                    _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_TRADE);
-                    windowRefresh(gInventoryWindow);
-                }
-            } else if (keyCode == KEY_CTRL_ARROW_UP) {
-                if (_target_stack_offset[_target_curr_stack] > 0) {
-                    _target_stack_offset[_target_curr_stack] -= 1;
-                    _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_TRADE);
-                    windowRefresh(gInventoryWindow);
-                }
-            } else if (keyCode == KEY_CTRL_ARROW_DOWN) {
-                if (_target_stack_offset[_target_curr_stack] + gInventorySlotsCount < _target_pud->length) {
-                    _target_stack_offset[_target_curr_stack] += 1;
-                    _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_TRADE);
-                    windowRefresh(gInventoryWindow);
-                }
-            } else if (keyCode == KEY_PAGE_UP) {
-                if (_ptable_offset > 0) {
-                    _ptable_offset -= 1;
-                    inventoryWindowRenderInnerInventories(win, _ptable, nullptr, -1);
-                }
-            } else if (keyCode == KEY_PAGE_DOWN) {
-                if (_ptable_offset + gInventorySlotsCount < _ptable_pud->length) {
-                    _ptable_offset += 1;
-                    inventoryWindowRenderInnerInventories(win, _ptable, nullptr, -1);
-                }
-            } else if (keyCode == KEY_CTRL_PAGE_UP) {
-                if (_btable_offset > 0) {
-                    _btable_offset -= 1;
-                    inventoryWindowRenderInnerInventories(win, nullptr, _btable, -1);
-                }
-            } else if (keyCode == KEY_CTRL_PAGE_DOWN) {
-                if (_btable_offset + gInventorySlotsCount < _btable_pud->length) {
-                    _btable_offset += 1;
-                    inventoryWindowRenderInnerInventories(win, nullptr, _btable, -1);
-                }
+            } else if (barterScrollKey(keyCode, win)) {
+                // handled: one of the four lists scrolled
             } else if ((mouseGetEvent() & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0) {
                 // ►► RIGHT-CLICK SWAPS HAND <-> ARROW, exactly as it does on every
                 // other inventory screen — and on the trade screen that IS the
