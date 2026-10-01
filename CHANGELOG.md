@@ -4,6 +4,79 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.4.1 (2026-10-01)
+
+Fixes for the follow-ups on three v1.4.0 reports and eight new player reports. Three of
+them change behaviour you will notice (see Changed). Saves from every earlier version load
+unchanged.
+
+### Changed
+
+- **A fight closing the character sheet is a Cancel
+  ([issue #12](https://github.com/gusmarcum/fallout2-coop/issues/12), follow-up).** In
+  v1.4.0 a sheet the game closed itself (a fight starting under it, a map change) kept what
+  the visit had spent. It now takes it back, as Cancel does: Done is the only way to keep
+  changes. Quitting the game with the sheet open still keeps what was spent.
+- **A line printed by one player's action shows who did it
+  ([issue #25](https://github.com/gusmarcum/fallout2-coop/issues/25)).** "You failed to
+  pick the lock" from a door's script, "That door is locked" from the game, and the like
+  used to reach every player as their own. The player who acted still reads the line as
+  written; everyone else reads it under that player's name, "Player2: You failed to pick
+  the lock."
+- **The world waits for a player to log in
+  ([issue #16](https://github.com/gusmarcum/fallout2-coop/issues/16)).** A server with
+  nobody playing froze its world only while nobody was connected, and a game that had
+  connected but not yet logged in (the account query, the creation screen, the load) set it
+  running with every character unattended. A player who had left next to hostiles came back
+  to find the fight had gone on without them. The world now stays frozen until a player has
+  logged in, and then that player's turn waits for them as it always did.
+
+### Fixed
+
+- **The pipboy's Hit Points line follows a rest
+  ([issue #10](https://github.com/gusmarcum/fallout2-coop/issues/10), follow-up).** The
+  line above the rest options only redrew when an option was clicked, so a heal showed one
+  rest late. It redraws whenever your hit points change while the pipboy is open.
+- **No more crouching at a weapon out of reach
+  ([issue #13](https://github.com/gusmarcum/fallout2-coop/issues/13), follow-up).** When an
+  enemy's walk toward a weapon on the ground used up its action points, its AI kept asking
+  to pick the weapon up, and each ask played the crouch for everyone while nothing was
+  taken. As in the original game, an ask with no points left now does nothing at all.
+- **A weapon an enemy picks up in a fight is seen, and stays in its body
+  ([issue #13](https://github.com/gusmarcum/fallout2-coop/issues/13), follow-up).** Each
+  game's copy of an enemy's inventory only updated items it already knew about, so a spear
+  picked up mid-fight never reached it: the enemy looked bare-handed while using the spear,
+  and its body had no spear to loot although the server had it there. The copy now takes
+  in new items.
+- **The level-up sound plays for your own level
+  ([issue #21](https://github.com/gusmarcum/fallout2-coop/issues/21)).** The server played
+  it for the host's levels only, as a broadcast, so the host's level-ups sounded on every
+  screen and nobody else's ever did. Each game now plays it when its own level rises.
+- **Dialog options open with one bullet for observers
+  ([issue #23](https://github.com/gusmarcum/fallout2-coop/issues/23)).** Observers' games
+  added a second bullet in front of the one the server already sends.
+- **No "Music could not be restarted" line on joining
+  ([issue #18](https://github.com/gusmarcum/fallout2-coop/issues/18)).** The music restarts
+  by itself a few seconds later; the line pointed at a debug.log the release does not write.
+- **Combat Control offers "Use your best weapon" and "Wear your best armor"
+  ([issue #22](https://github.com/gusmarcum/fallout2-coop/issues/22)).** The text version
+  of the Combat Control menu lacked the two buttons of the original window. They do what
+  the buttons did.
+- **Observers can scroll a trade
+  ([issue #26](https://github.com/gusmarcum/fallout2-coop/issues/26)).** The scroll buttons
+  were switched off for everyone but the trading player. Each observer scrolls their own
+  copy of the four lists.
+- **Another player's worn armor and held weapons stay out of the item list
+  ([issue #27](https://github.com/gusmarcum/fallout2-coop/issues/27)).** During a steal,
+  every game rebuilds its copy of the thief's inventory from scratch each time an item
+  moves, and the rebuild forgot which items were worn or held, so afterwards that player's
+  equipped gear showed as loose items on everyone else's screen, in that steal and in any
+  trade after it.
+
+Not in this release: [issue #20](https://github.com/gusmarcum/fallout2-coop/issues/20)
+(a player or companion arriving far from the party on some maps) could not be reproduced;
+see `bugs/054` for what was found.
+
 ## v1.4.0 (2026-09-30)
 
 Fixes for eleven player reports. One of them changes how the character sheet behaves: Esc
