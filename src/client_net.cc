@@ -2720,14 +2720,33 @@ private:
                 unsigned int equip = wi.flags & (OBJECT_IN_ANY_HAND | OBJECT_WORN);
                 // Apply ammo to the matching item even when it is not equipped — a
                 // remote critter's carried spare weapon can change ammo too. (This
-                // branch stays equip-flags-only for item lifecycle: no free/recreate,
-                // just scalar writes on items the mirror already holds.)
+                // branch never frees: no recreate, just scalar writes on items the
+                // mirror already holds, plus the one addition below.)
+                bool held = false;
                 for (int i = 0; i < inv->length; i++) {
                     if (inv->items[i].item != nullptr && inv->items[i].item->pid == wi.pid) {
                         if (equip != 0) inv->items[i].item->flags |= equip;
                         applyWireItemAmmo(inv->items[i].item, wi.ammoQuantity, wi.ammoTypePid);
+                        held = true;
                         break;
                     }
+                }
+                if (held) continue;
+                // ►► A STACK THE MIRROR NEVER HAD: a weapon the critter took off the ground
+                // in the fight (GitHub issue 13, follow-up). It was left out as "acceptable
+                // v1", and it was not: the viewer drew the critter bare-handed while it
+                // swung the spear, and its corpse never listed the spear for looting, as a
+                // corpse is reconciled in full only by a delta that carries its inventory,
+                // and nothing changes in a pack at the moment of death. ADDING an object
+                // frees nothing, so the lifetime hazard that keeps this branch from
+                // rebuilding does not apply; the dead-corpse path above makes items the
+                // same way.
+                Object* item = nullptr;
+                if (objectCreateWithPid(&item, wi.pid) == 0 && item != nullptr) {
+                    _obj_disconnect(item, nullptr); // inventory-only, not in the world
+                    item->flags |= equip;
+                    applyWireItemAmmo(item, wi.ammoQuantity, wi.ammoTypePid);
+                    mirrorInventoryAppend(obj, item, wi.quantity > 0 ? wi.quantity : 1);
                 }
             }
             if (getenv("F2_TRACE_EVENTS") != nullptr) {
