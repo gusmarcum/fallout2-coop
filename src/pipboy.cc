@@ -495,6 +495,12 @@ int pipboyOpen(int intent)
 
     // Co-op: the game minute the date and clock at the top were last drawn for.
     unsigned int clockShownMinute = gameTimeGetTime() / 600;
+    // Co-op: the hit points the alarm clock's "Hit Points" line was last drawn for.
+    int hitPointsShown = critterGetHitPoints(gDude);
+    // Says when the screen was up and which tab it closed on, like the inventory's and
+    // the character sheet's lines: a rest report is read against this.
+    unsigned int openedAt = getTicks();
+    debugPrint("pipboy: screen up (intent %d)\n", intent);
 
     while (true) {
         sharedFpsLimiter.mark();
@@ -512,6 +518,19 @@ int pipboyOpen(int intent)
             pipboyDrawNumber(gameTimeGetHour(), 4, PIPBOY_WINDOW_TIME_X, PIPBOY_WINDOW_TIME_Y);
             pipboyDrawDate();
             windowRefresh(gPipboyWindow);
+        }
+        // The alarm clock prints "Hit Points cur/max" above its rest options, and vanilla
+        // redraws it from its own rest loop, which a viewer never runs. The server's heal
+        // lands on the wire after the rest, so the line kept the old number until the next
+        // click redrew the options (GitHub issue 10, follow-up: "only refreshed by a second
+        // rest command"). Redraw it whenever the hit points change while that tab is up.
+        // Tab 4 is the alarm clock (the 500..504 button codes above).
+        if (clientViewerActive() && gPipboyTab == 4 && critterGetHitPoints(gDude) != hitPointsShown) {
+            hitPointsShown = critterGetHitPoints(gDude);
+            pipboyDrawHitPoints();
+            windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
+            debugPrint("pipboy: alarm clock hit points line redrawn: %d/%d\n",
+                hitPointsShown, critterGetStat(gDude, STAT_MAXIMUM_HIT_POINTS));
         }
 
         if (intent == PIPBOY_OPEN_INTENT_REST) {
@@ -541,6 +560,7 @@ int pipboyOpen(int intent)
 
         // SFALL: Close with 'Z'.
         if (keyCode == 503 || keyCode == KEY_ESCAPE || keyCode == KEY_RETURN || keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P || keyCode == KEY_UPPERCASE_Z || keyCode == KEY_LOWERCASE_Z || _game_user_wants_to_quit != 0) {
+            debugPrint("pipboy: closed after %u ms on tab %d\n", getTicksSince(openedAt), gPipboyTab);
             break;
         }
 
@@ -1966,6 +1986,8 @@ static void pipboyWindowRenderRestOptions(int a1)
     }
 
     pipboyDrawHitPoints();
+    debugPrint("pipboy: alarm clock up, hit points %d/%d\n",
+        critterGetHitPoints(gDude), critterGetStat(gDude, STAT_MAXIMUM_HIT_POINTS));
 
     // NOTE: I don't know if this +1 was a result of compiler optimization or it
     // was written like this in the first place.
