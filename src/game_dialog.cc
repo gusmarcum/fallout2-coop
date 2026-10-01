@@ -2156,6 +2156,11 @@ static void serverDialogPartyOrders()
                 partyOrdersMessage(_custom_settings[type][index].messageId));
             gameDialogAddTextOption(-1, line, GAME_DIALOG_REACTION_NEUTRAL);
         }
+        // The window's two one-shot buttons (USE BEST WEAPON / USE BEST ARMOR), which
+        // the text menu never offered (GitHub issue 22). Same calls as the window's
+        // 'w' and 'a' handlers below.
+        gameDialogAddTextOption(-1, "Use your best weapon", GAME_DIALOG_REACTION_NEUTRAL);
+        gameDialogAddTextOption(-1, "Wear your best armor", GAME_DIALOG_REACTION_NEUTRAL);
         gameDialogAddTextOption(-1, partyOrdersMessage(10), GAME_DIALOG_REACTION_NEUTRAL); // Done
 
         if (gDialogServerPump != nullptr) {
@@ -2181,6 +2186,28 @@ static void serverDialogPartyOrders()
         }
         if (intent.kind != DIALOG_INTENT_SELECT) {
             break; // Combat Control / barter pressed again: treat as Done
+        }
+        if (intent.arg == PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT + 1) {
+            // Use best weapon: the window's 'w'.
+            _inven_unwield(member, 1);
+            Object* weapon = _ai_search_inven_weap(member, 0, nullptr);
+            if (weapon != nullptr) {
+                _inven_wield(member, weapon, HAND_RIGHT);
+                aiAttemptWeaponReload(member, 0);
+            }
+            fprintf(stderr, "f2_server: party orders %s: use best weapon -> %s\n", critterGetName(member),
+                weapon != nullptr ? objectGetName(weapon) : "none carried");
+            continue;
+        }
+        if (intent.arg == PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT + 2) {
+            // Use best armor: the window's 'a' (Goris, pid 0x10000A1, wears none).
+            Object* armor = member->pid != 0x10000A1 ? _ai_search_inven_armor(member) : nullptr;
+            if (armor != nullptr) {
+                _inven_wield(member, armor, 0);
+            }
+            fprintf(stderr, "f2_server: party orders %s: wear best armor -> %s\n", critterGetName(member),
+                armor != nullptr ? objectGetName(armor) : "none carried");
+            continue;
         }
         if (intent.arg < 0 || intent.arg > PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT) {
             break; // Done (or out of range)
