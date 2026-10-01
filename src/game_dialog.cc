@@ -1372,6 +1372,31 @@ int gameDialogAddTextOption(int messageListId, const char* text, int reaction)
     return 0;
 }
 
+// An option whose display text is already final: the viewer's, straight off the wire.
+// The server resolves each option through gameDialogGetOptionText before it ships the
+// node, prefix included (the SFALL number or the bullet), and the viewer used to add it
+// through gameDialogAddTextOption, which prefixes again: every option on an observer's
+// screen opened with two bullets (GitHub issue 23). Stored verbatim.
+int gameDialogAddBakedOption(const char* text, int reaction)
+{
+    if (gGameDialogOptionEntriesLength >= DIALOG_OPTION_ENTRIES_CAPACITY) {
+        debugPrint("\nError: dialog: Ran out of options!");
+        return -1;
+    }
+
+    GameDialogOptionEntry* optionEntry = &(gDialogOptionEntries[gGameDialogOptionEntriesLength]);
+    optionEntry->messageListId = -4;
+    optionEntry->messageId = -4;
+    optionEntry->reaction = reaction;
+    optionEntry->btn = -1;
+    optionEntry->proc = 0;
+    snprintf(optionEntry->text, sizeof(optionEntry->text), "%s", text != nullptr ? text : "");
+
+    gGameDialogOptionEntriesLength++;
+
+    return 0;
+}
+
 // 0x445938
 int gameDialogReviewWindowInit(int* win)
 {
