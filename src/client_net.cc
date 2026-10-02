@@ -6222,6 +6222,26 @@ void clientViewerUnload(Object* item)
     gViewerConn->sendLine(cmd);
 }
 
+// Load `weapon` from the `ammo` stack the player dragged onto it, `quantity` packs of it
+// (GitHub issue 34). Both are named by netId; the server runs vanilla's own loader and the
+// rounds, the consumed packs and the ready sound come back with the inventory stream.
+void clientViewerLoadAmmo(Object* ammo, Object* weapon, int quantity)
+{
+    if (gViewerConn == nullptr || ammo == nullptr || weapon == nullptr) {
+        return;
+    }
+    if (ammo->netId == 0 || weapon->netId == 0) {
+        debugPrint("client_net: invload with an unbound item (ammo pid %d, weapon pid %d) ignored\n",
+            ammo->pid, weapon->pid);
+        return;
+    }
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "invload %d %d %d", ammo->netId, weapon->netId, quantity > 0 ? quantity : 1);
+    gViewerConn->sendLine(cmd);
+    debugPrint("client_net: invload sent, ammo pid %d into weapon pid %d, %d pack(s)\n",
+        ammo->pid, weapon->pid, quantity > 0 ? quantity : 1);
+}
+
 // USE / apply an inventory item (out-of-combat): the inventory ctx-menu USE leaf
 // for drugs / misc / weapons routes here instead of mutating the local mirror.
 // The server runs the authoritative itemUseDrug / itemUseFromInventory on the

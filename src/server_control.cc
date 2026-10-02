@@ -3850,6 +3850,7 @@ void serverControlLine(int sessionId, const char* line)
         || strcmp(verb, "invunwield") == 0
         || strcmp(verb, "invdrop") == 0
         || strcmp(verb, "unload") == 0
+        || strcmp(verb, "invload") == 0
         || strcmp(verb, "useitem") == 0
         || strcmp(verb, "useitem_armexplosive") == 0;
     if (isInvVerb) {
@@ -3972,7 +3973,7 @@ void serverControlLine(int sessionId, const char* line)
         // inventory recursively and the wire ships one per item), so the acting object
         // can simply be named.
         const bool byNetId = strcmp(verb, "invwield") == 0 || strcmp(verb, "invdrop") == 0
-            || strcmp(verb, "unload") == 0;
+            || strcmp(verb, "unload") == 0 || strcmp(verb, "invload") == 0;
         int pid = -1;
         Object* item = nullptr;
         int stackQty = 0;
@@ -4123,6 +4124,58 @@ void serverControlLine(int sessionId, const char* line)
             bool wielded = (item->flags & OBJECT_IN_ANY_HAND) != 0;
             weaponUnloadIntoInventory(gDude, item, !wielded);
             fprintf(stderr, "f2_server: control unload pid=%d\n", pid);
+            return;
+        }
+
+        if (strcmp(verb, "invload") == 0) {
+            // invload <ammo netId> <weapon netId> <packs>: the inventory screen's drag of
+            // an ammo stack onto a weapon (GitHub issue 34). Vanilla loads the weapon from
+            // THAT stack, as many packs as the player asked for (_drop_ammo_into_weapon),
+            // which is also how a player picks one kind of ammo over another; the hand
+            // bar's reload takes whatever fits. The viewer skipped the drop because ammo
+            // was not on the wire when its inventory was written. It is now, per item, so
+            // the load is one more netId-addressed verb and the result streams back with
+            // the rest of the pack. Free inside the screen, like every other verb here.
+            Object* weapon = nullptr;
+            {
+                Inventory* inv = &gDude->data.inventory;
+                for (int i = 0; i < inv->length; i++) {
+                    Object* candidate = inv->items[i].item;
+                    if (candidate != nullptr && candidate->netId == arg2 && arg2 != 0) {
+                        weapon = candidate;
+                        break;
+                    }
+                }
+            }
+            if (n < 3 || weapon == nullptr || itemGetType(weapon) != ITEM_TYPE_WEAPON
+                || itemGetType(item) != ITEM_TYPE_AMMO || !weaponCanBeReloadedWith(weapon, item)) {
+                fprintf(stderr, "f2_server: control invload ammo pid=%d weapon net=%d refused (no such weapon, or it does not take that ammo)\n",
+                    pid, n >= 3 ? arg2 : -1);
+                serverControlRefuse(sessionId, "That ammo doesn't fit that weapon.");
+                return;
+            }
+            int packs = n >= 4 ? arg3 : 1;
+            if (packs < 1) {
+                packs = 1;
+            }
+            if (packs > stackQty) {
+                packs = stackQty;
+            }
+            int weaponPid = weapon->pid;
+            int before = ammoGetQuantity(weapon);
+            // ►► A HELD WEAPON STAYS HELD. The loader takes the weapon out of the pack and
+            // puts it back (the screen it comes from has the hand items detached, so there
+            // the take-out simply fails), and itemRemove strips the in-hand flag on the
+            // way: loading the gun in your hand would put it away. Keep the flags across.
+            unsigned int equipped = weapon->flags & OBJECT_EQUIPPED;
+            int rc = weaponLoadAmmo(gDude, weapon, item, packs, true, nullptr);
+            weapon->flags |= equipped;
+            fprintf(stderr, "f2_server: control invload ammo pid=%d weapon pid=%d packs=%d rc=%d rounds %d -> %d held=%d\n",
+                pid, weaponPid, packs, rc, before, ammoGetQuantity(weapon),
+                (weapon->flags & OBJECT_IN_ANY_HAND) != 0 ? 1 : 0);
+            if (rc != 0) {
+                serverControlRefuse(sessionId, "That weapon is already full.");
+            }
             return;
         }
 

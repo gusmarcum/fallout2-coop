@@ -303,6 +303,7 @@ static void _container_enter(int keyCode, int inventoryWindowType);
 static void _container_exit(int keyCode, int inventoryWindowType);
 static int _drop_into_container(Object* container, Object* item, int sourceIndex, Object** itemSlot, int quantity);
 static int _drop_ammo_into_weapon(Object* weapon, Object* ammo, Object** ammoItemSlot, int quantity, int keyCode);
+static bool inventoryViewerLoadAmmo(Object* weapon, Object* ammo, int quantity);
 static void _draw_amount(int value, int inventoryWindowType);
 static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int maximum);
 static int inventoryViewerDropQuantity(Object* item, Object** itemSlot, int quantity);
@@ -2396,10 +2397,15 @@ static void _inven_pickup(int buttonCode, int indexOffset)
         int targetIndex = (y - 39) / INVENTORY_SLOT_HEIGHT + indexOffset;
         if (targetIndex < _pud->length) {
             Object* targetItem = _pud->items[targetIndex].item;
-            if (targetItem != item && !clientViewerActive()) {
-                // Dropping item on top of another item. Viewer (Slice 3b): SKIP — the
-                // container-store and ammo-load sub-drops mutate, and their contents/
-                // ammo are not streamed yet (Slice A2).
+            if (targetItem != item && clientViewerActive()) {
+                // Viewer: ammo dropped on a weapon in the list loads it, through the
+                // server (GitHub issue 34; inventoryViewerLoadAmmo). The container-store
+                // sub-drop is still skipped: nested contents are not streamed.
+                if (inventoryViewerLoadAmmo(targetItem, item, count)) {
+                    itemIndex = 0;
+                }
+            } else if (targetItem != item) {
+                // Dropping item on top of another item.
                 if (itemGetType(targetItem) == ITEM_TYPE_CONTAINER) {
                     if (_drop_into_container(targetItem, item, itemIndex, itemSlot, count) == 0) {
                         itemIndex = 0;
@@ -2438,15 +2444,18 @@ static void _inven_pickup(int buttonCode, int indexOffset)
     } else if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_LEFT_HAND_SLOT_X, INVENTORY_LEFT_HAND_SLOT_Y, INVENTORY_LEFT_HAND_SLOT_MAX_X, INVENTORY_LEFT_HAND_SLOT_MAX_Y)) {
         if (clientViewerActive()) {
             // Equip to the LEFT hand → wire verb, skip local mutation. Skip the container-
-            // store / ammo-load sub-drops (not streamed); mirror vanilla's branch select
-            // with side-effect-free reads so no local state changes.
+            // store sub-drop (not streamed); mirror vanilla's branch select with
+            // side-effect-free reads so no local state changes. Ammo that fits the weapon
+            // in the slot loads it, through the server (GitHub issue 34).
             bool containerStore = gInventoryLeftHandItem != nullptr && gInventoryLeftHandItem != item
                 && itemGetType(gInventoryLeftHandItem) == ITEM_TYPE_CONTAINER;
             bool ammoLoad = gInventoryLeftHandItem != nullptr
                 && itemGetType(gInventoryLeftHandItem) == ITEM_TYPE_WEAPON
                 && itemGetType(item) == ITEM_TYPE_AMMO
                 && weaponCanBeReloadedWith(gInventoryLeftHandItem, item);
-            if (!containerStore && !ammoLoad) {
+            if (ammoLoad) {
+                inventoryViewerLoadAmmo(gInventoryLeftHandItem, item, count);
+            } else if (!containerStore) {
                 clientViewerWield(item, HAND_LEFT);
             }
         } else if (gInventoryLeftHandItem != nullptr && itemGetType(gInventoryLeftHandItem) == ITEM_TYPE_CONTAINER && gInventoryLeftHandItem != item) {
@@ -2463,7 +2472,9 @@ static void _inven_pickup(int buttonCode, int indexOffset)
                 && itemGetType(gInventoryRightHandItem) == ITEM_TYPE_WEAPON
                 && itemGetType(item) == ITEM_TYPE_AMMO
                 && weaponCanBeReloadedWith(gInventoryRightHandItem, item);
-            if (!containerStore && !ammoLoad) {
+            if (ammoLoad) {
+                inventoryViewerLoadAmmo(gInventoryRightHandItem, item, count);
+            } else if (!containerStore) {
                 clientViewerWield(item, HAND_RIGHT);
             }
         } else if (gInventoryRightHandItem != nullptr && itemGetType(gInventoryRightHandItem) == ITEM_TYPE_CONTAINER && gInventoryRightHandItem != item) {
@@ -6175,6 +6186,25 @@ static int inventoryViewerDropQuantity(Object* item, Object** itemSlot, int quan
         return inventoryQuantitySelect(INVENTORY_WINDOW_TYPE_MOVE_ITEMS, item, quantity);
     }
     return quantity > 1 ? quantity : 1;
+}
+
+// The VIEWER's half of _drop_ammo_into_weapon (GitHub issue 34): the same three tests and
+// the same "how many" prompt for a stack, and then the load is asked of the server instead
+// of being done to the local mirror (clientViewerLoadAmmo). True when a load was asked for.
+static bool inventoryViewerLoadAmmo(Object* weapon, Object* ammo, int quantity)
+{
+    if (weapon == nullptr || ammo == nullptr || itemGetType(weapon) != ITEM_TYPE_WEAPON
+        || itemGetType(ammo) != ITEM_TYPE_AMMO || !weaponCanBeReloadedWith(weapon, ammo)) {
+        return false;
+    }
+    int quantityToMove = quantity > 1
+        ? inventoryQuantitySelect(INVENTORY_WINDOW_TYPE_MOVE_ITEMS, ammo, quantity)
+        : 1;
+    if (quantityToMove <= 0) {
+        return false;
+    }
+    clientViewerLoadAmmo(ammo, weapon, quantityToMove);
+    return true;
 }
 
 static int _drop_into_container(Object* container, Object* item, int sourceIndex, Object** itemSlot, int quantity)
