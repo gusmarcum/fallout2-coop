@@ -2,7 +2,11 @@
 
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include <utility>
+#include <vector>
 
 #include "actions.h"
 #include "animation.h"
@@ -30,6 +34,7 @@
 #include "palette.h"
 #include "party_member.h"
 #include "perk.h"
+#include "pres_record.h" // a script's gesture, recorded for the viewers (issue 40)
 #include "presenter.h"
 #include "proto.h"
 #include "proto_instance.h"
@@ -1454,6 +1459,98 @@ static void opSetCritterStat(Program* program)
     programStackPushInteger(program, result);
 }
 
+// ►► A SCRIPT'S GESTURE IS SHOWN TO THE PLAYERS (GitHub issue 40, bugs/074).
+//
+// A script animates a critter with animate_stand_obj (the Den's orphans picking a
+// pocket), anim(), or its own reg_anim sequence. On the dedicated server an animation is
+// nothing unless a record section is open to catch it, and no script opcode opened one:
+// the players saw the float text or the missing caps and no movement. These two open an
+// ambient section around what a script registers and ship it as a sequence, which every
+// viewer plays through its own engine.
+//
+// Critters only. An animation on scenery leaves it on its last frame in the real engine
+// (a trap sprung, a lid open), which is state the server would have to hold too; that
+// is not attempted here, so nothing is shown that the server does not also believe.
+// Out of combat only, as the opcodes themselves are.
+//
+// And only a critter that has its network id. A map's scripts run while the map loads
+// (Bess is laid down by her map_enter procedure), before the ids are handed out; the
+// recorder takes an object it cannot name for one the sequence creates, and a viewer
+// would be told to make a second Bess. Nothing is sent during a load, and the pose is
+// settled on the server either way, so nothing is lost by not recording it.
+static bool scriptGestureRecordBegin(Object* object)
+{
+    if (object == nullptr || PID_TYPE(object->pid) != OBJ_TYPE_CRITTER || object->netId <= 0
+        || !serverDedicatedActive() || !presRecordEnabled() || presRecordActive() || isInCombat()) {
+        return false;
+    }
+    presRecordAmbientBegin();
+    return true;
+}
+
+static void scriptGestureRecordShip(bool recording, Object* actor)
+{
+    if (!recording) {
+        return;
+    }
+    presRecordAmbientEnd();
+    if (presRecordOpCount() > 2) {
+        if (getenv("F2_TRACE_EVENTS") != nullptr) {
+            fprintf(stderr, "[gesture] net=%d pid=0x%X: a script's animation shipped (%d ops)\n",
+                actor->netId, actor->pid, presRecordOpCount());
+        }
+        presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), actor->netId);
+    }
+}
+
+static bool scriptPoseIsLying(int anim)
+{
+    return (anim >= FIRST_KNOCKDOWN_AND_DEATH_ANIM && anim <= LAST_KNOCKDOWN_AND_DEATH_ANIM)
+        || (anim >= FIRST_SF_DEATH_ANIM && anim <= LAST_SF_DEATH_ANIM);
+}
+
+// ►► THE ART A SCRIPT'S ANIMATION LEAVES A CRITTER IN (GitHub issues 42 and 40, bugs/072,
+// bugs/074). In the real engine a critter is left in the art of the last animation that
+// played, and the end of a sequence stands it up unless that art is a lying one
+// (_anim_set_end, _critter_is_prone). On the dedicated server an animation is nothing,
+// so after a script's sequence the critter's art was whatever it had been before, or
+// whatever a set-fid in the same script had left: Bess stood on her broken leg, and a
+// Den orphan that had tried a pocket kept its hands-raised art for good (anim() sets
+// that art, and the animate_stand_obj that follows it and stands the critter again in
+// the real engine did nothing here).
+//
+// So the server settles it, with the last animation the script played on the critter:
+// a fall or a lying single frame leaves it lying (in the single frame, which is how a
+// viewer and a save want it), anything else leaves it standing. Dedicated server only: a
+// client's real engine does this itself, and the goldens are unchanged.
+static void scriptSettleCritterArt(Object* critter, int lastAnim)
+{
+    if (!serverDedicatedActive() || critter == nullptr || FID_TYPE(critter->fid) != OBJ_TYPE_CRITTER
+        || PID_TYPE(critter->pid) != OBJ_TYPE_CRITTER || critterIsDead(critter)) {
+        return;
+    }
+    int pose = ANIM_STAND;
+    if (scriptPoseIsLying(lastAnim)) {
+        // The single frame of the same fall: 20..35 and 48..63 run in step.
+        pose = lastAnim <= LAST_KNOCKDOWN_AND_DEATH_ANIM
+            ? lastAnim + (FIRST_SF_DEATH_ANIM - FIRST_KNOCKDOWN_AND_DEATH_ANIM)
+            : lastAnim;
+    }
+    if (FID_ANIM_TYPE(critter->fid) == pose) {
+        return;
+    }
+    int fid = buildFid(OBJ_TYPE_CRITTER, critter->fid & 0xFFF, pose, (critter->fid & 0xF000) >> 12, critter->rotation + 1);
+    if (!artExists(fid)) {
+        return;
+    }
+    if (getenv("F2_TRACE_EVENTS") != nullptr) {
+        fprintf(stderr, "[pose] net=%d pid=0x%X script animation ended on anim %d: art anim %d -> %d\n",
+            critter->netId, critter->pid, lastAnim, FID_ANIM_TYPE(critter->fid), pose);
+    }
+    objectSetFid(critter, fid, nullptr);
+    objectSetFrame(critter, 0, nullptr);
+}
+
 // animate_stand_obj
 // 0x455DC8
 static void opAnimateStand(Program* program)
@@ -1472,9 +1569,12 @@ static void opAnimateStand(Program* program)
     }
 
     if (!isInCombat()) {
+        bool recording = scriptGestureRecordBegin(object);
         reg_anim_begin(ANIMATION_REQUEST_UNRESERVED);
         animationRegisterAnimate(object, ANIM_STAND, 0);
         reg_anim_end();
+        scriptGestureRecordShip(recording, object);
+        scriptSettleCritterArt(object, ANIM_STAND);
     }
 }
 
@@ -1496,9 +1596,12 @@ static void opAnimateStandReverse(Program* program)
     }
 
     if (!isInCombat()) {
+        bool recording = scriptGestureRecordBegin(object);
         reg_anim_begin(ANIMATION_REQUEST_UNRESERVED);
         animationRegisterAnimateReversed(object, ANIM_STAND, 0);
         reg_anim_end();
+        scriptGestureRecordShip(recording, object);
+        scriptSettleCritterArt(object, ANIM_STAND);
     }
 }
 
@@ -3643,6 +3746,26 @@ static void opAnim(Program* program)
         }
 
         reg_anim_end();
+
+        // ►► AND IT IS SHOWN (GitHub issue 40, bugs/074). The bracket above is the state:
+        // on the server the animation in it is nothing and the art it sets is applied at
+        // once. The same ops, registered once more into a record section, are what a
+        // viewer plays through its own engine, ending in the art the server now holds
+        // (obj->fid). A Den orphan raising its hands at a pocket is this opcode.
+        if (scriptGestureRecordBegin(obj)) {
+            reg_anim_begin(ANIMATION_REQUEST_UNRESERVED);
+            if (frame == 0) {
+                animationRegisterAnimate(obj, anim, 0);
+                if (anim >= ANIM_FALL_BACK && anim <= ANIM_FALL_FRONT_BLOOD) {
+                    animationRegisterSetFid(obj, obj->fid, -1);
+                }
+            } else {
+                animationRegisterAnimateReversed(obj, anim, 0);
+                animationRegisterSetFid(obj, obj->fid, -1);
+            }
+            reg_anim_end();
+            scriptGestureRecordShip(true, obj);
+        }
     } else if (anim == 1000) {
         if (frame < ROTATION_COUNT) {
             Rect rect;
@@ -3675,6 +3798,98 @@ static void opObjectCarryingObjectByPid(Program* program)
     programStackPushPointer(program, result);
 }
 
+// ►► THE POSE A SCRIPT'S OWN SEQUENCE ENDS ON (GitHub issue 42, bugs/072).
+//
+// A script lays a critter down with reg_anim_func(begin), reg_anim_animate(hit),
+// reg_anim_animate(fall_back), reg_anim_animate(fall_back_sf), reg_anim_func(end): Bess
+// the brahmin with her broken leg, in Modoc, on every map entry. In the real engine the
+// critter is left in the art of the last animation that played, and the end of a
+// sequence stands a critter back up only if that art is not a lying one
+// (_anim_set_end, _critter_is_prone). On the dedicated server an animation is nothing
+// (server_anim.cc applies no art for one), so the sequence left no trace: Bess stood
+// on her broken leg for everyone, and stayed up after being pushed over.
+//
+// So the server settles the pose itself when the script closes its sequence, with the
+// LAST animation it played on each critter (scriptSettleCritterArt): lying after a fall
+// or a lying single frame, standing after anything else (back_to_standing). Scripts
+// only (the engine's own sequences keep the server's rules), out of combat only (scripts
+// cannot register animations in a fight).
+static std::vector<std::pair<Object*, int>> gScriptSequenceLastAnim;
+
+// The same sequence, kept whole, for showing it (GitHub issue 40): every animation the
+// script registered, in order. `mixed` is set by anything else it registers (a walk, an
+// endless animation), and such a sequence is not shown: the walk is the server's own
+// stepped one, and a gesture replayed beside it would run at the wrong moment.
+struct ScriptSequenceAnim {
+    Object* object;
+    int anim;
+    int delay;
+    bool reversed;
+};
+static std::vector<ScriptSequenceAnim> gScriptSequenceAnims;
+static bool gScriptSequenceMixed = false;
+static int gScriptSequenceOptions = 0;
+
+static void scriptSequenceShow()
+{
+    if (gScriptSequenceMixed || gScriptSequenceAnims.empty()) {
+        return;
+    }
+    for (const ScriptSequenceAnim& entry : gScriptSequenceAnims) {
+        if (PID_TYPE(entry.object->pid) != OBJ_TYPE_CRITTER || entry.object->netId <= 0) {
+            return;
+        }
+    }
+    Object* actor = gScriptSequenceAnims.front().object;
+    if (!scriptGestureRecordBegin(actor)) {
+        return;
+    }
+    // Registered a second time, into the open section: on the server that records each
+    // one and does nothing else.
+    reg_anim_begin(gScriptSequenceOptions);
+    for (const ScriptSequenceAnim& entry : gScriptSequenceAnims) {
+        if (entry.reversed) {
+            animationRegisterAnimateReversed(entry.object, entry.anim, entry.delay);
+        } else {
+            animationRegisterAnimate(entry.object, entry.anim, entry.delay);
+        }
+    }
+    reg_anim_end();
+    scriptGestureRecordShip(true, actor);
+}
+
+static void scriptSequenceNoteAnim(Object* object, int anim, int delay = 0, bool reversed = false)
+{
+    if (!serverDedicatedActive() || object == nullptr) {
+        return;
+    }
+    gScriptSequenceAnims.push_back(ScriptSequenceAnim { object, anim, delay, reversed });
+    if (reversed) {
+        // Played backwards a fall is a getting up: for the pose it counts as standing.
+        anim = ANIM_STAND;
+    }
+    for (auto& entry : gScriptSequenceLastAnim) {
+        if (entry.first == object) {
+            entry.second = anim;
+            return;
+        }
+    }
+    gScriptSequenceLastAnim.push_back({ object, anim });
+}
+
+static void scriptSequenceSettlePoses()
+{
+    for (const auto& entry : gScriptSequenceLastAnim) {
+        scriptSettleCritterArt(entry.first, entry.second);
+    }
+    gScriptSequenceLastAnim.clear();
+    // Shown after the pose is settled: a viewer's own replay of the sequence ends in the
+    // same art, by the engine's own rule, whichever of the two reaches it first.
+    scriptSequenceShow();
+    gScriptSequenceAnims.clear();
+    gScriptSequenceMixed = false;
+}
+
 // reg_anim_func
 // 0x459C20
 static void opRegAnimFunc(Program* program)
@@ -3685,6 +3900,10 @@ static void opRegAnimFunc(Program* program)
     if (!isInCombat()) {
         switch (cmd) {
         case OP_REG_ANIM_FUNC_BEGIN:
+            gScriptSequenceLastAnim.clear();
+            gScriptSequenceAnims.clear();
+            gScriptSequenceMixed = false;
+            gScriptSequenceOptions = param.integerValue;
             reg_anim_begin(param.integerValue);
             break;
         case OP_REG_ANIM_FUNC_CLEAR:
@@ -3692,6 +3911,7 @@ static void opRegAnimFunc(Program* program)
             break;
         case OP_REG_ANIM_FUNC_END:
             reg_anim_end();
+            scriptSequenceSettlePoses();
             break;
         }
     }
@@ -3709,6 +3929,7 @@ static void opRegAnimAnimate(Program* program)
         if (anim != 20 || object == nullptr || object->pid != 0x100002F || (settings.preferences.violence_level >= 2)) {
             if (object != nullptr) {
                 animationRegisterAnimate(object, anim, delay);
+                scriptSequenceNoteAnim(object, anim, delay);
             } else {
                 scriptPredefinedError(program, "reg_anim_animate", SCRIPT_ERROR_OBJECT_IS_NULL);
             }
@@ -3727,6 +3948,7 @@ static void opRegAnimAnimateReverse(Program* program)
     if (!isInCombat()) {
         if (object != nullptr) {
             animationRegisterAnimateReversed(object, anim, delay);
+            scriptSequenceNoteAnim(object, anim, delay, true);
         } else {
             scriptPredefinedError(program, "reg_anim_animate_reverse", SCRIPT_ERROR_OBJECT_IS_NULL);
         }
@@ -3744,6 +3966,7 @@ static void opRegAnimObjectMoveToObject(Program* program)
     if (!isInCombat()) {
         if (object != nullptr) {
             animationRegisterMoveToObject(object, dest, -1, delay);
+            gScriptSequenceMixed = true;
         } else {
             scriptPredefinedError(program, "reg_anim_obj_move_to_obj", SCRIPT_ERROR_OBJECT_IS_NULL);
         }
@@ -3761,6 +3984,7 @@ static void opRegAnimObjectRunToObject(Program* program)
     if (!isInCombat()) {
         if (object != nullptr) {
             animationRegisterRunToObject(object, dest, -1, delay);
+            gScriptSequenceMixed = true;
         } else {
             scriptPredefinedError(program, "reg_anim_obj_run_to_obj", SCRIPT_ERROR_OBJECT_IS_NULL);
         }
@@ -3778,6 +4002,7 @@ static void opRegAnimObjectMoveToTile(Program* program)
     if (!isInCombat()) {
         if (object != nullptr) {
             animationRegisterMoveToTile(object, tile, object->elevation, -1, delay);
+            gScriptSequenceMixed = true;
         } else {
             scriptPredefinedError(program, "reg_anim_obj_move_to_tile", SCRIPT_ERROR_OBJECT_IS_NULL);
         }
@@ -3795,6 +4020,7 @@ static void opRegAnimObjectRunToTile(Program* program)
     if (!isInCombat()) {
         if (object != nullptr) {
             animationRegisterRunToTile(object, tile, object->elevation, -1, delay);
+            gScriptSequenceMixed = true;
         } else {
             scriptPredefinedError(program, "reg_anim_obj_run_to_tile", SCRIPT_ERROR_OBJECT_IS_NULL);
         }
@@ -4201,6 +4427,7 @@ static void opRegAnimAnimateForever(Program* program)
     if (!isInCombat()) {
         if (obj != nullptr) {
             animationRegisterAnimateForever(obj, anim, -1);
+            gScriptSequenceMixed = true;
         } else {
             scriptPredefinedError(program, "reg_anim_animate_forever", SCRIPT_ERROR_OBJECT_IS_NULL);
         }
