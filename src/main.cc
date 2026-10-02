@@ -2037,6 +2037,28 @@ static int mainClientViewer(const char* connectSpec)
                 char cmd[32];
                 snprintf(cmd, sizeof(cmd), "reload %d", curHand);
                 conn.sendLine(cmd);
+                // ►► AND THE SLOT GOES BACK TO FIRING (GitHub issue 33). Vanilla's reload
+                // (_intface_item_reload) ends by cycling the slot's action on from RELOAD,
+                // which lands on the weapon's primary attack: reload, and the next click
+                // shoots. Sending the verb and stopping there left the slot on RELOAD, so
+                // the next click reloaded a full weapon and the player had to right-click
+                // back to the shot by hand. In a fight vanilla only reloads when it is the
+                // player's turn and the action points are there, so only then here too
+                // (the server refuses the rest, and a refused reload leaves the slot be).
+                bool reloads = true;
+                if (conn.inCombat()) {
+                    int reloadHitMode = curHand == HAND_LEFT
+                        ? HIT_MODE_LEFT_WEAPON_RELOAD
+                        : HIT_MODE_RIGHT_WEAPON_RELOAD;
+                    reloads = conn.myTurn() && gDude != nullptr
+                        && itemGetActionPointCost(gDude, reloadHitMode, false) <= gDude->data.critter.combat.ap;
+                }
+                if (reloads) {
+                    interfaceCycleItemAction();
+                    if (conn.inCombat()) {
+                        conn.recomputeCombatOutlines();
+                    }
+                }
             } else if (conn.inCombat()) {
                 // Attack action: arm the crosshair. In combat it sticks immediately;
                 gameMouseSetMode(GAME_MOUSE_MODE_CROSSHAIR);
