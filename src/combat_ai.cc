@@ -30,6 +30,7 @@
 #include "proto_instance.h"
 #include "random.h"
 #include "scripts.h"
+#include "server_loop.h" // serverLoopActive — the item-use gesture is recorded on the server
 #include "server_players.h" // playerActorIs — sneak is per-actor
 #include "settings.h"
 #include "skill.h"
@@ -922,11 +923,27 @@ int aiSetDisposition(Object* obj, int disposition)
 // 0x428398
 static int _ai_magic_hands(Object* critter, Object* item, int num)
 {
+    // ►► THE GESTURE IS SHOWN (GitHub issue 40, bugs/074). An enemy taking a stimpak or
+    // a dose of Jet in a fight raises its hands, and on the server an animation is
+    // nothing unless a record section is open to catch it: this one was not, so the
+    // players saw the message line and no movement. Recorded here and shipped as the
+    // critter's own sequence, in front of the line that says what it used.
+    bool recording = serverLoopActive() && presRecordEnabled() && !presRecordActive();
+    if (recording) presRecordAmbientBegin();
+
     reg_anim_begin(ANIMATION_REQUEST_RESERVED);
 
     animationRegisterAnimate(critter, ANIM_MAGIC_HANDS_MIDDLE, 0);
 
-    if (reg_anim_end() == 0) {
+    int rc = reg_anim_end();
+    if (recording) {
+        presRecordAmbientEnd();
+        if (presRecordOpCount() > 2) {
+            presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), critter->netId);
+        }
+    }
+
+    if (rc == 0) {
         if (isInCombat()) {
             _combat_turn_run();
         }
