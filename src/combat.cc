@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <unordered_map>
+
 #include "actions.h"
 #include "animation.h"
 #include "art.h"
@@ -2357,6 +2359,67 @@ Object* _combat_whose_turn()
 void combatViewerSetTurnObject(Object* obj)
 {
     _combat_turn_obj = obj;
+}
+
+// See combat.h. Keyed by the object; emptied when the map is replaced, which frees them.
+static std::unordered_map<Object*, int> gKnockdownFalls;
+static unsigned int gKnockdownFallsGeneration = 0;
+
+static void combatKnockdownFallsPrune()
+{
+    if (mapGetLoadGeneration() != gKnockdownFallsGeneration) {
+        gKnockdownFallsGeneration = mapGetLoadGeneration();
+        gKnockdownFalls.clear();
+    }
+}
+
+void combatNoteKnockdownFall(Object* critter, int anim)
+{
+    combatKnockdownFallsPrune();
+    if (critter != nullptr) {
+        gKnockdownFalls[critter] = anim;
+        if (getenv("F2_TRACE_EVENTS") != nullptr) {
+            fprintf(stderr, "[knockdown] net=%d went down on its %s\n", critter->netId,
+                anim == ANIM_FALL_BACK ? "back" : "front");
+        }
+    }
+}
+
+int combatKnockdownFall(Object* critter)
+{
+    combatKnockdownFallsPrune();
+    auto it = gKnockdownFalls.find(critter);
+    return it != gKnockdownFalls.end() ? it->second : -1;
+}
+
+void combatForgetKnockdownFall(Object* critter)
+{
+    gKnockdownFalls.erase(critter);
+}
+
+// A blow has just been applied to `critter`: if it knocked a living critter down or
+// out, keep the fall it was shown taking.
+static bool combatIsDown(Object* critter)
+{
+    return critter != nullptr && FID_TYPE(critter->fid) == OBJ_TYPE_CRITTER
+        && (critter->data.critter.combat.results & (DAM_KNOCKED_OUT | DAM_KNOCKED_DOWN)) != 0;
+}
+
+static void combatKeepKnockdownFall(Object* critter, int flags, bool wasDown, int fall)
+{
+    if (critter == nullptr || FID_TYPE(critter->fid) != OBJ_TYPE_CRITTER
+        || (flags & (DAM_KNOCKED_OUT | DAM_KNOCKED_DOWN)) == 0
+        || (critter->data.critter.combat.results & DAM_DEAD) != 0
+        || !combatIsDown(critter)) {
+        return;
+    }
+    // Already down before this blow: it does not fall a second time, and the fall it
+    // is lying in stands. (An entry for a critter that was NOT down is a leftover from
+    // an earlier knockdown that ended some way this table was not told of.)
+    if (wasDown && combatKnockdownFall(critter) != -1) {
+        return;
+    }
+    combatNoteKnockdownFall(critter, fall);
 }
 
 // 0x4217E8
@@ -5920,6 +5983,36 @@ void _apply_damage(Attack* attack, bool animated)
     bool attackerIsCritter = attacker != nullptr && FID_TYPE(attacker->fid) == OBJ_TYPE_CRITTER;
     bool v5 = attack->defender != attack->oops;
 
+    // Which way each of them is shown falling, should this blow put it down (issue 39).
+    // Worked out BEFORE the damage, on the world the recorded sequence was built on,
+    // with _show_damage's own arguments: the attacker falls as if hit from the front,
+    // the others by how they face the attacker. Kept after it, for those it did put
+    // down. Dedicated server only: a client's engine has the fall in the critter's art.
+    bool keepFalls = serverDedicatedActive() && attackerIsCritter;
+    bool attackerWasDown = false;
+    bool defenderWasDown = false;
+    int attackerFall = ANIM_FALL_BACK;
+    int defenderFall = ANIM_FALL_BACK;
+    bool extrasWasDown[EXPLOSION_TARGET_COUNT] = {};
+    int extrasFall[EXPLOSION_TARGET_COUNT] = {};
+    if (keepFalls) {
+        attackerWasDown = combatIsDown(attacker);
+        attackerFall = actionKnockdownFall(attacker, true, 0);
+        if (attack->defender != nullptr && FID_TYPE(attack->defender->fid) == OBJ_TYPE_CRITTER) {
+            defenderWasDown = combatIsDown(attack->defender);
+            defenderFall = actionKnockdownFall(attack->defender, _is_hit_from_front(attack->defender, attacker),
+                attack->defenderKnockback);
+        }
+        for (int index = 0; index < attack->extrasLength && index < EXPLOSION_TARGET_COUNT; index++) {
+            Object* extra = attack->extras[index];
+            if (extra != nullptr && FID_TYPE(extra->fid) == OBJ_TYPE_CRITTER) {
+                extrasWasDown[index] = combatIsDown(extra);
+                extrasFall[index] = actionKnockdownFall(extra, _is_hit_from_front(attacker, extra),
+                    attack->extrasKnockback[index]);
+            }
+        }
+    }
+
     if (attackerIsCritter && (attacker->data.critter.combat.results & DAM_DEAD) == 0) {
         _set_new_results(attacker, attack->attackerFlags);
         // TODO: Not sure about "attack->defender == attack->oops".
@@ -6001,6 +6094,15 @@ void _apply_damage(Attack* attack, bool animated)
                     scriptExecProc(attack->attacker->sid, SCRIPT_PROC_COMBAT);
                 }
             }
+        }
+    }
+
+    if (keepFalls) {
+        combatKeepKnockdownFall(attacker, attack->attackerFlags, attackerWasDown, attackerFall);
+        combatKeepKnockdownFall(attack->defender, attack->defenderFlags, defenderWasDown, defenderFall);
+        for (int index = 0; index < attack->extrasLength && index < EXPLOSION_TARGET_COUNT; index++) {
+            combatKeepKnockdownFall(attack->extras[index], attack->extrasFlags[index], extrasWasDown[index],
+                extrasFall[index]);
         }
     }
 }

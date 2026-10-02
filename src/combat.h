@@ -29,6 +29,15 @@ Object* _combat_whose_turn();
 // player's own turn and lost a point with every action point spent (GitHub issue 24).
 // Compared, never dereferenced, on a viewer: null it when the fight or the world goes.
 void combatViewerSetTurnObject(Object* obj);
+// ►► WHICH WAY A KNOCKED-DOWN CRITTER FELL (GitHub issue 39, bugs/076). On the dedicated
+// server a critter that is knocked down keeps its standing art, so nothing there says
+// whether it lies on its back or its front, and three things need to know: the blood a
+// kill where it lies is shown with, the art its corpse is left in, and the animation it
+// gets up with. Kept from the blow that put it down until it stands, wakes or dies.
+// ANIM_FALL_BACK or ANIM_FALL_FRONT; -1 when not known (laid down by a script's flag).
+void combatNoteKnockdownFall(Object* critter, int anim);
+int combatKnockdownFall(Object* critter);
+void combatForgetKnockdownFall(Object* critter);
 void _combat_data_init(Object* obj);
 Object* aiInfoGetFriendlyDead(Object* obj);
 int aiInfoSetFriendlyDead(Object* a1, Object* a2);

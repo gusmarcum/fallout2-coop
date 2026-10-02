@@ -970,7 +970,26 @@ void critterKill(Object* critter, int anim, bool a3)
     // NOTE: Original code uses goto to jump out from nested conditions below.
     bool shouldChangeFid = false;
     int fid;
-    if (_critter_is_prone(critter)) {
+    if (serverDedicatedActive() && _critter_is_prone(critter)
+        && !(FID_ANIM_TYPE(critter->fid) >= FIRST_KNOCKDOWN_AND_DEATH_ANIM && FID_ANIM_TYPE(critter->fid) <= LAST_KNOCKDOWN_AND_DEATH_ANIM)
+        && !(FID_ANIM_TYPE(critter->fid) >= FIRST_SF_DEATH_ANIM && FID_ANIM_TYPE(critter->fid) <= LAST_SF_DEATH_ANIM)) {
+        // ►► KILLED WHERE IT LAY, ON THE SERVER (GitHub issue 39, bugs/076). Prone by its
+        // flags (knocked down or out) but standing by its art, because the server
+        // applies no art for a fall. The branch below reads the art, found no fall in
+        // it and left the art alone: the corpse was a flattened STANDING critter on the
+        // server, in every snapshot after, and on a viewer whatever the last replay
+        // had left. It lies the way it fell (combatKnockdownFall), in its blood where
+        // the art has that (which is what the kill is shown ending in), bare otherwise.
+        bool back = combatKnockdownFall(critter) != ANIM_FALL_FRONT;
+        fid = buildFid(OBJ_TYPE_CRITTER, critter->fid & 0xFFF, back ? ANIM_FALL_BACK_BLOOD_SF : ANIM_FALL_FRONT_BLOOD_SF,
+            (critter->fid & 0xF000) >> 12, critter->rotation + 1);
+        _obj_fix_violence_settings(&fid);
+        if (!artExists(fid)) {
+            fid = buildFid(OBJ_TYPE_CRITTER, critter->fid & 0xFFF, back ? ANIM_FALL_BACK_SF : ANIM_FALL_FRONT_SF,
+                (critter->fid & 0xF000) >> 12, critter->rotation + 1);
+        }
+        shouldChangeFid = artExists(fid);
+    } else if (_critter_is_prone(critter)) {
         int current = FID_ANIM_TYPE(critter->fid);
         if (current == ANIM_FALL_BACK || current == ANIM_FALL_FRONT) {
             bool back = false;
@@ -1040,6 +1059,8 @@ void critterKill(Object* critter, int anim, bool a3)
         scriptRemove(critter->sid);
         critter->sid = -1;
     }
+
+    combatForgetKnockdownFall(critter);
 
     _critterClearObj = critter;
     _queue_clear_type(EVENT_TYPE_DRUG, _critterClearObjDrugs);
@@ -1549,6 +1570,7 @@ int _critter_wake_clear(Object* obj, void* data)
     }
 
     obj->data.critter.combat.results &= ~(DAM_KNOCKED_OUT | DAM_KNOCKED_DOWN);
+    combatForgetKnockdownFall(obj);
 
     int fid = buildFid(FID_TYPE(obj->fid), obj->fid & 0xFFF, ANIM_STAND, (obj->fid & 0xF000) >> 12, obj->rotation + 1);
     objectSetFid(obj, fid, nullptr);
@@ -1812,6 +1834,17 @@ void _dude_standup(Object* a1)
         anim = ANIM_BACK_TO_STANDING;
     } else {
         anim = ANIM_PRONE_TO_STANDING;
+    }
+
+    // On the dedicated server the art above is the STANDING one (no art is applied for
+    // a fall there), so this always chose "prone to standing": a critter that viewers
+    // saw fall on its back got up as if from its front. The server keeps the fall
+    // (GitHub issue 39); the getting up ends it.
+    if (serverDedicatedActive()) {
+        if (combatKnockdownFall(a1) == ANIM_FALL_BACK) {
+            anim = ANIM_BACK_TO_STANDING;
+        }
+        combatForgetKnockdownFall(a1);
     }
 
     animationRegisterAnimate(a1, anim, 0);
