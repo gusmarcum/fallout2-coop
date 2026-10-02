@@ -37,6 +37,11 @@ enum BarterIntentKind {
     // Cancel out of barter (== ESC): leave the loop without a table sweep
     // (teardown handles the tables). arg/qty unused.
     BARTER_INTENT_CANCEL,
+    // Unload a weapon of proto `pid` where it lies (== the action menu's Unload, which
+    // vanilla's trade screen offers on every list, the merchant's guns included): its
+    // ammo goes into the same inventory. `quantity` names the list: 0 the player's
+    // pack, 1 the merchant's, 2 the player's table, 3 the merchant's table.
+    BARTER_INTENT_UNLOAD_ITEM,
 };
 
 struct BarterIntent {

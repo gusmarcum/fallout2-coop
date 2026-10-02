@@ -4769,6 +4769,8 @@ private:
         constexpr int kMaxRows = 64;
         static int pids[4][kMaxRows];
         static int qtys[4][kMaxRows];
+        static int ammoQtys[4][kMaxRows];
+        static int ammoPids[4][kMaxRows];
         int counts[4] = { 0, 0, 0, 0 };
 
         // Order: driver inventory, merchant inventory, player table, merchant table.
@@ -4788,11 +4790,26 @@ private:
         // the mirrors from half-read garbage pids.
         if (!clientViewerActive() || r.overflow()) return;
 
+        // What each row's weapon is loaded with rides behind the result code since
+        // v1.4.2 (GitHub issue 38). An older server sends none: the copies then keep
+        // the load their proto gives them, as before.
+        bool hasAmmo = r.remaining() >= (size_t)(counts[0] + counts[1] + counts[2] + counts[3]) * 8;
+        if (hasAmmo) {
+            for (int list = 0; list < 4; list++) {
+                for (int i = 0; i < counts[list]; i++) {
+                    ammoQtys[list][i] = r.i32();
+                    ammoPids[list][i] = r.i32();
+                }
+            }
+        }
+
         ClientBarterList lists[4];
         for (int i = 0; i < 4; i++) {
             lists[i].pids = pids[i];
             lists[i].qtys = qtys[i];
             lists[i].count = counts[i];
+            lists[i].ammoQtys = hasAmmo ? ammoQtys[i] : nullptr;
+            lists[i].ammoPids = hasAmmo ? ammoPids[i] : nullptr;
         }
         clientBarterOnState(lists[0], lists[1], lists[2], lists[3], offerValue, askingValue, resultCode);
     }

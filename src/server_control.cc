@@ -2204,6 +2204,7 @@ static bool serverControlIsTradeVerb(const char* verb)
     return strcmp(verb, "boffer") == 0
         || strcmp(verb, "btake") == 0
         || strcmp(verb, "bunoffer") == 0
+        || strcmp(verb, "bunload") == 0
         || strcmp(verb, "bcommit") == 0
         || strcmp(verb, "bdone") == 0
         || strcmp(verb, "bcancel") == 0
@@ -2993,6 +2994,7 @@ void serverControlLine(int sessionId, const char* line)
     // predicate, deliberately not a second notion of ownership to keep in sync.
     if (strcmp(verb, "boffer") == 0 || strcmp(verb, "btake") == 0
         || strcmp(verb, "bunoffer") == 0 || strcmp(verb, "bcommit") == 0
+        || strcmp(verb, "bunload") == 0
         || strcmp(verb, "bdone") == 0 || strcmp(verb, "bcancel") == 0) {
         // ►► A PLAYER-TO-PLAYER TRADE SPEAKS THE SAME VERBS (server_trade.cc), which
         // is what lets the viewer reuse vanilla's trade screen as-is. When one is
@@ -3030,6 +3032,10 @@ void serverControlLine(int sessionId, const char* line)
             barterIntentPush(BARTER_INTENT_TAKE_ITEM, pid, qty);
         } else if (strcmp(verb, "bunoffer") == 0) {
             barterIntentPush(BARTER_INTENT_UNOFFER_ITEM, pid, qty);
+        } else if (strcmp(verb, "bunload") == 0) {
+            // `bunload <pid> <list>`: the second number is which of the four lists the
+            // weapon lies in, not a count (barter_intent.h).
+            barterIntentPush(BARTER_INTENT_UNLOAD_ITEM, pid, qty);
         } else if (strcmp(verb, "bcommit") == 0) {
             barterIntentPush(BARTER_INTENT_COMMIT, 0, 0);
         } else if (strcmp(verb, "bdone") == 0) {

@@ -304,6 +304,7 @@ static void _container_exit(int keyCode, int inventoryWindowType);
 static int _drop_into_container(Object* container, Object* item, int sourceIndex, Object** itemSlot, int quantity);
 static int _drop_ammo_into_weapon(Object* weapon, Object* ammo, Object** ammoItemSlot, int quantity, int keyCode);
 static bool inventoryViewerLoadAmmo(Object* weapon, Object* ammo, int quantity);
+static bool inventoryTradeViewerIsPlayerTrade();
 static void _draw_amount(int value, int inventoryWindowType);
 static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int maximum);
 static int inventoryViewerDropQuantity(Object* item, Object** itemSlot, int quantity);
@@ -3399,6 +3400,10 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
 
         mouseState = mouseGetEvent();
         if ((mouseState & MOUSE_EVENT_LEFT_BUTTON_UP) != 0) {
+            if (clientViewerActive() && inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE
+                && getenv("F2_TRACE_EVENTS") != nullptr) {
+                fprintf(stderr, "[trade-menu] click: look at pid %d (slot key %d)\n", item->pid, keyCode);
+            }
             if (inventoryWindowType != INVENTORY_WINDOW_TYPE_NORMAL) {
                 _obj_look_at_func(_stack[0], item, gInventoryPrintItemDescriptionHandler);
             } else {
@@ -3422,7 +3427,14 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
 
     int actionMenuItemsLength;
     const int* actionMenuItems;
-    if (itemType == ITEM_TYPE_WEAPON && weaponCanBeUnloaded(item)) {
+    // A trade between two players has no unload (the server's trade session moves
+    // stacks and nothing else): its menu is look alone.
+    bool playerTrade = clientViewerActive() && inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE
+        && inventoryTradeViewerIsPlayerTrade();
+    if (playerTrade) {
+        actionMenuItemsLength = 2;
+        actionMenuItems = _act_nothing;
+    } else if (itemType == ITEM_TYPE_WEAPON && weaponCanBeUnloaded(item)) {
         if (inventoryWindowType != INVENTORY_WINDOW_TYPE_NORMAL && objectGetOwner(item) != gDude) {
             actionMenuItemsLength = 3;
             actionMenuItems = _act_weap2;
@@ -3571,6 +3583,13 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
     _display_inventory(_stack_offset[_curr_stack], -1, inventoryWindowType);
 
     int actionMenuItem = actionMenuItems[menuItemIndex];
+    if (clientViewerActive() && inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE
+        && getenv("F2_TRACE_EVENTS") != nullptr) {
+        fprintf(stderr, "[trade-menu] held: %d choices, chose %s for pid %d (slot key %d)\n", actionMenuItemsLength,
+            actionMenuItem == GAME_MOUSE_ACTION_MENU_ITEM_LOOK ? "look"
+                : actionMenuItem == GAME_MOUSE_ACTION_MENU_ITEM_UNLOAD ? "unload" : "cancel",
+            item->pid, keyCode);
+    }
     switch (actionMenuItem) {
     case GAME_MOUSE_ACTION_MENU_ITEM_DROP:
         if (clientViewerActive()) {
@@ -3659,6 +3678,15 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
         }
         break;
     case GAME_MOUSE_ACTION_MENU_ITEM_UNLOAD:
+        if (clientViewerActive() && inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE) {
+            // On the trade screen the lists are copies built from the trade's own
+            // stream, so the weapon is named by its kind and the list it lies in
+            // (the four slot ranges, in the stream's order) and the server unloads it
+            // there; the next STATE shows the weapon empty and the rounds beside it.
+            int list = keyCode < 2000 ? 0 : keyCode < 2300 ? 1 : keyCode < 2400 ? 2 : 3;
+            clientViewerBarterVerb("bunload", item->pid, list);
+            break;
+        }
         if (clientViewerActive()) {
             // Route to the server (authoritative inventory); the emptied weapon +
             // ejected ammo stream back via OBJECT_DELTA_INVENTORY. Mutating the local
@@ -5052,6 +5080,10 @@ static int barterSnapshotTable(Object* table, Presenter::BarterStack* out, int c
         }
         out[count].pid = inv->items[i].item->pid;
         out[count].quantity = inv->items[i].quantity;
+        if (itemGetType(inv->items[i].item) == ITEM_TYPE_WEAPON) {
+            out[count].ammoQuantity = ammoGetQuantity(inv->items[i].item);
+            out[count].ammoTypePid = weaponGetAmmoTypePid(inv->items[i].item);
+        }
         count++;
     }
     return count;
@@ -5408,6 +5440,35 @@ void inventoryOpenTrade(int win, Object* barterer, Object* playerTable, Object* 
                 continue;
             }
 
+            if (intent.kind == BARTER_INTENT_UNLOAD_ITEM) {
+                // == the action menu's Unload (GitHub issue 38). Vanilla's trade screen
+                // offers it on every list, and the ammo goes into the inventory the
+                // weapon lies in: unload the merchant's pistol and the rounds are the
+                // merchant's, to be bought on their own.
+                Object* owners[4] = { _inven_dude, barterer, playerTable, bartererTable };
+                Object* owner = intent.quantity >= 0 && intent.quantity < 4 ? owners[intent.quantity] : nullptr;
+                Object* weapon = nullptr;
+                if (owner != nullptr) {
+                    Inventory* inventory = &(owner->data.inventory);
+                    for (int index = 0; index < inventory->length && weapon == nullptr; index++) {
+                        Object* candidate = inventory->items[index].item;
+                        if (candidate != nullptr && candidate->pid == intent.pid
+                            && itemGetType(candidate) == ITEM_TYPE_WEAPON && weaponCanBeUnloaded(candidate)) {
+                            weapon = candidate;
+                        }
+                    }
+                }
+                int rounds = weapon != nullptr ? ammoGetQuantity(weapon) : 0;
+                if (weapon != nullptr) {
+                    weaponUnloadIntoInventory(owner, weapon, true);
+                }
+                fprintf(stderr, "f2_server: barter unload pid=%d list=%d %s (%d rounds)\n", intent.pid, intent.quantity,
+                    weapon != nullptr ? "unloaded" : "no loaded weapon of that kind there", rounds);
+                barterEmitState(barterer, playerTable, bartererTable,
+                    _barter_mod, gGameDialogSpeakerIsPartyMember);
+                continue;
+            }
+
             // OFFER/TAKE/UNOFFER: move `quantity` of `pid` between an owner and
             // a table. Mirrors the LMB dude/merchant/table slot handlers.
             Object* item = nullptr;
@@ -5751,6 +5812,13 @@ void inventoryTradeViewerSetHooks(void (*repaint)(), bool (*canTake)())
     gTradeViewerCanTakeHook = canTake;
 }
 
+// True while the trade screen is showing a trade between two players (client_trade.cc
+// installs its hooks for the life of one), not a merchant's barter.
+static bool inventoryTradeViewerIsPlayerTrade()
+{
+    return gTradeViewerRepaintHook != nullptr;
+}
+
 // Same shape as client_dialog: bypass the loop that would execute authority
 // locally, call the pure-render pieces directly.
 //
@@ -5990,6 +6058,22 @@ void inventoryOpenTradeViewer(Object* merchant, Object* playerTable, Object* mer
                 inventorySetCursor(gInventoryCursor == INVENTORY_WINDOW_CURSOR_HAND
                         ? INVENTORY_WINDOW_CURSOR_ARROW
                         : INVENTORY_WINDOW_CURSOR_HAND);
+            } else if ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0
+                && gInventoryCursor == INVENTORY_WINDOW_CURSOR_ARROW) {
+                // ►► THE ARROW'S CLICK, as on vanilla's trade screen (GitHub issue 38): a
+                // click looks at the item, a held button opens the action menu (look,
+                // and unload for a loaded weapon). This loop only ever handled the HAND's
+                // click, so under the arrow a click did nothing at all. The menu runs
+                // inner input loops that pump the wire, which is safe for the reason the
+                // drag below is: a STATE that arrives meanwhile is only latched.
+                bool onSlot = (keyCode >= 1000 && keyCode <= 1000 + gInventorySlotsCount)
+                    || (keyCode >= 2000 && keyCode <= 2000 + gInventorySlotsCount)
+                    || (keyCode >= 2300 && keyCode <= 2300 + gInventorySlotsCount)
+                    || (keyCode >= 2400 && keyCode <= 2400 + gInventorySlotsCount);
+                if (onSlot) {
+                    inventoryWindowOpenContextMenu(keyCode, INVENTORY_WINDOW_TYPE_TRADE);
+                    draggedThisFrame = true; // the menu drew over the lists: repaint them
+                }
             } else if ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0
                 && gInventoryCursor == INVENTORY_WINDOW_CURSOR_HAND) {
                 // ►► REAL DRAG/DROP, VANILLA MACHINERY. A left-click on a slot runs

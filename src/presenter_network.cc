@@ -1108,6 +1108,18 @@ public:
         putI32(view.offerValue);
         putI32(view.askingValue);
         putI32(view.resultCode); // last-commit result, -1 for a plain move (append-only)
+        // What each row's weapon is loaded with, in the same list and row order, behind
+        // everything an older client reads (it stops at the result code).
+        auto putAmmo = [&](const BarterStack* rows, int count) {
+            for (int i = 0; i < count; i++) {
+                putI32(rows[i].ammoQuantity);
+                putI32(rows[i].ammoTypePid);
+            }
+        };
+        putAmmo(view.driverInv, view.driverInvCount);
+        putAmmo(view.merchantInv, view.merchantInvCount);
+        putAmmo(view.playerTable, view.playerTableCount);
+        putAmmo(view.merchantTable, view.merchantTableCount);
         endEvent();
         flushFrame();
     }
