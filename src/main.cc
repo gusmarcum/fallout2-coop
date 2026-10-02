@@ -1865,11 +1865,25 @@ static int mainClientViewer(const char* connectSpec)
         // animation plays or before the last is answered — vanilla blocks input for the
         // whole attack (this also stops spamming AP away in a blink, §3.c).
         if (conn.inCombat()) {
-            // END intents are escape hatches and must not depend on presentation state.
-            // A stale `_myTurn` or wedged replay is exactly when SPACE is needed most;
-            // the server now accepts only the actual current actor and de-duplicates
-            // key repeat, so sending is safe even when the mirror is wrong.
-            if (keyCode == KEY_SPACE) {
+            // END intents are the escape hatch out of a wedged client: a stale `_myTurn`
+            // or a replay that never finishes is exactly when SPACE is needed most, and
+            // the server accepts it only from the actual current actor.
+            //
+            // ►► BUT NOT WHILE THE OTHER SIDE'S TURNS ARE STILL PLAYING (GitHub issue 30).
+            // The server resolves the whole enemy side in one beat and is already waiting
+            // on this player while their attacks are still being shown here. A SPACE
+            // pressed during that show ("come on, hurry up") reached a server whose
+            // current actor WAS this player, and ended a turn they had not seen begin.
+            // So the end intents wait for the presentation like every other key, which
+            // is also vanilla (no input while animations play). The hatch stays: after
+            // eight seconds without any presentation progress the busy watchdog below
+            // clears combatBusy, and then SPACE goes out whatever the mirror believes.
+            if (combatBusy) {
+                if (keyCode == KEY_SPACE || keyCode == KEY_RETURN) {
+                    debugPrint("client-viewer: %s held back, the turn in front of it is still being shown\n",
+                        keyCode == KEY_SPACE ? "end turn" : "end combat");
+                }
+            } else if (keyCode == KEY_SPACE) {
                 conn.sendLine("cendturn"); // 32: end-turn button / SPACE
                 actionPending = true;
                 actionPendingSince = getTicks();
