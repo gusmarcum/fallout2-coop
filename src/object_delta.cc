@@ -270,6 +270,24 @@ void objectDeltaScan()
                 if ((mask & OBJECT_DELTA_INVENTORY) != 0 && playerActorIs(obj)) {
                     mask |= OBJECT_DELTA_FID | OBJECT_DELTA_FRAME;
                 }
+                // ►► A CRITTER THAT DIES SHIPS ITS WHOLE PACK WITH ITS DEATH (GitHub issue
+                // 13, bugs/060). A viewer keeps a LIVING critter's pack only roughly: it
+                // moves the equip flags and adds a stack it never had, but it does not take
+                // one away (an attack replay in flight may still hold the object), so a
+                // spear the critter threw, a stimpak it used or anything stolen from it
+                // stays in the viewer's copy. The copy is put right in full when a delta
+                // carries the pack of a critter that is dead, and nothing changes in a pack
+                // at the moment of death, so that delta never came: the corpse listed the
+                // thrown spear and taking it answered "That item is gone." Dedicated server
+                // only: the probes' streams, and so the goldens, are unchanged.
+                if (serverDedicatedActive() && objectIsCritter(obj)
+                    && (mask & OBJECT_DELTA_COMBAT_RESULTS) != 0
+                    && (current.results & DAM_DEAD) != 0 && (it->second.results & DAM_DEAD) == 0) {
+                    if ((mask & OBJECT_DELTA_INVENTORY) == 0 && getenv("F2_TRACE_EVENTS") != nullptr) {
+                        fprintf(stderr, "[inv] DELTA net=%d invBit=1 (died: its pack is sent whole)\n", obj->netId);
+                    }
+                    mask |= OBJECT_DELTA_INVENTORY;
+                }
                 if (mask != 0) {
                     if ((mask & OBJECT_DELTA_INVENTORY) != 0 && getenv("F2_TRACE_EVENTS") != nullptr) {
                         fprintf(stderr, "[inv] DELTA net=%d invBit=1 (hash %u->%u)\n",
