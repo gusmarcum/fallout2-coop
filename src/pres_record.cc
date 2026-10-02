@@ -380,14 +380,52 @@ int presRecordCostMs()
 
 // ---- leaf emitters --------------------------------------------------------
 
+// ---- the cut (GitHub issue 13, bugs/059) -----------------------------------
+// Vanilla ends a sequence at a FORCED callback that fails: an approach is a walk, then
+// _is_next_to, then the gesture, and when the walk fell short the gesture is never
+// shown. A viewer replays what was recorded and has no such check, so the recording
+// backend marks the point (presRecordCutHere) once it knows the reach check is going to
+// fail, and SeqEnd drops everything recorded after it. What is left is what vanilla
+// shows: the walk, and nothing more. One cut per sequence; the first one stands.
+static int gCutSize = -1; // -1: no cut marked in the sequence being recorded
+static int gCutOpCount = 0;
+static std::unordered_map<Object*, int> gCutHandles;
+static int gCutNextHandle = -1;
+static std::unordered_map<int, unsigned int> gCutCostByRef;
+static unsigned int gCutCostMaxMs = 0;
+
+void presRecordCutHere()
+{
+    if (!gActive || gCutSize >= 0) {
+        return;
+    }
+    gCutSize = (int)gBuf.size();
+    gCutOpCount = gOpCount;
+    gCutHandles = gHandles;
+    gCutNextHandle = gNextHandle;
+    gCutCostByRef = gCostByRef;
+    gCutCostMaxMs = gCostMaxMs;
+}
+
 void presRecordSeqBegin(int flags)
 {
+    gCutSize = -1;
     beginOp(PRES_OP_SEQ_BEGIN);
     appendI32(flags);
 }
 
 void presRecordSeqEnd()
 {
+    if (gCutSize >= 0) {
+        // Back to the mark: the ops, the transients they minted and their cost.
+        gBuf.resize((size_t)gCutSize);
+        gOpCount = gCutOpCount;
+        gHandles = gCutHandles;
+        gNextHandle = gCutNextHandle;
+        gCostByRef = gCutCostByRef;
+        gCostMaxMs = gCutCostMaxMs;
+        gCutSize = -1;
+    }
     beginOp(PRES_OP_SEQ_END);
 }
 

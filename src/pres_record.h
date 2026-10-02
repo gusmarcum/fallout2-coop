@@ -283,6 +283,10 @@ int presRecordCostMs();
 // ---- leaf record emitters (called from server_anim.cc leaves) ----
 void presRecordSeqBegin(int flags);
 void presRecordSeqEnd();
+// Mark the point where the sequence being recorded ends for a viewer: SeqEnd drops what
+// was recorded after it. For a forced reach check the backend knows will fail, so the
+// gesture after a walk that falls short is not shown (vanilla ends the sequence there).
+void presRecordCutHere();
 void presRecordPriority(int n);
 void presRecordAnimate(Object* owner, int anim, int delay);
 void presRecordAnimateReversed(Object* owner, int anim, int delay);
