@@ -8,6 +8,7 @@
 #include "db.h"
 #include "debug.h"
 #include "object.h"
+#include "party_member.h" // partyMemberOwnersSave/Load — the appendix carries who follows whom
 #include "perk.h"
 #include "presenter.h"
 #include "proto.h"
@@ -61,6 +62,9 @@ static constexpr int kPlayerActorAppendixMagicV2 = 0x50414332; // 'PAC2' (v2)
 // no appendix-magic bump is needed, same self-delimiting nicety as the appendix
 // itself.
 static constexpr int kPlayerActorEventsMagic = 0x50414556; // 'PAEV'
+// Tail section after the events: which player each companion follows (bugs/067). Same
+// self-delimiting rule: absent in an older save, ignored by an older server.
+static constexpr int kPlayerActorOwnersMagic = 0x50414F57; // 'PAOW'
 
 // Per-slot "sheet row changed this beat" bits, set by playerSheetMarkDirty and
 // drained by playerSheetDeltaEmit. A runtime sheet mutation (drug, level-up,
@@ -291,6 +295,16 @@ int playerActorAppendixSave(File* stream)
         }
     }
 
+    // Which player each companion follows (bugs/067). Last, behind its own magic, like
+    // the events above: an older server stops reading before it, and a save written
+    // before it existed ends here, which the loader takes as "nobody recorded".
+    if (fileWriteInt32(stream, kPlayerActorOwnersMagic) == -1) {
+        return -1;
+    }
+    if (partyMemberOwnersSave(stream) == -1) {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -463,6 +477,23 @@ int playerActorAppendixLoad(File* stream)
             debugPrint("player_sheet: slot %d event reload failed\n", slot);
             return -1;
         }
+    }
+
+    // Companion owners (bugs/067). EOF = a save from before the section existed: the
+    // companions come back unowned, as they always did. A COUNTED read, as above.
+    unsigned char ownersMagicBytes[4];
+    if (fileRead(ownersMagicBytes, 1, sizeof(ownersMagicBytes), stream) != sizeof(ownersMagicBytes)) {
+        return 0;
+    }
+    int ownersMagic = (ownersMagicBytes[0] << 24) | (ownersMagicBytes[1] << 16)
+        | (ownersMagicBytes[2] << 8) | ownersMagicBytes[3];
+    if (ownersMagic != kPlayerActorOwnersMagic) {
+        fprintf(stderr, "player_sheet: bad appendix OWNERS magic 0x%08x — refusing the save\n", ownersMagic);
+        return -1;
+    }
+    if (partyMemberOwnersLoad(stream) == -1) {
+        fprintf(stderr, "player_sheet: appendix companion owners read failed\n");
+        return -1;
     }
 
     return 0;

@@ -861,12 +861,13 @@ static void opRollDice(Program* program)
 // rather than special-cased: a conditional nobody can test is worse than either outcome.
 //
 // SP is byte-identical — playerActorCount() == 1, so the loop body never runs.
-static void scriptRelocateOtherPlayerActors(Object* mover, int tile, int elevation)
+static void scriptRelocateOtherPlayerActors(Object* mover, int tile, int elevation, bool changedFloor)
 {
     if (mover == nullptr || !playerActorIs(mover)) {
         return;
     }
 
+    bool moved = false;
     for (int slot = 0; slot < playerActorCount(); slot++) {
         Object* actor = playerActorAt(slot);
         if (actor == nullptr || actor == mover || !playerActorOnline(slot)) {
@@ -877,6 +878,15 @@ static void scriptRelocateOtherPlayerActors(Object* mover, int tile, int elevati
         // and leaves the actor where it was if it cannot, so a cramped destination
         // degrades to "did not move" instead of stacking bodies.
         _objPMAttemptPlacement(actor, tile, elevation);
+        moved = true;
+    }
+
+    // The whole group went to another floor, so every companion goes with its player
+    // (bugs/067). The mover's own came along when the mover's floor changed; the ones
+    // that follow the players moved just above would be left on the old floor, where
+    // nobody is any more and nothing would ever bring them up.
+    if (moved && changedFloor) {
+        _partyMemberSyncPosition();
     }
 }
 
@@ -891,6 +901,7 @@ static void opMoveTo(Program* program)
     int newTile;
 
     if (object != nullptr) {
+        int oldElevation = object->elevation;
         if (object == gDude) {
             bool tileLimitingEnabled = tileScrollLimitingIsEnabled();
             bool tileBlockingEnabled = tileScrollBlockingIsEnabled();
@@ -932,7 +943,7 @@ static void opMoveTo(Program* program)
             }
         }
         if (newTile != -1) {
-            scriptRelocateOtherPlayerActors(object, tile, elevation);
+            scriptRelocateOtherPlayerActors(object, tile, elevation, oldElevation != elevation);
         }
     } else {
         scriptPredefinedError(program, "move_to", SCRIPT_ERROR_OBJECT_IS_NULL);
@@ -2973,7 +2984,8 @@ static void opCritterAttemptPlacement(Program* program)
         return;
     }
 
-    if (elevation != critter->elevation && PID_TYPE(critter->pid) == OBJ_TYPE_CRITTER) {
+    bool changedFloor = elevation != critter->elevation;
+    if (changedFloor && PID_TYPE(critter->pid) == OBJ_TYPE_CRITTER) {
         _combat_delete_critter(critter);
     }
 
@@ -2985,7 +2997,7 @@ static void opCritterAttemptPlacement(Program* program)
     // here is the script's business, and if the initiator only half-landed, the others
     // standing near the target is still closer to the script's intent than being left
     // on the far side of the map.
-    scriptRelocateOtherPlayerActors(critter, tile, elevation);
+    scriptRelocateOtherPlayerActors(critter, tile, elevation, changedFloor);
 
     programStackPushInteger(program, rc);
 }

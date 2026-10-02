@@ -1286,6 +1286,13 @@ int mapHandleTransition()
                     objectSetLocation(actor, tile, gMapTransition.elevation, nullptr);
                     objectSetRotation(actor, gMapTransition.rotation, nullptr);
                 }
+                // And the companions once more, now that the players stand where the
+                // trip ends: the sync inside mapSetElevation above ran with the extras
+                // still where the load had put them, so their companions were placed
+                // there, the map's default entrance, and left behind (bugs/067).
+                if (playerActorCount() > 1) {
+                    _partyMemberSyncPosition();
+                }
             }
 
             if (tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW) == -1) {
@@ -1773,7 +1780,11 @@ static void _map_place_dude_and_mouse()
         gDude->flags |= OBJECT_NO_SAVE;
 
         _dude_stand(gDude, gDude->rotation, gDude->fid);
-        _partyMemberSyncPosition();
+        // The companions are placed BELOW, after every other player is standing on
+        // this map: each goes beside its own player, and beside a player who still
+        // held a tile number from the map just left it landed twenty hexes off, or
+        // nowhere at all on a small map (GitHub issues 20 and 41, bugs/067). With
+        // one player that is the same moment as before.
     }
 
     // Same treatment for every other player actor (MP_PROPOSAL Ch 14.2): the
@@ -1823,6 +1834,10 @@ static void _map_place_dude_and_mouse()
         objectSetLight(actor, 4, 0x10000, nullptr);
         actor->flags |= OBJECT_NO_SAVE;
         _dude_stand(actor, actor->rotation, actor->fid);
+    }
+
+    if (gDude != nullptr) {
+        _partyMemberSyncPosition();
     }
 
     presenter()->mouseResetBouncingCursor();
