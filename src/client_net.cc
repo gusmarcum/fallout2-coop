@@ -459,6 +459,10 @@ public:
         // ►► NO FEEDER YET (§12.5 step 1): nothing enqueues this today, so the path is
         // inert and the goldens must be byte-identical. Step 2 adds the feeder.
         kDeferredEvent,
+        // This viewer's own hit points, parked while a fight is still being shown so the
+        // counter moves where the wire put the new total: behind the attack that caused
+        // it, not at decode (GitHub issue 44, bugs/069).
+        kDudeHp,
     };
     struct PresEvent {
         PresKind kind;
@@ -466,6 +470,7 @@ public:
         int tsNetId = 0, tsIsPlayer = 0, tsAp = 0, tsDeadline = 0, tsFreeMove = 0; // kTurnStart
         int floatNetId = 0; // kFloat owner
         int moveNetId = 0, moveHops = 0; // kMoveRelease
+        int hpNetId = 0, hpValue = 0; // kDudeHp: whose total it is (the body may be rebound meanwhile) and the total
         std::vector<unsigned char> seqOps; // kRecordedSeq — the raw op buffer (played at pump time)
         int seqActorNetId = 0; // kRecordedSeq — actor whose approach glide must drain before play (0 = none)
         // kRecordedSeq — the adopt netIds this sequence INCREMENTED in _pendingAdopts at
@@ -911,6 +916,42 @@ public:
         interfaceBarRefresh();
     }
 
+    // Adopt a hit point total for this viewer's own body: the value the counter rolls
+    // toward. `netId` is the body the total was sent for; one parked across a rebind
+    // (the roster moved this screen to another actor) is not this body's and is dropped.
+    void applyDudeHp(int netId, int hp)
+    {
+        if (gDude == nullptr || lookup(netId) != gDude) {
+            return;
+        }
+        if (getenv("F2_TRACE_EVENTS") != nullptr && hp != _dudeHpAuth) {
+            fprintf(stderr, "[hp] own total %d -> %d adopted (shown %d)\n", _dudeHpAuth, hp, gDude->data.critter.hp);
+        }
+        _dudeHpAuth = hp;
+        _dudeHpSeeded = true;
+    }
+
+    // Must a new total for this viewer's own body wait on the presentation queue?
+    // Yes while a fight is still being shown: something is queued or an attack is
+    // playing, and either the fight is on or its end (or an earlier total, which this
+    // one must not overtake) is still in the line. Outside a fight the queue only ever
+    // holds another actor's door or gesture, and a heal must not wait on that.
+    bool dudeHpWaitsForPresentation() const
+    {
+        if (_presQueue.empty() && !clientCombatAnimActive()) {
+            return false;
+        }
+        if (_inCombat) {
+            return true;
+        }
+        for (const PresEvent& e : _presQueue) {
+            if (e.kind == PresKind::kExit || e.kind == PresKind::kDudeHp) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void presentationPump()
     {
         if (!clientViewerActive()) {
@@ -1027,6 +1068,7 @@ public:
             case PresKind::kFloat: applyFloat(ev.floatNetId, ev.text); break;
             case PresKind::kSfx: applySfx(ev.text); break;
             case PresKind::kMoveRelease: clientAnimRelease(lookup(ev.moveNetId), ev.moveHops); break;
+            case PresKind::kDudeHp: applyDudeHp(ev.hpNetId, ev.hpValue); break;
             case PresKind::kDeferredEvent: {
                 // Re-dispatch verbatim through the SAME handler the decoder would have
                 // used. event() expects a reader bounded to exactly this payload, which
@@ -1313,6 +1355,11 @@ private:
                 continue;
             }
             if (it->kind != PresKind::kTurnStart && it->kind != PresKind::kExit) {
+                if (it->kind == PresKind::kDudeHp) {
+                    // A total is state, not a caption: taken out of the line it is
+                    // applied, early, and the later ones still follow it in order.
+                    applyDudeHp(it->hpNetId, it->hpValue);
+                }
                 if (it->kind == PresKind::kMoveRelease) {
                     // Its held glide must not outlive its release: snap the mover to
                     // its (already authoritative) position instead of stranding it.
@@ -2962,8 +3009,32 @@ private:
             // SCOPE (this slice): the roll only SMOOTHS the motion; it still STARTS at
             // decode (~swing start), not the blow's action frame. Action-frame commit is
             // Pillar 1 / phase 3 — deliberately left for the deferred-commit FIFO.
-            _dudeHpAuth = hp;
-            _dudeHpSeeded = true;
+            //
+            // ►► AND IT WAITS ITS TURN WHILE A FIGHT IS STILL BEING SHOWN (issue 44). The
+            // enemy side's attacks all arrive within a beat or two and then take seconds
+            // to play, so a total adopted at decode counted the bar down to the END of
+            // the enemy phase while the first swing was still in the air: the player read
+            // off how much they were about to lose. The total is parked on the
+            // presentation queue instead and adopted where the wire put it, which since
+            // v1.4.2 is right behind the attack that caused it (objectDeltaFlushHitPoints).
+            // With nothing owed (a stimpak, a rest, a trap out of combat) it is adopted
+            // at once, as before.
+            if (!_dudeHpSeeded) {
+                _dudeHpAuth = gDude->data.critter.hp;
+                _dudeHpSeeded = true;
+            }
+            if (dudeHpWaitsForPresentation()) {
+                PresEvent e;
+                e.kind = PresKind::kDudeHp;
+                e.hpNetId = obj->netId;
+                e.hpValue = hp;
+                enqueue(e);
+                if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                    fprintf(stderr, "[hp] own total %d parked behind %d queued event(s)\n", hp, (int)_presQueue.size() - 1);
+                }
+            } else {
+                applyDudeHp(obj->netId, hp);
+            }
             dudeCombatHp = true;
         }
         if (hasHp && !dudeCombatHp) obj->data.critter.hp = hp;
@@ -4167,6 +4238,9 @@ private:
     {
         // The interface bar's message log — "You were hit for N points…".
         displayMonitorAddMessageStyled(const_cast<char*>(text.c_str()), channel);
+        if (getenv("F2_TRACE_EVENTS") != nullptr) {
+            fprintf(stderr, "[console] shown: %s\n", text.c_str());
+        }
     }
 
     void onFloatText(Reader& r)

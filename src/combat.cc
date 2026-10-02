@@ -33,6 +33,7 @@
 #include "message.h"
 #include "msg_channel.h" // kMsgChannelReward — XP payout is addressed to its earner
 #include "object.h"
+#include "object_delta.h" // objectDeltaFlushHitPoints — a player's hit points, sent where the blow lands
 #include "party_member.h"
 #include "perk.h"
 #include "pipboy.h"
@@ -6077,6 +6078,12 @@ static void _damage_object(Object* a1, int damage, bool animated, int a4, Object
 
     if (a1 == gDude) {
         presenter()->hudHitPoints(animated);
+    }
+
+    // A player's new total goes on the wire here, behind the attack that caused it,
+    // and not once at the end of a beat that may hold a whole enemy phase (issue 44).
+    if (playerActorIs(a1)) {
+        objectDeltaFlushHitPoints(a1);
     }
 
     a1->data.critter.combat.damageLastTurn += damage;

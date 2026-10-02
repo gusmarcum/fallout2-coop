@@ -56,6 +56,17 @@ void objectDeltaNotePresentedFrame(Object* obj);
 // client without a rebaseline. Cheap: one map erase, one extra delta.
 void objectDeltaForgetShadow(Object* obj);
 
+// Put `obj`'s hit points on the wire NOW, in the middle of the beat, if they differ
+// from what the stream last said (GitHub issue 44, bugs/069). The scan above runs once
+// at the end of a beat, and the enemy side takes many turns in one beat, so a player
+// who was hit five times got ONE hit point delta, after all five attacks: a viewer
+// could show the number only before the first blow played or after the last. Called
+// where a blow lands on a player, this puts each new total right behind the attack
+// that caused it, and a viewer that applies the stream in order counts the bar down
+// blow by blow. Dedicated server only; a no-op for an object the scan has not seen yet
+// (its first delta carries everything).
+void objectDeltaFlushHitPoints(Object* obj);
+
 // ─── GVAR streaming ─────────────────────────────────────────────────────────
 //
 // ►► THE GLOBAL VARIABLES WERE NEVER STREAMED. Before this, a viewer's

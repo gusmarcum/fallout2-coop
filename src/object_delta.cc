@@ -232,6 +232,21 @@ void objectDeltaForgetShadow(Object* obj)
     gShadow.erase(obj);
 }
 
+void objectDeltaFlushHitPoints(Object* obj)
+{
+    if (obj == nullptr || !serverDedicatedActive() || !objectIsCritter(obj)) {
+        return;
+    }
+    auto it = gShadow.find(obj);
+    if (it == gShadow.end() || it->second.hp == obj->data.critter.hp) {
+        return;
+    }
+    // Advance the shadow with the emit, so the beat-end scan sends the hit points again
+    // only if they moved once more after this.
+    it->second.hp = obj->data.critter.hp;
+    presenter()->objectDelta(obj, OBJECT_DELTA_HP);
+}
+
 void objectDeltaScan()
 {
     // A map transition wholesale-replaces the object set; rebaseline silently
