@@ -108,6 +108,7 @@
 #include "obj_types.h"
 #include "object.h"
 #include "path.h"
+#include "perk.h" // PERK_SILENT_RUNNING — a sneaking player's registered run is a walk without it
 #include "pres_record.h"
 #include "presenter.h"
 #include "presenter_network.h"
@@ -784,6 +785,14 @@ static bool serverAnimMoveArtAvailable(Object* owner, bool run, bool* effectiveR
     // Vanilla passes weaponCode 0 for this probe but the real weapon code for the
     // preload; mirror that asymmetry rather than tidying it (animation.cc:737 vs :748).
     if (run && !artExists(buildFid(OBJ_TYPE_CRITTER, owner->fid & 0xFFF, ANIM_RUNNING, 0, owner->rotation + 1))) {
+        *effectiveRun = false;
+    }
+    // A sneaking player without Silent Running WALKS wherever a run is registered for
+    // them: the approach of a use, a pickup, a talk (animation.cc:729, :812; GitHub
+    // issue 29). The run they click themselves ends the sneak instead, before it gets
+    // here (serverControlMove), as _dude_run does.
+    if (run && playerActorIs(owner) && dudeHasState(DUDE_STATE_SNEAKING, owner)
+        && !perkGetRank(owner, PERK_SILENT_RUNNING)) {
         *effectiveRun = false;
     }
 

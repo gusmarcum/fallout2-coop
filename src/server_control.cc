@@ -1377,6 +1377,16 @@ static void serverControlMove(Object* actor, int tile, bool run)
         return;
     }
 
+    // ►► RUNNING ENDS SNEAKING, unless the runner has Silent Running (GitHub issue 29).
+    // Vanilla does this in _dude_run, the click's own handler (animation.cc), which a
+    // dedicated server never calls: the run arrives here as a verb. So a player with
+    // Sneak on kept it on at a run, the indicator stayed up and critters went on judging
+    // them as sneaking. The sheet row carries the state back, so the indicator follows.
+    if (run && !perkGetRank(actor, PERK_SILENT_RUNNING) && dudeHasState(DUDE_STATE_SNEAKING, actor)) {
+        dudeDisableState(DUDE_STATE_SNEAKING, actor);
+        fprintf(stderr, "f2_server: control mv run ends sneaking (no Silent Running)\n");
+    }
+
     reg_anim_begin(ANIMATION_REQUEST_RESERVED);
     if (run) {
         animationRegisterRunToTile(actor, tile, actor->elevation, -1, 0);
