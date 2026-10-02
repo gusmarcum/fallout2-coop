@@ -2346,7 +2346,7 @@ static void opAnimBusy(Program* program)
 
     int rc = 0;
     if (object != nullptr) {
-        rc = animationIsBusy(object);
+        rc = animationIsBusyForScript(object);
     } else {
         scriptPredefinedError(program, "anim_busy", SCRIPT_ERROR_OBJECT_IS_NULL);
     }

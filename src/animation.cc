@@ -594,6 +594,13 @@ void animationDescribeBusy(Object* obj, char* out, size_t cap)
     }
 }
 
+// What a script's anim_busy sees. Here that is the real thing; the dedicated server's
+// backend answers it from its walk registry instead (server_anim.cc says why).
+int animationIsBusyForScript(Object* a1)
+{
+    return animationIsBusy(a1);
+}
+
 int animationIsBusy(Object* a1)
 {
     if (gAnimationDescriptionCurrentIndex >= ANIMATION_DESCRIPTION_LIST_CAPACITY || a1 == nullptr) {

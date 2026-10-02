@@ -107,6 +107,7 @@
 #include "movement.h"
 #include "obj_types.h"
 #include "object.h"
+#include "party_member.h" // objectIsPartyMember — companions keep their tuned follow (anim_busy)
 #include "path.h"
 #include "perk.h" // PERK_SILENT_RUNNING — a sneaking player's registered run is a walk without it
 #include "pres_record.h"
@@ -1154,6 +1155,35 @@ int reg_anim_end()
 int animationIsBusy(Object* a1)
 {
     return 0;
+}
+
+// ►► BUT A SCRIPT THAT ASKS anim_busy GETS THE TRUTH ABOUT WALKS (GitHub issue 43,
+// bugs/068). animationIsBusy stays 0 for the engine's own callers: they busy-wait on it
+// (`while (animationIsBusy(x)) _process_bk();`, combat.cc, combat_ai.cc), and nothing in
+// that pump advances a stepped walk, so a true answer there would spin for good.
+//
+// Scripts use it differently, as "did the move I just asked for get under way". The stock
+// idiom, in a critter's own proc: ask to walk to the target; while not anim_busy, the move
+// was refused (no path, too far), so pull the destination one hex back toward yourself and
+// ask again. With 0 always, every ask looked refused: the loop walked the destination all
+// the way back to the critter's own feet and the last ask, the one that stood, went
+// nowhere. That is Grisham's wild dogs "standing still in top of the Brahmin Pasture"
+// instead of running at the herd, and any other script that homes in this way.
+//
+// A walk under way is exactly what the registry holds, out of combat, which is where
+// these procs run; in a fight walks apply at once and nothing is ever under way.
+//
+// Companions keep the old answer on purpose. Their follow was tuned against it (bugs/027):
+// with "not busy" their script re-aims at the leader on every heartbeat, mid-walk, which
+// is what makes them keep up at a server's proc cadence. Told the truth, they would finish
+// each leg to where the leader WAS before looking again. Nothing was reported against how
+// they move, so they are left as they are.
+int animationIsBusyForScript(Object* a1)
+{
+    if (a1 == nullptr || objectIsPartyMember(a1)) {
+        return 0;
+    }
+    return serverAnimWalkInFlightFor(a1) ? 1 : 0;
 }
 
 // ---- Lifecycle (no-ops; there is no engine/sad list to manage) -----------
