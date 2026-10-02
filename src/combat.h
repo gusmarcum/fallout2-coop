@@ -22,6 +22,13 @@ int combatSave(File* stream);
 bool _combat_safety_invalidate_weapon(Object* attacker, Object* weapon, int hitMode, Object* defender, int* safeDistancePtr);
 bool _combatTestIncidentalHit(Object* attacker, Object* defender, Object* attackerFriend, Object* weapon);
 Object* _combat_whose_turn();
+// A viewer runs no combat loop, so nothing there sets whose turn it is: it is told
+// (TURN_START) and passes it on here. The one thing a viewer reads it for is the armor
+// class stat, which adds a critter's unspent action points except on its own turn; with
+// the turn never set, the counter on the interface bar showed the bonus all through the
+// player's own turn and lost a point with every action point spent (GitHub issue 24).
+// Compared, never dereferenced, on a viewer: null it when the fight or the world goes.
+void combatViewerSetTurnObject(Object* obj);
 void _combat_data_init(Object* obj);
 Object* aiInfoGetFriendlyDead(Object* obj);
 int aiInfoSetFriendlyDead(Object* a1, Object* a2);

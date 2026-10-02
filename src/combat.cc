@@ -2354,6 +2354,11 @@ Object* _combat_whose_turn()
     }
 }
 
+void combatViewerSetTurnObject(Object* obj)
+{
+    _combat_turn_obj = obj;
+}
+
 // 0x4217E8
 void _combat_data_init(Object* obj)
 {

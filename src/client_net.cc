@@ -1957,6 +1957,7 @@ private:
             // recompute re-lights your crosshair highlight over the fresh list now; the
             // acting-critter outline returns on that TURN_START. No stale-netId leak (#8).
             _combatActorNetId = 0;
+            combatViewerSetTurnObject(nullptr);
             recomputeCombatOutlines();
         } else {
             setInCombat(false);
@@ -3252,6 +3253,7 @@ private:
         _presQueue.clear();
         _pendingDudeTick = 0;
         _dudeApDeferring = false;
+        combatViewerSetTurnObject(nullptr); // the world it pointed into is gone
         gCombatState &= ~(COMBAT_STATE_0x01 | COMBAT_STATE_0x02);
         gCombatState |= COMBAT_STATE_0x02;
         interfaceBarEndButtonsHide(false);
@@ -3345,6 +3347,7 @@ private:
             interfaceBarRefresh();
             // No actor yet — the first TURN_START drives the outlines (#8).
             _combatActorNetId = 0;
+            combatViewerSetTurnObject(nullptr);
             recomputeCombatOutlines();
         }
         debugPrint("client_net: COMBAT ENTER\n");
@@ -3399,6 +3402,7 @@ private:
         // outlines (recompute clears since _inCombat is now false). Rebaseline/rejoin
         // self-clear (fresh object list), so this is the only path needing a clear (#8).
         _combatActorNetId = 0;
+        combatViewerSetTurnObject(nullptr);
         recomputeCombatOutlines();
         debugPrint("client_net: COMBAT EXIT applied\n");
     }
@@ -3451,6 +3455,10 @@ private:
             debugPrint("client_net: turn start, this player's turn (%d action points)\n", ap);
         }
         gCombatState |= COMBAT_STATE_0x01;
+        // Whose turn it is, for the armor class stat: a critter's unspent action points
+        // count toward it except on its own turn (GitHub issue 24). Set before the bar
+        // is redrawn below, which draws that counter.
+        combatViewerSetTurnObject(lookup(netId));
         interfaceBarEndButtonsShow(true); // idempotent: animates only the first reveal
         if (_myTurn) {
             gCombatState |= COMBAT_STATE_0x02; // free to act
