@@ -437,6 +437,17 @@ static void serverEmitBaseline()
     }
     presenter()->snapshotEnd();
 
+    // The clock and the light level, said outright. A viewer's own map load puts the
+    // light at full day (mapLoad), and the map script that darkens it at night runs
+    // only here; after that the level travels as a delta, sent only when it CHANGES,
+    // and a map load rebaselines that diff silently (objectDeltaReset). So a party
+    // that changed maps at night, or a player who joined at night, stood in full
+    // daylight until dawn moved the level again (GitHub issue 37, bugs/071). Dedicated
+    // server only: the probes' streams, and so the goldens, are unchanged.
+    if (serverDedicatedActive()) {
+        presenter()->worldDelta(WORLD_DELTA_GAMETIME | WORLD_DELTA_LIGHT);
+    }
+
     // Re-announce the map's music. EVENT_MUSIC_PLAY is a transient cue, not state
     // carried in the blob, so a viewer that joined after the track started would
     // hear nothing until the next map change — which in co-op is EVERY joiner but
