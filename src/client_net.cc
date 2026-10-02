@@ -1,5 +1,6 @@
 #include "client_net.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -479,6 +480,10 @@ public:
         // later state event for that netId defers against it and force-applies a full cap
         // late, forever (§12.6 trap 2, reached by a second route).
         std::vector<int> seqAdopts;
+        // kRecordedSeq: the live objects this sequence reserved at its decode, once each.
+        // Each is owed this replay (clientCombatAnimReserve) until the sequence executes
+        // or is dropped, and is told so then (clientCombatAnimNotePlayed).
+        std::vector<int> seqReserved;
         std::string text; // kConsole / kFloat / kSfx
         int consoleChannel = kMsgChannelDefault; // kConsole — message-log style (msg_channel.h)
         // kDeferredEvent — the parked state event, re-dispatched verbatim at drain.
@@ -1082,13 +1087,17 @@ public:
             }
             case PresKind::kRecordedSeq:
                 presPlayRecordedSeq(ev.seqOps.data(), (int)ev.seqOps.size(), true);
+                for (int ref : ev.seqReserved) {
+                    clientCombatAnimNotePlayed(lookup(ref));
+                }
                 // Uniform Active marking (Fable review A5/C.2): a throw/attack/wield seq's
                 // ops don't self-promote to Active (only MOVE/TAKE_OUT do), so combatAnim
                 // read 0 while such a seq was still animating — the turn-flip gate could
                 // play over it and the `[busy] STUCK combatAnim=0` misreport. Mark the actor
                 // Active (capMs=0, ownsMoveFrame=false) so every executing seq holds the
-                // pump and reaps via advanceReplays. In combat only (out-of-combat gesture/
-                // door keep their existing lifecycle). Idempotent for a MOVE seq that already
+                // pump and reaps via advanceReplays. In combat only: out of combat a gesture
+                // or a door does not hold the pump, and its reserve ends when it has played
+                // (clientCombatAnimNotePlayed above). Idempotent for a MOVE seq that already
                 // marked itself (enterReplay no-ops when already Active; capMs 0 won't shrink
                 // the move's cap; ownsMoveFrame false won't clear its frame claim).
                 if (_inCombat) {
@@ -1365,6 +1374,10 @@ private:
                     // its (already authoritative) position instead of stranding it.
                     clientAnimCancel(lookup(it->moveNetId));
                 }
+                if (it->kind == PresKind::kAttack) {
+                    // Its participants were reserved for this replay and will not get it.
+                    attackNotePlayed(it->attack);
+                }
                 if (it->kind == PresKind::kRecordedSeq) {
                     // This sequence will never execute, so the mints it promised at decode
                     // will never happen — release them, or the netIds stay entangled with
@@ -1375,6 +1388,10 @@ private:
                     // meant.
                     for (int adoptNetId : it->seqAdopts) {
                         releasePendingAdopt(adoptNetId);
+                    }
+                    // And the objects it reserved are no longer owed it.
+                    for (int ref : it->seqReserved) {
+                        clientCombatAnimNotePlayed(lookup(ref));
                     }
                 }
                 _presQueue.erase(it);
@@ -3598,6 +3615,11 @@ private:
     // the pass and carried on the queued entry, so a dropped sequence can release them.
     std::vector<int> _seqAdoptIds;
 
+    // The live objects the DRY pass of the sequence being decoded has reserved, once
+    // each: a sequence names the same object in several ops, and a reserve counts one
+    // replay owed (bugs/077). Read by onPresSeq straight after the pass, like _seqAdoptIds.
+    std::vector<int> _seqReservedIds;
+
     Object* resolveSeqRef(int ref, std::unordered_map<int, Object*>& handles)
     {
         if (ref > 0) {
@@ -3620,7 +3642,12 @@ private:
     // clientCombatAnimReserve tolerates it.
     void reserveSeqRef(int ref)
     {
-        if (ref > 0) clientCombatAnimReserve(lookup(ref));
+        if (ref <= 0 || lookup(ref) == nullptr
+            || std::find(_seqReservedIds.begin(), _seqReservedIds.end(), ref) != _seqReservedIds.end()) {
+            return;
+        }
+        _seqReservedIds.push_back(ref);
+        clientCombatAnimReserve(lookup(ref));
     }
 
     // Walk the op stream. execute=false = DRY reserve pass at decode (reserve live
@@ -3856,6 +3883,7 @@ private:
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     }
                 } else {
+                    reserveSeqRef(ref);
                     clientCombatAnimArmMoveHold(lookup(ref)); // reserve + flag: hold this mover's pos/AP deltas
                 }
                 break;
@@ -3893,6 +3921,7 @@ private:
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     }
                 } else {
+                    reserveSeqRef(ref);
                     clientCombatAnimArmMoveHold(lookup(ref)); // hold the MOVER only (not the target)
                 }
                 break;
@@ -3981,8 +4010,10 @@ private:
         // moved to execute, or the same-beat corpse-fid leak regresses for every attack).
         // It also PROMISES this sequence's adopt mints, which entangles those netIds from
         // here on — the parking rule for everything that follows on the state lane.
+        _seqReservedIds.clear();
         presPlayRecordedSeq(ops.data(), (int)ops.size(), false);
         std::vector<int> promisedAdopts = _seqAdoptIds;
+        std::vector<int> reserved = _seqReservedIds;
         // In combat: always ride the pump (turn-serial ordering). Out of combat: an
         // ACTORED sequence (gesture/door) rides the pump too so it waits out that
         // actor's approach glide (pump gate 1d); an actor-less sequence (explosion)
@@ -3993,10 +4024,14 @@ private:
             e.seqOps = std::move(ops);
             e.seqActorNetId = actorNetId;
             e.seqAdopts = std::move(promisedAdopts);
+            e.seqReserved = std::move(reserved);
             enqueue(e);
         } else {
             // Plays now, so the promise is kept immediately (the execute pass releases it).
             presPlayRecordedSeq(ops.data(), (int)ops.size(), true);
+            for (int ref : reserved) {
+                clientCombatAnimNotePlayed(lookup(ref));
+            }
         }
     }
 
@@ -4022,11 +4057,23 @@ private:
 
     // Reconstruct one queued attack and start its replay. netIds are resolved HERE
     // (dequeue time), so a participant freed since the event is simply skipped.
+    // The participants of a queued attack that will not be replayed are no longer owed
+    // that replay (clientCombatAnimReserve counted it at decode).
+    void attackNotePlayed(const PendingAttack& pa)
+    {
+        clientCombatAnimNotePlayed(lookup(pa.attackerNetId));
+        clientCombatAnimNotePlayed(lookup(pa.defenderNetId));
+        for (int i = 0; i < pa.extraCount; i++) {
+            clientCombatAnimNotePlayed(lookup(pa.extraNetId[i]));
+        }
+    }
+
     void playPending(const PendingAttack& pa)
     {
         Object* attacker = lookup(pa.attackerNetId);
         Object* defender = lookup(pa.defenderNetId);
         if (attacker == nullptr || defender == nullptr) {
+            attackNotePlayed(pa);
             return;
         }
 

@@ -138,6 +138,15 @@ bool clientCombatAnimActive();
 // Idempotent; VIEWER-only.
 void clientCombatAnimReserve(Object* obj);
 
+// Each reserve counts one replay as OWED to the object: an attack it takes part in, or a
+// recorded sequence that names it (reserved once per sequence). NotePlayed says one of
+// them has now played (an attack's replay notes its own participants; the decoder notes
+// a recorded sequence's objects when it executes or drops it). The held final state
+// lands when the last replay owed has played and the object is idle, and lands again
+// there if an earlier replay's end had already landed it (advanceReplays; bugs/077,
+// bugs/078).
+void clientCombatAnimNotePlayed(Object* obj);
+
 // Force-resolve cap for a recorded in-combat walk (up to kMaxBurstHops tiles at the walk
 // pace + trailing rotate + slack) — well above the generic 2 s replay cap so a legit multi-
 // tile walk isn't killed mid-stride.
