@@ -1790,9 +1790,19 @@ static void _map_place_dude_and_mouse()
     // re-plants them beside the host. The transition path then moves the whole
     // group again if it has a specific entry tile; landing twice is harmless,
     // landing never is a body standing inside a wall on the wrong map.
-    for (int slot = 1; slot < playerActorCount(); slot++) {
+    //
+    // ►► "BESIDE THE HOST" MEANS BESIDE WHOEVER gDude IS HERE, AND THAT IS NOT ALWAYS
+    // SLOT 0 (GitHub issue 20, bugs/066). A load asked for by a script runs under the
+    // scope of the player whose dialog or use ran it (mapHandleTransition), so gDude
+    // is THAT player: mapLoad put them on the entering tile above, and this loop
+    // planted "every other player" beside them, starting at slot 1. When the asker
+    // was not the host, slot 0 was nobody's: not gDude, not in the loop. The host
+    // kept the tile number it had on the map it had just left ("only the speaker
+    // gets correctly spawned, the other player gets spawned into the woods depending
+    // on his position in Klamath"). So: every slot but the one that IS gDude.
+    for (int slot = 0; slot < playerActorCount(); slot++) {
         Object* actor = playerActorAt(slot);
-        if (actor == nullptr || gDude == nullptr) {
+        if (actor == nullptr || gDude == nullptr || actor == gDude) {
             continue;
         }
         // Same offline rule as the transition placement above: a despawned body
