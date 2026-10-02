@@ -504,17 +504,63 @@ void serverRequestRebaseline()
     gRebaselineRequested = true;
 }
 
+// A rebaseline re-seeds every client's world from the join blob, but the blob
+// (a save-pipeline snapshot) carries NO combat state — gCombatState and whose-
+// turn are not in it. During an active fight that leaves a mid-combat joiner
+// unaware it is combat, and it WIPES the existing viewers' combat mirror (the
+// client clears it on every reload, COMBAT_CLIENT_DESIGN.md §3.0/risk-2), which
+// DEADLOCKS the controller: its client reverts to free-roam `mv`, the server
+// rejects that mid-combat, and the turn barrier stalls until the idle timer.
+// Re-assert the combat framing through the normal presentation events so every
+// client re-derives it — no state replay needed (HP/AP/positions already rode
+// the blob + deltas), only the tiny in-combat/whose-turn framing. Emits land in
+// the same frame as the blob, after it, so clients apply blob then re-derive. These
+// are pure wire emits; no sim mutation. Gated on isInCombat() → only mid-fight
+// joins pay for it (combat never spans a map change, so the map-change baseline
+// never trips this).
+static void serverReassertCombatFraming()
+{
+    if (!isInCombat()) {
+        return;
+    }
+    Object* cur = _combat_whose_turn();
+    presenter()->combatEnter(nullptr); // re-assert the in-combat bit (initiator unused)
+    if (cur != nullptr) {
+        presenter()->turnStart(cur, playerActorIs(cur), cur->data.critter.combat.ap, 0);
+    }
+}
+
 void serverTick(int tick, const std::function<void(int)>& intentsDrain, bool advanceSim)
 {
     if (intentsDrain) {
         intentsDrain(tick);
     }
-    // FROZEN beat (persistent server, no players): the intent drain above already
-    // ran — so a connection/login that arrived this beat is accepted and will
-    // un-freeze the next one — but the sim itself does not move. No clock, no
-    // scripts/NPCs, no id-budget burn, and no frame emit (there is nobody to send
-    // it to; a joiner's rebaseline is deferred to the first live beat).
+    // FROZEN beat (persistent server, nobody bound to a body): the intent drain above
+    // already ran — so a connection/login that arrived this beat is accepted, and a
+    // login un-freezes the next one — but the sim itself does not move. No clock, no
+    // scripts/NPCs, no id-budget burn, no delta scan.
+    //
+    // ►► A JOINER IS STILL OWED ITS WORLD ON A FROZEN BEAT (GitHub issue 32, bugs/058).
+    // The real client connects, WAITS for the join snapshot, and only then sends
+    // `login` (main.cc, "awaiting join snapshot"); the snapshot is this rebaseline. It
+    // used to be "deferred to the first live beat", which was right while a frozen
+    // server meant no client connected at all. Since the world stays frozen until a
+    // slot is BOUND (issue 16, bugs/052), deferring it is a deadlock: the client waits
+    // for the world, the server waits for the login, and the player looks at the black
+    // loading backdrop for good. It hit every first player of a session, because
+    // join.cmd's `account` probe is a connection of its own and took the one snapshot
+    // the boot emits. So serve it here: the same netId re-walk, blob and baseline the
+    // live tail sends, and the fight's framing if one is frozen mid-turn. All of it is
+    // a read of the world as it stands; nothing advances, so the joiner still finds
+    // the fight exactly where it was left (which is what issue 16 asked for).
     if (!advanceSim) {
+        if (gRebaselineRequested) {
+            gRebaselineRequested = false;
+            objectDeltaReset();
+            serverEmitBaseline();
+            serverReassertCombatFraming();
+            presenter()->beatEnd(tick);
+        }
         return;
     }
     simClockAdvance(kServerTickDelta);
@@ -704,26 +750,10 @@ void serverTick(int tick, const std::function<void(int)>& intentsDrain, bool adv
         }
     }
 
-    // A rebaseline re-seeds every client's world from the join blob, but the blob
-    // (a save-pipeline snapshot) carries NO combat state — gCombatState and whose-
-    // turn are not in it. During an active fight that leaves a mid-combat joiner
-    // unaware it is combat, and it WIPES the existing viewers' combat mirror (the
-    // client clears it on every reload, COMBAT_CLIENT_DESIGN.md §3.0/risk-2), which
-    // DEADLOCKS the controller: its client reverts to free-roam `mv`, the server
-    // rejects that mid-combat, and the turn barrier stalls until the idle timer.
-    // Re-assert the combat framing through the normal presentation events so every
-    // client re-derives it — no state replay needed (HP/AP/positions already rode
-    // the blob + deltas), only the tiny in-combat/whose-turn framing. Emits land in
-    // this same frame, after the blob, so clients apply blob then re-derive. These
-    // are pure wire emits; no sim mutation. Gated on isInCombat() → only mid-fight
-    // joins pay for it (combat never spans a map change, so the map-change baseline
-    // never trips this).
-    if (rebaselined && isInCombat()) {
-        Object* cur = _combat_whose_turn();
-        presenter()->combatEnter(nullptr); // re-assert the in-combat bit (initiator unused)
-        if (cur != nullptr) {
-            presenter()->turnStart(cur, playerActorIs(cur), cur->data.critter.combat.ap, 0);
-        }
+    // The blob carries no combat state: give a rebaselined client the fight's framing
+    // back, in this same frame (serverReassertCombatFraming says why).
+    if (rebaselined) {
+        serverReassertCombatFraming();
     }
 
     // Close the frame: the beat's accumulated events flush as one sequenced unit.
@@ -839,8 +869,22 @@ void serverServe(const std::function<void(int)>& intentsDrain,
     // driver only ever passes a positive safety cap). An empty predicate stops
     // after one beat (degenerate, but never spins).
     for (int tick = 0;; tick++) {
+        // ►► THE DRAIN RUNS FIRST, THEN THE GATE IS ASKED (GitHub issue 16, bugs/052).
+        // The gate's answer is "is anybody bound to a body", and the drain is where a
+        // binding is dropped (a session that went away) or made (a login). Asking
+        // before the drain made the beat that NOTICED the last player leave a live
+        // one: their body was unbound by then, a body nobody is bound to has its
+        // combat turn ended at once (combatSessionShouldWait), and the whole enemy
+        // side took its turns in that single beat before the freeze set in. A player
+        // who quit a fight on their own turn, which is where a fight nearly always
+        // sits, came back a round behind. Asked after the drain, that beat is already
+        // frozen and the turn is still theirs; and the beat a login arrives on is
+        // already live, so the world it asked for goes out with no beat's delay.
+        if (intentsDrain) {
+            intentsDrain(tick);
+        }
         bool advanceSim = !simGate || simGate();
-        serverTick(tick, intentsDrain, advanceSim);
+        serverTick(tick, nullptr, advanceSim);
         if (!keepServing || !keepServing(tick)) {
             break;
         }

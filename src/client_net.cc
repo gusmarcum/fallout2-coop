@@ -3374,7 +3374,11 @@ private:
         // netId 1 always (server assigns walk numbers dude-first, [[p5-server-plan]]).
         // Keyed on netId, never isPlayer alone (another player's turn is isPlayer
         // too — [[mp-actor-architecture-principle]] UI-driving corollary).
+        bool wasMyTurn = _myTurn;
         _myTurn = isPlayer != 0 && gDude != nullptr && netId == gDude->netId;
+        if (_myTurn && !wasMyTurn) {
+            debugPrint("client_net: turn start, this player's turn (%d action points)\n", ap);
+        }
         gCombatState |= COMBAT_STATE_0x01;
         interfaceBarEndButtonsShow(true); // idempotent: animates only the first reveal
         if (_myTurn) {

@@ -1635,6 +1635,31 @@ enum class ClaimDisposition {
     kClaimed,         // legacy bare `claim`, no account identity to explain
 };
 
+// A slot was just bound while a fight is waiting on THAT body's turn. It happens when
+// the world froze with the fight there: the last player dropped on their own turn, the
+// freeze kept the turn theirs (GitHub issue 16, bugs/052), and they are back. Two
+// things are owed, both after the roster that tells their client which body is its own:
+//
+//  * the turn, said again. A client keys "is it my turn" on its own actor at the
+//    moment TURN_START arrives (client_net.cc), and the one that came with the join
+//    snapshot arrived before this login, when the client did not own a body yet. For
+//    slot 0 the two happen to agree; for every other slot the client would sit on the
+//    wait cursor through its own turn until the idle budget ran out.
+//  * a full idle budget. The clock stood still while they were away, so what is left
+//    is whatever they had not used before the drop, which may be seconds.
+static void serverControlResumeHeldTurn(int slot)
+{
+    if (!isInCombat()) {
+        return;
+    }
+    Object* actor = playerActorAt(slot);
+    if (actor == nullptr || _combat_whose_turn() != actor) {
+        return;
+    }
+    combatSessionRearmIdleTimer();
+    combatEmitCurrentTurnCheckpoint();
+}
+
 static void serverGreetClaimant(int slot, ClaimDisposition disposition)
 {
     Object* actor = playerActorAt(slot);
@@ -2550,6 +2575,7 @@ void serverControlLine(int sessionId, const char* line)
         // scripts/check_wire_combat.sh — keep that prefix verbatim on this path too.
         fprintf(stderr, "f2_server: control claimed by session %d (slot %d)\n", sessionId, slot);
         serverEmitPlayerRoster();
+        serverControlResumeHeldTurn(slot);
         serverGreetClaimant(slot, disp);
         return;
     }
@@ -2600,6 +2626,7 @@ void serverControlLine(int sessionId, const char* line)
         // and scripts/check_wire_combat.sh — keep that prefix verbatim.
         fprintf(stderr, "f2_server: control claimed by session %d (slot %d)\n", sessionId, want);
         serverEmitPlayerRoster(); // every viewer re-derives which actor is its own
+        serverControlResumeHeldTurn(want);
         serverGreetClaimant(want, ClaimDisposition::kClaimed);
         return;
     }
