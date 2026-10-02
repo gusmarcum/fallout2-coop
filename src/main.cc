@@ -1092,6 +1092,15 @@ static void viewerSendPrimaryVerb(ClientConnection& conn, Object* target)
             } else {
                 viewerArmPendingLoot(conn, target->netId);
             }
+        } else if (conn.inCombat()) {
+            // ►► IN A FIGHT THE PRIMARY ON A LIVE CRITTER IS LOOK (GitHub issue 31).
+            // Vanilla's hover icon and its click agree (game_mouse.cc: talk outside a
+            // fight, the binoculars in one, since nobody talks mid-fight). The icon here
+            // is vanilla's own code and showed the binoculars; the click sent `talk`
+            // regardless, so reading an enemy's condition took the hold-and-pick menu
+            // and the plain click answered "You can't talk to anyone in combat".
+            snprintf(cmd, sizeof(cmd), "look %d", target->netId);
+            conn.sendLine(cmd);
         } else {
             // Primary on a live critter is TALK in vanilla.
             snprintf(cmd, sizeof(cmd), "talk %d", target->netId);
