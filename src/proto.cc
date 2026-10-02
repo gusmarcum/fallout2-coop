@@ -1046,6 +1046,13 @@ void protoPlayerActorsUpdateLook()
     }
 }
 
+int protoPlayerActorBareFrmId(Object* actor)
+{
+    int nativeLook = gameMovieIsSeen(MOVIE_VSUIT) ? DUDE_NATIVE_LOOK_JUMPSUIT : DUDE_NATIVE_LOOK_TRIBAL;
+    int gender = critterGetStat(actor, STAT_GENDER) == GENDER_MALE ? GENDER_MALE : GENDER_FEMALE;
+    return _art_vault_person_nums[nativeLook][gender];
+}
+
 // proto_dude_init
 // 0x49FA64
 int _proto_dude_init(const char* path)

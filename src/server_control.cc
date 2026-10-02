@@ -849,6 +849,37 @@ static void serverControlEmitReloadPresentation(Object* weapon)
 // OBJECT_DELTA; viewers HOLD it during the replay) — and unconditionally, not just in
 // combat like _invenWieldFunc, because out of combat this is the whole point: the
 // server must show the drawn/holstered pose to every viewer and to a mid-join.
+// Take the worn armor off the acting player (gDude, under the actor scope): the WORN
+// flag, the protection it gave, and the body, which goes back to the bare one.
+//
+// The bare body is THIS player's: their own gender in the world's look. It used to be
+// read out of the dude proto (0x1000000), which is the host's, so a second player of the
+// other sex took their armor off and stood there in the host's body for everyone, until
+// they put armor on again (GitHub issue 28, bugs/070).
+static void serverControlTakeArmorOff(Object* armor)
+{
+    armor->flags &= ~OBJECT_WORN;
+    _adjust_ac(gDude, armor, nullptr);
+    int bareFid = buildFid(OBJ_TYPE_CRITTER, protoPlayerActorBareFrmId(gDude), ANIM_STAND,
+        (gDude->fid & 0xF000) >> 12, gDude->rotation + 1);
+    if (artExists(bareFid) && gDude->fid != bareFid) {
+        objectSetFid(gDude, bareFid, nullptr);
+        objectSetFrame(gDude, 0, nullptr);
+    }
+}
+
+// What the acting player wears, its protection and the body they are drawn in, for the
+// event trace: the armor verbs' proofs read it (tools/issue_wire_proof.py armoroff).
+static void serverControlTraceArmor(const char* verb)
+{
+    if (getenv("F2_TRACE_EVENTS") == nullptr) {
+        return;
+    }
+    Object* armor = critterGetArmor(gDude);
+    fprintf(stderr, "[armor] %s slot=%d worn pid=%d ac=%d body=%d\n", verb, playerActorSlotOf(gDude),
+        armor != nullptr ? armor->pid : -1, critterGetStat(gDude, STAT_ARMOR_CLASS), gDude->fid & 0xFFF);
+}
+
 static void serverControlSwapHand(Object* actor, int slot, int hand)
 {
     if (actor == nullptr) {
@@ -3933,28 +3964,14 @@ void serverControlLine(int sessionId, const char* line)
                     fprintf(stderr, "f2_server: control invunwield hand=%d (nothing held, or an equipped/nested item)\n", hand);
                 }
             } else if (hand == HAND_COUNT) { // 2 == armor slot (no Hand enum value)
+                // Back to the bare body, mirroring the equip side. Without it the
+                // server keeps rendering the armor it no longer believes you are wearing.
                 Object* armor = critterGetArmor(gDude);
                 if (armor != nullptr) {
-                    armor->flags &= ~OBJECT_WORN;
-                    _adjust_ac(gDude, armor, nullptr);
-                    // Back to the bare body, mirroring the equip side (and vanilla's
-                    // own unequip, proto_instance.cc's remove-from-inven armor branch,
-                    // which reads the same naked base out of the dude proto). Without
-                    // it the server keeps rendering the armor it no longer believes
-                    // you are wearing.
-                    Proto* dudeProto;
-                    int baseFrmId = 1;
-                    if (protoGetProto(0x1000000, &dudeProto) != -1) {
-                        baseFrmId = dudeProto->fid & 0xFFF;
-                    }
-                    int bareFid = buildFid(OBJ_TYPE_CRITTER, baseFrmId, ANIM_STAND,
-                        (gDude->fid & 0xF000) >> 12, gDude->rotation + 1);
-                    if (artExists(bareFid) && gDude->fid != bareFid) {
-                        objectSetFid(gDude, bareFid, nullptr);
-                        objectSetFrame(gDude, 0, nullptr);
-                    }
+                    serverControlTakeArmorOff(armor);
                 }
                 fprintf(stderr, "f2_server: control invunwield armor\n");
+                serverControlTraceArmor("invunwield");
             } else {
                 fprintf(stderr, "f2_server: control invunwield bad hand=%d ignored\n", hand);
             }
@@ -4293,6 +4310,7 @@ void serverControlLine(int sessionId, const char* line)
                 }
             }
             fprintf(stderr, "f2_server: control invwield pid=%d hand=%d\n", pid, hand);
+            serverControlTraceArmor("invwield");
             if (getenv("F2_TRACE_EVENTS") != nullptr) {
                 Object* h2 = critterGetItem2(gDude);
                 fprintf(stderr, "[dude-equip] pid=%d type=%d hand=%d dudeFid=0x%x rhandPid=%d inCombat=%d\n",
@@ -4308,13 +4326,24 @@ void serverControlLine(int sessionId, const char* line)
             if (qty > stackQty) {
                 qty = stackQty;
             }
-            // Dropping WORN armor must also strip its AC bonus (itemDropStack only moves
-            // the object) — same _adjust_ac the invunwield-armor path uses.
+            // ►► A DROP STRAIGHT OUT OF A SLOT COMES OUT OF THE SLOT FIRST. The viewer's
+            // inventory drops the armor being worn, or the thing in a hand, with this one
+            // verb and no unwield before it, as vanilla's does. itemDropStack refuses
+            // anything still flagged as equipped (it has to, see its own comment), so
+            // nothing was dropped: a held item silently stayed, and worn armor stayed
+            // too with its protection already taken off by the line that used to be
+            // here, so the player stood in armor that stopped nothing (found proving
+            // GitHub issue 28, bugs/070).
             if (itemGetType(item) == ITEM_TYPE_ARMOR && (item->flags & OBJECT_WORN) != 0) {
-                _adjust_ac(gDude, item, nullptr);
+                serverControlTakeArmorOff(item);
+            } else if ((item->flags & OBJECT_IN_LEFT_HAND) != 0) {
+                _inven_unwield(gDude, HAND_LEFT);
+            } else if ((item->flags & OBJECT_IN_RIGHT_HAND) != 0) {
+                _inven_unwield(gDude, HAND_RIGHT);
             }
             itemDropStack(gDude, item, qty);
             fprintf(stderr, "f2_server: control invdrop pid=%d qty=%d\n", pid, qty);
+            serverControlTraceArmor("invdrop");
         }
         return;
     }

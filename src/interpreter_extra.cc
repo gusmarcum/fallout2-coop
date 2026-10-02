@@ -443,7 +443,10 @@ static int _correctFidForRemovedItem(Object* a1, Object* a2, int flags)
         }
     } else {
         if (a1 == gDude) {
-            newFid = buildFid(FID_TYPE(fid), _art_vault_guy_num, FID_ANIM_TYPE(fid), v8, (fid & 0x70000000) >> 28);
+            // _art_vault_guy_num is the host's body. A script that takes the armor off
+            // a second player leaves them in their own (issue 28).
+            int bareFrmId = playerActorSlotOf(a1) > 0 ? protoPlayerActorBareFrmId(a1) : _art_vault_guy_num;
+            newFid = buildFid(FID_TYPE(fid), bareFrmId, FID_ANIM_TYPE(fid), v8, (fid & 0x70000000) >> 28);
         }
 
         _adjust_ac(a1, a2, nullptr);

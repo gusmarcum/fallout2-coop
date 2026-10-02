@@ -672,6 +672,17 @@ void inventoryOpen()
             if (_stack_offset[_curr_stack] < 0) {
                 _stack_offset[_curr_stack] = 0;
             }
+            // The body in the middle of the screen is drawn from the armor and hand
+            // slots, and in a viewer those change HERE, when the server's answer
+            // arrives, not at the drop that asked for it. The drop's own _adjust_fid
+            // ran on the slots as they were before the answer and nothing ran after
+            // it, so the body was always one change behind: bare after putting armor
+            // on, armored after taking it off (GitHub issue 28).
+            _adjust_fid();
+            if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                fprintf(stderr, "[inv-body] preview fid 0x%x armor pid %d\n", gInventoryWindowDudeFid,
+                    gInventoryArmor != nullptr ? gInventoryArmor->pid : -1);
+            }
             _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_NORMAL);
             inventoryRenderSummary();
             // BLIT IT. Neither _display_inventory nor inventoryRenderSummary reaches
