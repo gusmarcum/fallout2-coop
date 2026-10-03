@@ -18,6 +18,10 @@ int _action_loot_container(Object* critter, Object* container);
 int _action_skill_use(int skill);
 int actionUseSkill(Object* user, Object* target, int skill);
 bool _is_hit_from_front(Object* attacker, Object* defender);
+// The fall a knocked-down critter is SHOWN taking (ANIM_FALL_BACK or ANIM_FALL_FRONT),
+// worked out the way _show_damage_to_object works it out, for the server to keep
+// (combatNoteKnockdownFall, GitHub issue 39).
+int actionKnockdownFall(Object* critter, bool hitFromFront, int knockbackDistance);
 bool _can_see(Object* a1, Object* a2);
 bool _action_explode_running();
 int actionExplode(int tile, int elevation, int minDamage, int maxDamage, Object* sourceObj, bool animate);

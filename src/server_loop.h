@@ -189,10 +189,11 @@ void serverRun(int ticks, const std::function<void(int)>& intentsDrain);
 // condition (e.g. "the game hasn't requested quit, and a safety tick cap hasn't
 // been hit"). Installs/restores the SAME interlocked state as serverRun; the
 // predicate is evaluated AFTER each beat's serverTick so at least one beat runs.
-// simGate (optional): asked BEFORE each beat's serverTick — return false to FREEZE
-// the sim that beat (intentsDrain still runs; see serverTick's advanceSim). The
-// keepalive dedicated server passes "are there any clients", so an empty server
-// idles frozen instead of ticking the world with nobody watching. Null = always
+// simGate (optional): asked each beat AFTER intentsDrain and before the sim — return
+// false to FREEZE the sim that beat (the drain has run, and a viewer that connected is
+// still sent its join snapshot; see serverTick's advanceSim). The keepalive dedicated
+// server passes "is anybody bound to a body", so a server nobody is playing on idles
+// frozen instead of ticking the world with nobody at the controls. Null = always
 // advance (every pre-keepalive caller unchanged).
 void serverServe(const std::function<void(int)>& intentsDrain,
     const std::function<bool(int)>& keepServing,

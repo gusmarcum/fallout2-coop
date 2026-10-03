@@ -1213,25 +1213,33 @@ bool serverAdminLine(const char* line,
         reply(msg);
         for (int index = 1; index < partyMemberCount(); index++) {
             Object* member = partyMemberAt(index);
-            snprintf(msg, sizeof(msg), "  [%d] %s pid=%d id=%d tile=%d %s", index,
+            // owner = the player slot the companion follows (-1: nobody recorded, it
+            // keeps to whoever is nearest); set it with `partyadd <pid> <slot>`.
+            snprintf(msg, sizeof(msg), "  [%d] %s pid=%d id=%d tile=%d elev=%d owner=%d %s", index,
                 member != nullptr ? critterGetName(member) : "?", member != nullptr ? (int)(member->pid & 0xFFFFFF) : -1,
                 member != nullptr ? member->id : -1, member != nullptr ? member->tile : -1,
+                member != nullptr ? member->elevation : -1,
+                member != nullptr ? partyMemberOwnerSlot(member) : -1,
                 member != nullptr && critterIsDead(member) ? "(dead)" : "");
             reply(msg);
         }
         return true;
     }
     if (strcmp(verb, "partyadd") == 0) {
-        // partyadd <critter pid>: re-attach a critter standing on the current map to
-        // the party (e.g. 89 = John Cassidy). The repair for companions the old
-        // build turned back into plain NPCs on a map change after a load.
+        // partyadd <critter pid> [slot]: re-attach a critter standing on the current
+        // map to the party (e.g. 89 = John Cassidy). The repair for companions the old
+        // build turned back into plain NPCs on a map change after a load. With a slot,
+        // the companion follows that player (also for one already in the party: the
+        // repair for a world saved before owners were kept, bugs/067).
         if (!worldLoaded) {
             reply("partyadd: no world loaded");
             return true;
         }
-        int pid = rest != nullptr ? atoi(rest) : 0;
-        if (pid <= 0) {
-            reply("usage: partyadd <critter pid number>   (see pro_crit.msg; 89 = John Cassidy)");
+        int pid = 0;
+        int ownerSlot = -1;
+        int given = rest != nullptr ? sscanf(rest, "%d %d", &pid, &ownerSlot) : 0;
+        if (given < 1 || pid <= 0) {
+            reply("usage: partyadd <critter pid number> [player slot]   (see pro_crit.msg; 89 = John Cassidy)");
             return true;
         }
         Object* found = nullptr;
@@ -1247,10 +1255,13 @@ bool serverAdminLine(const char* line,
             return true;
         }
         int rc = partyMemberAdd(found);
-        snprintf(msg, sizeof(msg), "partyadd: %s (pid %d) -> rc=%d, party now %d entries",
-            critterGetName(found), pid, rc, partyMemberCount());
+        if (given >= 2) {
+            partyMemberSetOwnerSlot(found, ownerSlot);
+        }
+        snprintf(msg, sizeof(msg), "partyadd: %s (pid %d) -> rc=%d, party now %d entries, follows slot %d",
+            critterGetName(found), pid, rc, partyMemberCount(), partyMemberOwnerSlot(found));
         reply(msg);
-        fprintf(stderr, "f2_server: admin partyadd pid=%d rc=%d\n", pid, rc);
+        fprintf(stderr, "f2_server: admin partyadd pid=%d rc=%d owner=%d\n", pid, rc, partyMemberOwnerSlot(found));
         return true;
     }
     if (strcmp(verb, "gvar") == 0) {

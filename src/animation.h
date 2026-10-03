@@ -111,6 +111,9 @@ int _register_priority(int a1);
 int reg_anim_clear(Object* a1);
 int reg_anim_end();
 int animationIsBusy(Object* a1);
+// The answer to a SCRIPT's anim_busy. The same as animationIsBusy on a client; on the
+// dedicated server, "is a walk of this object still under way" (bugs/068).
+int animationIsBusyForScript(Object* a1);
 // animationIsBusy minus the sequences registered INSIGNIFICANT, i.e. the idle fidget.
 // For the co-op viewer's out-of-combat input gate (issue 15).
 int animationIsBusyIgnoringFidgets(Object* a1);

@@ -14,6 +14,7 @@
 #include "input.h" // getTicks / getTicksBetween
 #include "item.h" // critterGetAnimationForHitMode / weaponGetAnimationCode / itemGetType
 #include "object.h" // objectSetFid / objectSetFrame / objectSetLocation / objectSetRotation / _obj_offset
+#include "proto.h" // protoGetProto (is it a door)
 #include "tile.h" // tileToScreenXY / tileGetRotationTo / tileDistanceBetween
 
 // See client_present.h for the module overview. This is step 2 ENTRY FUSION: the
@@ -210,6 +211,14 @@ struct PresEntry {
     // kReplayCapMs; a recorded move sets this so advanceReplays doesn't force-resolve it
     // mid-stride.
     unsigned int replayCapMs = 0; // 0 = use the generic kReplayCapMs
+
+    // ---- replays owed (bugs/077, bugs/078) ----
+    // owed = replays that reserved this entry at their decode and have not played yet: an
+    // attack (it is the attacker, the defender or an extra) or a recorded sequence that
+    // names it. played = at least one of them has played. The held final state belongs
+    // after the LAST of them; see advanceReplays.
+    int owed = 0;
+    bool played = false;
 };
 
 // The one table. Keyed by netId (monotonic, never recycled within a world — a missed
@@ -420,6 +429,53 @@ void endGlide(PresEntry& e)
 // REPLAY helpers
 // ============================================================================
 
+// ►► A DOOR LEAVES ITS RESERVE IN THE FRAME ITS STATE CALLS FOR (bugs/077). The server
+// does not send a door's frame after a slide: the slide IS the frame change, and a frame
+// sent beside it would snap the door past its own animation. So a slide that never plays
+// leaves this viewer's door in the wrong frame for good, and one way that happens is
+// plain: a door used twice in quick succession (a double click, or a player closing the
+// door an NPC has just opened) sends two slides, the second reaches the engine while the
+// door is still playing the first, and the engine refuses a second animation on a busy
+// object. The door then stood open on screen and shut on the server.
+//
+// A door's frame follows its state (_check_door_state: open is the last frame, closed is
+// frame 0), and the state is the flags, which always arrive. So when the reserve ends
+// and the door is idle, a frame that disagrees with the flags is put right, with the
+// art offsets the slide would have applied. Any cause is covered: a refused animation, a
+// dropped sequence, a cap.
+void settleDoorFrame(Object* obj)
+{
+    if (obj == nullptr || PID_TYPE(obj->pid) != OBJ_TYPE_SCENERY || FID_TYPE(obj->fid) != OBJ_TYPE_SCENERY) {
+        return;
+    }
+    Proto* proto = nullptr;
+    if (protoGetProto(obj->pid, &proto) == -1 || proto->scenery.type != SCENERY_TYPE_DOOR) {
+        return;
+    }
+    if (animationIsBusy(obj) != 0) {
+        return;
+    }
+    CacheEntry* handle = nullptr;
+    Art* art = artLock(obj->fid, &handle);
+    if (art == nullptr) {
+        return;
+    }
+    int last = artGetFrameCount(art) - 1;
+    artUnlock(handle);
+    int want = (obj->flags & OBJECT_NO_BLOCK) != 0 ? last : 0;
+    if (obj->frame == want) {
+        return;
+    }
+    if (getenv("F2_TRACE_EVENTS") != nullptr) {
+        fprintf(stderr, "[door-settle] net=%d flags=0x%X say %s: frame %d -> %d\n",
+            obj->netId, obj->flags, want != 0 ? "open" : "closed", obj->frame, want);
+    }
+    Rect rect;
+    if (objectSetFrameWithArtOffsets(obj, want, &rect) == 0) {
+        tileWindowRefreshRect(&rect, obj->elevation);
+    }
+}
+
 // Apply obj's held final state (the deferred corpse fid / armed pose / facing) and
 // clear the replay-held bucket. When resume=true (the normal completion path, was
 // walkSetReplaySuspended(false)) also re-baseline a still-parked held glide: adopt
@@ -496,6 +552,7 @@ void resolveHeld(PresEntry& e, bool resume, FrameReap reap = FrameReap::All)
     e.dHasFid = false;
     e.dHasFlags = false;
     e.dHasRot = false;
+    settleDoorFrame(obj);
     if (resume && glideLive(e) && !e.posed) {
         e.parkedFid = obj->fid; // adopt the settled (armed) fid as the tripwire baseline
         walkApplyOffset(e, 0); // re-park to origin, syncing obj->x/y == appliedX/Y
@@ -777,6 +834,31 @@ void advanceReplays()
                 resolveHeld(e, /*resume=*/true);
                 e.replay = Replay::None;
                 eraseIfEmpty(id);
+            } else if (e.played && e.owed == 0 && e.holdFrames.empty() && animationIsBusy(obj) == 0) {
+                // ►► A RESERVE ENDS WHEN THE LAST REPLAY IT WAS TAKEN FOR HAS PLAYED
+                // (bugs/077). An object named by a recorded sequence is reserved at the
+                // sequence's decode, so the state that follows it in the same beat waits
+                // for the animation. Only the sequence's ACTOR, and only in a fight, is ever
+                // promoted to Active; everything else stayed Reserved after the animation
+                // had run, and the only way out was the stall above: five seconds with
+                // nothing on the whole map moving or being shown. A town rarely gives
+                // that. So a door an NPC or a player opened slid open on screen and kept
+                // its closed flags in this viewer's copy of the map (still blocking, still
+                // stopping light and shots) for as long as anybody anywhere was walking:
+                // the movement cursor showed the red X on every tile behind an open door.
+                //
+                // The reserve was for the animation. Every replay that took it has now
+                // played, and the object is idle, so the held final state lands, the same
+                // way an Active replay's does when it ends. FrameReap::None: a reserve
+                // with move frames never reaches this branch.
+                if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                    fprintf(stderr, "[seq-settle] net=%d its last replay is over, %u ms after it was reserved: held fid=%d flags=%d rot=%d land\n",
+                        obj != nullptr ? obj->netId : id, getTicksBetween(now, e.replaySince),
+                        e.dHasFid ? 1 : 0, e.dHasFlags ? 1 : 0, e.dHasRot ? 1 : 0);
+                }
+                resolveHeld(e, /*resume=*/true, FrameReap::None);
+                e.replay = Replay::None;
+                eraseIfEmpty(id);
             }
             continue;
         }
@@ -798,9 +880,38 @@ void advanceReplays()
             // completed wield/throw (activeIsMove=false) leaves the pending move frames of
             // LATER queued seqs untouched. resume=true re-baselines a still-parked held
             // approach glide to the settled (armed) pose so the pump can release it next.
+            // ►► THE FINAL STATE BELONGS AFTER THE LAST REPLAY (bugs/078). The held pose is
+            // one bucket per object, and it landed here, at the end of whichever replay
+            // of the object finished first. With another replay of the same object still
+            // waiting its turn, that one then played OVER the landed state: a critter
+            // killed while its own last attack was still being shown got its corpse art
+            // and its flat flag here, then stood up for the queued attack, then played the
+            // death, whose animation leaves it in the fall's last frame (no blood pool:
+            // _show_death never sets the bloody single frame, the server's art does) and
+            // whose callback TOGGLES the flat flag, back off. Nothing put it right again.
+            //
+            // What lands here still lands, so nothing between two replays looks different
+            // from before. But while more replays are owed the bucket is kept, and it
+            // lands once more when the last of them is over.
+            bool more = e.owed > 0;
+            bool keepFid = more && e.dHasFid, keepFlags = more && e.dHasFlags, keepRot = more && e.dHasRot;
+            int keptFid = e.dFid, keptRot = e.dRot;
+            unsigned int keptFlags = e.dFlags;
             resolveHeld(e, /*resume=*/true, e.activeIsMove ? FrameReap::One : FrameReap::None);
             e.activeIsMove = false;
-            if (!e.holdFrames.empty()) {
+            if (more) {
+                e.dHasFid = keepFid;
+                e.dFid = keptFid;
+                e.dHasFlags = keepFlags;
+                e.dFlags = keptFlags;
+                e.dHasRot = keepRot;
+                e.dRot = keptRot;
+                if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                    fprintf(stderr, "[replay-more] net=%d %d more replays are owed to it: held fid=%d flags=%d rot=%d kept to land again\n",
+                        obj != nullptr ? obj->netId : id, e.owed, keepFid ? 1 : 0, keepFlags ? 1 : 0, keepRot ? 1 : 0);
+                }
+            }
+            if (!e.holdFrames.empty() || more) {
                 // More recorded seqs for this actor are still queued to execute (gate (1e)
                 // serialized them behind this one). Hold their frames — drop back to
                 // Reserved so this Active branch won't re-reap on the idle window before the
@@ -1313,14 +1424,11 @@ bool clientCombatAnimActive()
     return false;
 }
 
-void clientCombatAnimReserve(Object* obj)
+// Take obj under deferral. Idempotent: an existing reserved/active entry keeps its held
+// state (only a fresh reserve initializes the held bucket). Coexists with a live glide on
+// the same entry.
+static PresEntry& reserveEntry(Object* obj)
 {
-    if (!gEnabled || obj == nullptr) {
-        return;
-    }
-    // Take obj under deferral BEFORE its replay plays (ATTACK_RESULT / TAKE_OUT decode).
-    // Idempotent: an existing reserved/active entry keeps its held state (only a fresh
-    // reserve initializes the held bucket). Coexists with a live glide on the same entry.
     PresEntry& e = gEntries[obj->netId];
     e.obj = obj;
     if (e.replay == Replay::None) {
@@ -1329,7 +1437,35 @@ void clientCombatAnimReserve(Object* obj)
         e.dHasFid = false;
         e.dHasFlags = false;
         e.dHasRot = false;
+        e.owed = 0;
+        e.played = false;
     }
+    return e;
+}
+
+void clientCombatAnimReserve(Object* obj)
+{
+    if (!gEnabled || obj == nullptr) {
+        return;
+    }
+    // Take obj under deferral BEFORE its replay plays (ATTACK_RESULT decode, or the decode
+    // of a recorded sequence that names it), and count that replay as owed to it.
+    reserveEntry(obj).owed++;
+}
+
+void clientCombatAnimNotePlayed(Object* obj)
+{
+    if (!gEnabled || obj == nullptr) {
+        return;
+    }
+    PresEntry* e = entryFind(obj);
+    if (e == nullptr || e->replay == Replay::None) {
+        return;
+    }
+    if (e->owed > 0) {
+        e->owed--;
+    }
+    e->played = true;
 }
 
 void clientCombatAnimMarkActive(Object* obj, unsigned int capMs, bool ownsMoveFrame)
@@ -1368,7 +1504,9 @@ void clientCombatAnimArmMoveHold(Object* obj)
     if (!gEnabled || obj == nullptr) {
         return;
     }
-    clientCombatAnimReserve(obj);
+    // Not counted as a replay owed: the sequence's decode counts the mover once, with
+    // every other object it names.
+    reserveEntry(obj);
     PresEntry* e = entryFind(obj);
     if (e != nullptr) {
         e->holdFrames.emplace_back();
@@ -1568,13 +1706,17 @@ void clientCombatAnimPlay(Attack* attack)
     if (clientAnimPlayableActiveFor(attack->defender)) {
         clientAnimCancel(attack->defender);
     }
+    // Each of them was reserved for this attack at its decode: that replay is now playing.
     enterReplay(attack->attacker, now);
+    clientCombatAnimNotePlayed(attack->attacker);
     enterReplay(attack->defender, now);
+    clientCombatAnimNotePlayed(attack->defender);
     for (int i = 0; i < attack->extrasLength; i++) {
         if (clientAnimPlayableActiveFor(attack->extras[i])) {
             clientAnimCancel(attack->extras[i]);
         }
         enterReplay(attack->extras[i], now);
+        clientCombatAnimNotePlayed(attack->extras[i]);
     }
 
     // Arm the attacker's fid to match its weapon BEFORE registering the attack.

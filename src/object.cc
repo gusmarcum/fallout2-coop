@@ -1514,7 +1514,12 @@ int objectSetLocation(Object* obj, int tile, int elevation, Rect* rect)
             // SFALL: Remove text floaters after moving to another elevation.
             textObjectsReset();
 
+            // The party sync inside mapSetElevation is for THIS player's change of
+            // floor: their own companions follow, nobody else's (party_member.cc,
+            // bugs/067). A load or a group move leaves the mover unset and places all.
+            partyMemberSyncSetMover(obj);
             mapSetElevation(elevation);
+            partyMemberSyncSetMover(nullptr);
             tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW | TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
             // On the wire viewer gCombatState is a mirror, not a real local fight;
             // a wire-driven dude elevation change must not trip vanilla's "changed

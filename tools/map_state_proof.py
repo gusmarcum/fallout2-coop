@@ -64,6 +64,26 @@ srv = None
 log = None
 
 
+def unthrottle(proc):
+    """Ask Windows to leave a process started here at full speed. With no window, and
+    another program in the foreground, the client is treated as background work and runs
+    at 36 frames a second instead of 60, so the recorded keyboard (which counts frames)
+    lands late. See client_screen_proof.py."""
+    if os.name != "nt":
+        return proc
+    try:
+        import ctypes
+
+        class PowerThrottling(ctypes.Structure):
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        state = PowerThrottling(1, 0x1 | 0x4, 0)
+        ctypes.windll.kernel32.SetProcessInformation(int(proc._handle), 4, ctypes.byref(state), ctypes.sizeof(state))
+    except Exception:
+        pass
+    return proc
+
+
 def check(name, ok, detail=""):
     """With --expect-loss the far side of the defect is expected to fail."""
     results.append((name, ok, detail))
@@ -180,7 +200,7 @@ def boot(extra, mode):
     log = open(logpath, mode)
     log.write("===== boot %s =====%s" % (extra, NL))
     log.flush()
-    srv = subprocess.Popen([server_exe], cwd=gamedir, env=env, stdout=log, stderr=subprocess.STDOUT)
+    srv = unthrottle(subprocess.Popen([server_exe], cwd=gamedir, env=env, stdout=log, stderr=subprocess.STDOUT))
     time.sleep(7)
 
 
@@ -260,8 +280,8 @@ def join_with_the_game(seconds=10):
             env.pop(name)
     env.update({"F2_CLIENT_CONNECT": "127.0.0.1:%d" % port, "F2_PLAYER_NAME": "Brother",
                 "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"})
-    game = subprocess.Popen([client_exe], cwd=gamedir, env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    game = unthrottle(subprocess.Popen([client_exe], cwd=gamedir, env=env,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     time.sleep(seconds)
     alive = game.poll() is None
     listing = state_files()
@@ -297,8 +317,8 @@ def join_and_quit_properly():
             env.pop(name)
     env.update({"F2_CLIENT_CONNECT": "127.0.0.1:%d" % port, "F2_PLAYER_NAME": "Brother",
                 "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "F2_INPUT_REPLAY": trace})
-    game = subprocess.Popen([client_exe], cwd=gamedir, env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    game = unthrottle(subprocess.Popen([client_exe], cwd=gamedir, env=env,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     time.sleep(5)
     in_the_world = fingerprints()
     deadline = time.time() + 45

@@ -27,6 +27,10 @@ struct ClientBarterList {
     const int* pids;
     const int* qtys;
     int count;
+    // What each row's weapon is loaded with (rounds, ammo proto), or null when the
+    // stream did not say: an older server, or a trade between two players.
+    const int* ammoQtys = nullptr;
+    const int* ammoPids = nullptr;
 };
 
 void clientBarterOnState(const ClientBarterList& driverInv, const ClientBarterList& merchantInv,

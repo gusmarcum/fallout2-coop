@@ -879,6 +879,7 @@ bool clientViewerConsumeDudeInvDirty() { serverStubAbort("clientViewerConsumeDud
 bool clientViewerConsumeLootTargetInvDirty() { serverStubAbort("clientViewerConsumeLootTargetInvDirty"); }
 void clientViewerDrop(Object* item, int quantity) { serverStubAbort("clientViewerDrop"); }
 void clientViewerUnload(Object* item) { serverStubAbort("clientViewerUnload"); }
+void clientViewerLoadAmmo(Object* ammo, Object* weapon, int quantity) { serverStubAbort("clientViewerLoadAmmo"); }
 void clientViewerLootPut(int containerNetId, int pid, int quantity) { serverStubAbort("clientViewerLootPut"); }
 void clientViewerLootTake(int containerNetId, int pid, int quantity) { serverStubAbort("clientViewerLootTake"); }
 void clientViewerLootTakeAll(int containerNetId) { serverStubAbort("clientViewerLootTakeAll"); }

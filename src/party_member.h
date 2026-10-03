@@ -54,6 +54,14 @@ int _partyMemberRecoverLoad();
 int partyMembersLoad(File* stream);
 void _partyMemberClear();
 int _partyMemberSyncPosition();
+// Co-op (bugs/067). Name the ONE player whose change of floor the next sync is for, so only
+// their own companions go with them; nullptr = everybody arrived somewhere, place them all.
+void partyMemberSyncSetMover(Object* mover);
+// Who recruited whom, for the co-op save appendix: a count, then (object id, owner slot).
+int partyMemberOwnersSave(File* stream);
+int partyMemberOwnersLoad(File* stream);
+int partyMemberOwnerSlot(Object* member);
+void partyMemberSetOwnerSlot(Object* member, int ownerSlot);
 // Co-op: the player this member follows (its recruiter when reachable, else the
 // nearest live player on its elevation, else gDude). gDude in single-player.
 Object* partyMemberLeader(Object* member);

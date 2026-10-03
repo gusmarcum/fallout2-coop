@@ -849,6 +849,37 @@ static void serverControlEmitReloadPresentation(Object* weapon)
 // OBJECT_DELTA; viewers HOLD it during the replay) — and unconditionally, not just in
 // combat like _invenWieldFunc, because out of combat this is the whole point: the
 // server must show the drawn/holstered pose to every viewer and to a mid-join.
+// Take the worn armor off the acting player (gDude, under the actor scope): the WORN
+// flag, the protection it gave, and the body, which goes back to the bare one.
+//
+// The bare body is THIS player's: their own gender in the world's look. It used to be
+// read out of the dude proto (0x1000000), which is the host's, so a second player of the
+// other sex took their armor off and stood there in the host's body for everyone, until
+// they put armor on again (GitHub issue 28, bugs/070).
+static void serverControlTakeArmorOff(Object* armor)
+{
+    armor->flags &= ~OBJECT_WORN;
+    _adjust_ac(gDude, armor, nullptr);
+    int bareFid = buildFid(OBJ_TYPE_CRITTER, protoPlayerActorBareFrmId(gDude), ANIM_STAND,
+        (gDude->fid & 0xF000) >> 12, gDude->rotation + 1);
+    if (artExists(bareFid) && gDude->fid != bareFid) {
+        objectSetFid(gDude, bareFid, nullptr);
+        objectSetFrame(gDude, 0, nullptr);
+    }
+}
+
+// What the acting player wears, its protection and the body they are drawn in, for the
+// event trace: the armor verbs' proofs read it (tools/issue_wire_proof.py armoroff).
+static void serverControlTraceArmor(const char* verb)
+{
+    if (getenv("F2_TRACE_EVENTS") == nullptr) {
+        return;
+    }
+    Object* armor = critterGetArmor(gDude);
+    fprintf(stderr, "[armor] %s slot=%d worn pid=%d ac=%d body=%d\n", verb, playerActorSlotOf(gDude),
+        armor != nullptr ? armor->pid : -1, critterGetStat(gDude, STAT_ARMOR_CLASS), gDude->fid & 0xFFF);
+}
+
 static void serverControlSwapHand(Object* actor, int slot, int hand)
 {
     if (actor == nullptr) {
@@ -1377,6 +1408,16 @@ static void serverControlMove(Object* actor, int tile, bool run)
         return;
     }
 
+    // ►► RUNNING ENDS SNEAKING, unless the runner has Silent Running (GitHub issue 29).
+    // Vanilla does this in _dude_run, the click's own handler (animation.cc), which a
+    // dedicated server never calls: the run arrives here as a verb. So a player with
+    // Sneak on kept it on at a run, the indicator stayed up and critters went on judging
+    // them as sneaking. The sheet row carries the state back, so the indicator follows.
+    if (run && !perkGetRank(actor, PERK_SILENT_RUNNING) && dudeHasState(DUDE_STATE_SNEAKING, actor)) {
+        dudeDisableState(DUDE_STATE_SNEAKING, actor);
+        fprintf(stderr, "f2_server: control mv run ends sneaking (no Silent Running)\n");
+    }
+
     reg_anim_begin(ANIMATION_REQUEST_RESERVED);
     if (run) {
         animationRegisterRunToTile(actor, tile, actor->elevation, -1, 0);
@@ -1634,6 +1675,31 @@ enum class ClaimDisposition {
     kRollRefused,     // new account WITH a spec, refused: the body is established (bugs/026)
     kClaimed,         // legacy bare `claim`, no account identity to explain
 };
+
+// A slot was just bound while a fight is waiting on THAT body's turn. It happens when
+// the world froze with the fight there: the last player dropped on their own turn, the
+// freeze kept the turn theirs (GitHub issue 16, bugs/052), and they are back. Two
+// things are owed, both after the roster that tells their client which body is its own:
+//
+//  * the turn, said again. A client keys "is it my turn" on its own actor at the
+//    moment TURN_START arrives (client_net.cc), and the one that came with the join
+//    snapshot arrived before this login, when the client did not own a body yet. For
+//    slot 0 the two happen to agree; for every other slot the client would sit on the
+//    wait cursor through its own turn until the idle budget ran out.
+//  * a full idle budget. The clock stood still while they were away, so what is left
+//    is whatever they had not used before the drop, which may be seconds.
+static void serverControlResumeHeldTurn(int slot)
+{
+    if (!isInCombat()) {
+        return;
+    }
+    Object* actor = playerActorAt(slot);
+    if (actor == nullptr || _combat_whose_turn() != actor) {
+        return;
+    }
+    combatSessionRearmIdleTimer();
+    combatEmitCurrentTurnCheckpoint();
+}
 
 static void serverGreetClaimant(int slot, ClaimDisposition disposition)
 {
@@ -2138,6 +2204,7 @@ static bool serverControlIsTradeVerb(const char* verb)
     return strcmp(verb, "boffer") == 0
         || strcmp(verb, "btake") == 0
         || strcmp(verb, "bunoffer") == 0
+        || strcmp(verb, "bunload") == 0
         || strcmp(verb, "bcommit") == 0
         || strcmp(verb, "bdone") == 0
         || strcmp(verb, "bcancel") == 0
@@ -2550,6 +2617,7 @@ void serverControlLine(int sessionId, const char* line)
         // scripts/check_wire_combat.sh — keep that prefix verbatim on this path too.
         fprintf(stderr, "f2_server: control claimed by session %d (slot %d)\n", sessionId, slot);
         serverEmitPlayerRoster();
+        serverControlResumeHeldTurn(slot);
         serverGreetClaimant(slot, disp);
         return;
     }
@@ -2600,6 +2668,7 @@ void serverControlLine(int sessionId, const char* line)
         // and scripts/check_wire_combat.sh — keep that prefix verbatim.
         fprintf(stderr, "f2_server: control claimed by session %d (slot %d)\n", sessionId, want);
         serverEmitPlayerRoster(); // every viewer re-derives which actor is its own
+        serverControlResumeHeldTurn(want);
         serverGreetClaimant(want, ClaimDisposition::kClaimed);
         return;
     }
@@ -2925,6 +2994,7 @@ void serverControlLine(int sessionId, const char* line)
     // predicate, deliberately not a second notion of ownership to keep in sync.
     if (strcmp(verb, "boffer") == 0 || strcmp(verb, "btake") == 0
         || strcmp(verb, "bunoffer") == 0 || strcmp(verb, "bcommit") == 0
+        || strcmp(verb, "bunload") == 0
         || strcmp(verb, "bdone") == 0 || strcmp(verb, "bcancel") == 0) {
         // ►► A PLAYER-TO-PLAYER TRADE SPEAKS THE SAME VERBS (server_trade.cc), which
         // is what lets the viewer reuse vanilla's trade screen as-is. When one is
@@ -2962,6 +3032,10 @@ void serverControlLine(int sessionId, const char* line)
             barterIntentPush(BARTER_INTENT_TAKE_ITEM, pid, qty);
         } else if (strcmp(verb, "bunoffer") == 0) {
             barterIntentPush(BARTER_INTENT_UNOFFER_ITEM, pid, qty);
+        } else if (strcmp(verb, "bunload") == 0) {
+            // `bunload <pid> <list>`: the second number is which of the four lists the
+            // weapon lies in, not a count (barter_intent.h).
+            barterIntentPush(BARTER_INTENT_UNLOAD_ITEM, pid, qty);
         } else if (strcmp(verb, "bcommit") == 0) {
             barterIntentPush(BARTER_INTENT_COMMIT, 0, 0);
         } else if (strcmp(verb, "bdone") == 0) {
@@ -3813,6 +3887,7 @@ void serverControlLine(int sessionId, const char* line)
         || strcmp(verb, "invunwield") == 0
         || strcmp(verb, "invdrop") == 0
         || strcmp(verb, "unload") == 0
+        || strcmp(verb, "invload") == 0
         || strcmp(verb, "useitem") == 0
         || strcmp(verb, "useitem_armexplosive") == 0;
     if (isInvVerb) {
@@ -3895,28 +3970,14 @@ void serverControlLine(int sessionId, const char* line)
                     fprintf(stderr, "f2_server: control invunwield hand=%d (nothing held, or an equipped/nested item)\n", hand);
                 }
             } else if (hand == HAND_COUNT) { // 2 == armor slot (no Hand enum value)
+                // Back to the bare body, mirroring the equip side. Without it the
+                // server keeps rendering the armor it no longer believes you are wearing.
                 Object* armor = critterGetArmor(gDude);
                 if (armor != nullptr) {
-                    armor->flags &= ~OBJECT_WORN;
-                    _adjust_ac(gDude, armor, nullptr);
-                    // Back to the bare body, mirroring the equip side (and vanilla's
-                    // own unequip, proto_instance.cc's remove-from-inven armor branch,
-                    // which reads the same naked base out of the dude proto). Without
-                    // it the server keeps rendering the armor it no longer believes
-                    // you are wearing.
-                    Proto* dudeProto;
-                    int baseFrmId = 1;
-                    if (protoGetProto(0x1000000, &dudeProto) != -1) {
-                        baseFrmId = dudeProto->fid & 0xFFF;
-                    }
-                    int bareFid = buildFid(OBJ_TYPE_CRITTER, baseFrmId, ANIM_STAND,
-                        (gDude->fid & 0xF000) >> 12, gDude->rotation + 1);
-                    if (artExists(bareFid) && gDude->fid != bareFid) {
-                        objectSetFid(gDude, bareFid, nullptr);
-                        objectSetFrame(gDude, 0, nullptr);
-                    }
+                    serverControlTakeArmorOff(armor);
                 }
                 fprintf(stderr, "f2_server: control invunwield armor\n");
+                serverControlTraceArmor("invunwield");
             } else {
                 fprintf(stderr, "f2_server: control invunwield bad hand=%d ignored\n", hand);
             }
@@ -3935,7 +3996,7 @@ void serverControlLine(int sessionId, const char* line)
         // inventory recursively and the wire ships one per item), so the acting object
         // can simply be named.
         const bool byNetId = strcmp(verb, "invwield") == 0 || strcmp(verb, "invdrop") == 0
-            || strcmp(verb, "unload") == 0;
+            || strcmp(verb, "unload") == 0 || strcmp(verb, "invload") == 0;
         int pid = -1;
         Object* item = nullptr;
         int stackQty = 0;
@@ -4089,6 +4150,58 @@ void serverControlLine(int sessionId, const char* line)
             return;
         }
 
+        if (strcmp(verb, "invload") == 0) {
+            // invload <ammo netId> <weapon netId> <packs>: the inventory screen's drag of
+            // an ammo stack onto a weapon (GitHub issue 34). Vanilla loads the weapon from
+            // THAT stack, as many packs as the player asked for (_drop_ammo_into_weapon),
+            // which is also how a player picks one kind of ammo over another; the hand
+            // bar's reload takes whatever fits. The viewer skipped the drop because ammo
+            // was not on the wire when its inventory was written. It is now, per item, so
+            // the load is one more netId-addressed verb and the result streams back with
+            // the rest of the pack. Free inside the screen, like every other verb here.
+            Object* weapon = nullptr;
+            {
+                Inventory* inv = &gDude->data.inventory;
+                for (int i = 0; i < inv->length; i++) {
+                    Object* candidate = inv->items[i].item;
+                    if (candidate != nullptr && candidate->netId == arg2 && arg2 != 0) {
+                        weapon = candidate;
+                        break;
+                    }
+                }
+            }
+            if (n < 3 || weapon == nullptr || itemGetType(weapon) != ITEM_TYPE_WEAPON
+                || itemGetType(item) != ITEM_TYPE_AMMO || !weaponCanBeReloadedWith(weapon, item)) {
+                fprintf(stderr, "f2_server: control invload ammo pid=%d weapon net=%d refused (no such weapon, or it does not take that ammo)\n",
+                    pid, n >= 3 ? arg2 : -1);
+                serverControlRefuse(sessionId, "That ammo doesn't fit that weapon.");
+                return;
+            }
+            int packs = n >= 4 ? arg3 : 1;
+            if (packs < 1) {
+                packs = 1;
+            }
+            if (packs > stackQty) {
+                packs = stackQty;
+            }
+            int weaponPid = weapon->pid;
+            int before = ammoGetQuantity(weapon);
+            // ►► A HELD WEAPON STAYS HELD. The loader takes the weapon out of the pack and
+            // puts it back (the screen it comes from has the hand items detached, so there
+            // the take-out simply fails), and itemRemove strips the in-hand flag on the
+            // way: loading the gun in your hand would put it away. Keep the flags across.
+            unsigned int equipped = weapon->flags & OBJECT_EQUIPPED;
+            int rc = weaponLoadAmmo(gDude, weapon, item, packs, true, nullptr);
+            weapon->flags |= equipped;
+            fprintf(stderr, "f2_server: control invload ammo pid=%d weapon pid=%d packs=%d rc=%d rounds %d -> %d held=%d\n",
+                pid, weaponPid, packs, rc, before, ammoGetQuantity(weapon),
+                (weapon->flags & OBJECT_IN_ANY_HAND) != 0 ? 1 : 0);
+            if (rc != 0) {
+                serverControlRefuse(sessionId, "That weapon is already full.");
+            }
+            return;
+        }
+
         if (strcmp(verb, "invwield") == 0) {
             // arg2 = target hand (0/1); ignored for armor (_inven_wield branches on
             // ITEM_TYPE_ARMOR internally). Default to the right hand.
@@ -4203,6 +4316,7 @@ void serverControlLine(int sessionId, const char* line)
                 }
             }
             fprintf(stderr, "f2_server: control invwield pid=%d hand=%d\n", pid, hand);
+            serverControlTraceArmor("invwield");
             if (getenv("F2_TRACE_EVENTS") != nullptr) {
                 Object* h2 = critterGetItem2(gDude);
                 fprintf(stderr, "[dude-equip] pid=%d type=%d hand=%d dudeFid=0x%x rhandPid=%d inCombat=%d\n",
@@ -4218,13 +4332,24 @@ void serverControlLine(int sessionId, const char* line)
             if (qty > stackQty) {
                 qty = stackQty;
             }
-            // Dropping WORN armor must also strip its AC bonus (itemDropStack only moves
-            // the object) — same _adjust_ac the invunwield-armor path uses.
+            // ►► A DROP STRAIGHT OUT OF A SLOT COMES OUT OF THE SLOT FIRST. The viewer's
+            // inventory drops the armor being worn, or the thing in a hand, with this one
+            // verb and no unwield before it, as vanilla's does. itemDropStack refuses
+            // anything still flagged as equipped (it has to, see its own comment), so
+            // nothing was dropped: a held item silently stayed, and worn armor stayed
+            // too with its protection already taken off by the line that used to be
+            // here, so the player stood in armor that stopped nothing (found proving
+            // GitHub issue 28, bugs/070).
             if (itemGetType(item) == ITEM_TYPE_ARMOR && (item->flags & OBJECT_WORN) != 0) {
-                _adjust_ac(gDude, item, nullptr);
+                serverControlTakeArmorOff(item);
+            } else if ((item->flags & OBJECT_IN_LEFT_HAND) != 0) {
+                _inven_unwield(gDude, HAND_LEFT);
+            } else if ((item->flags & OBJECT_IN_RIGHT_HAND) != 0) {
+                _inven_unwield(gDude, HAND_RIGHT);
             }
             itemDropStack(gDude, item, qty);
             fprintf(stderr, "f2_server: control invdrop pid=%d qty=%d\n", pid, qty);
+            serverControlTraceArmor("invdrop");
         }
         return;
     }

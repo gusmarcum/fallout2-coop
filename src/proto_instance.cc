@@ -679,6 +679,12 @@ static int _obj_remove_from_inven(Object* critter, Object* item)
                 v5 = proto->fid;
             }
 
+            // That proto is the host's. A second player who drops the armor they are
+            // wearing goes back to their OWN bare body (issue 28).
+            if (playerActorSlotOf(critter) > 0) {
+                v5 = protoPlayerActorBareFrmId(critter);
+            }
+
             fid = buildFid(OBJ_TYPE_CRITTER, v5, FID_ANIM_TYPE(critter->fid), (critter->fid & 0xF000) >> 12, critter->rotation);
             objectSetFid(critter, fid, &updatedRect);
             v11 = 3;

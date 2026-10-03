@@ -283,6 +283,7 @@ void clientViewerWield(Object* item, int hand);
 void clientViewerUnwield(int hand);
 void clientViewerDrop(Object* item, int quantity);
 void clientViewerUnload(Object* item);
+void clientViewerLoadAmmo(Object* ammo, Object* weapon, int quantity);
 
 // Tell the server this viewer is done with the movie it was shown (finished or
 // skipped). The server's movie barrier releases on the FIRST ack it gets, so this

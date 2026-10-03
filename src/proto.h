@@ -142,6 +142,12 @@ int _proto_dude_update_gender();
 // Idempotent derive from (MOVIE_VSUIT world flag, per-actor gender, armor state);
 // drive it from the baseline choke so every rebuild carries the right fid.
 void protoPlayerActorsUpdateLook();
+// The art number of `actor`'s UNARMORED body: the world's native look (tribal until the
+// vault suit movie has been seen) in the actor's OWN gender. For putting a player back
+// into their bare body when armor comes off: the dude proto (0x1000000) and
+// _art_vault_guy_num both answer for the HOST, so every path that read them dressed a
+// second player in the host's gender (GitHub issue 28, bugs/070).
+int protoPlayerActorBareFrmId(Object* actor);
 int _proto_dude_init(const char* path);
 int proto_scenery_init(Proto* proto, int pid);
 int proto_scenery_subdata_init(Proto* proto, int type);

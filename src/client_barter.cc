@@ -28,6 +28,8 @@ static bool gBarterDirty = false;
 static const int kBarterMaxRows = 64;
 static int gPendingPids[4][kBarterMaxRows];
 static int gPendingQtys[4][kBarterMaxRows];
+static int gPendingAmmoQtys[4][kBarterMaxRows]; // -1 = not said: the copy keeps its proto's load
+static int gPendingAmmoPids[4][kBarterMaxRows];
 static int gPendingCounts[4] = { 0, 0, 0, 0 };
 static int gPendingOfferValue = 0;
 static int gPendingAskingValue = 0;
@@ -78,7 +80,8 @@ static void barterClearTable(Object* table)
     }
 }
 
-static void barterFillTable(Object* table, const int* pids, const int* qtys, int count)
+static void barterFillTable(Object* table, const int* pids, const int* qtys, const int* ammoQtys,
+    const int* ammoPids, int count)
 {
     if (table == nullptr) {
         return;
@@ -91,6 +94,15 @@ static void barterFillTable(Object* table, const int* pids, const int* qtys, int
         Object* item = nullptr;
         if (objectCreateWithFidPid(&item, -1, pids[i]) == -1) {
             continue;
+        }
+        // A copy is born as its proto says, which for a gun is fully loaded. Give it
+        // the load the server's one has BEFORE it is added, so an empty gun and a
+        // loaded one stay two rows here as they are there (itemAdd merges only
+        // identical items), the action menu offers Unload on the right one and a look
+        // counts the right rounds (GitHub issue 38).
+        if (ammoQtys[i] >= 0 && itemGetType(item) == ITEM_TYPE_WEAPON) {
+            ammoSetQuantity(item, ammoQtys[i]);
+            item->data.item.weapon.ammoTypePid = ammoPids[i];
         }
         // A freshly created item is on the ground conceptually; itemAdd moves it
         // into the container and merges it with any matching stack.
@@ -179,6 +191,8 @@ void clientBarterOnState(const ClientBarterList& driverInv, const ClientBarterLi
         for (int i = 0; i < n; i++) {
             gPendingPids[list][i] = lists[list]->pids[i];
             gPendingQtys[list][i] = lists[list]->qtys[i];
+            gPendingAmmoQtys[list][i] = lists[list]->ammoQtys != nullptr ? lists[list]->ammoQtys[i] : -1;
+            gPendingAmmoPids[list][i] = lists[list]->ammoPids != nullptr ? lists[list]->ammoPids[i] : -1;
         }
         gPendingCounts[list] = n;
     }
@@ -201,10 +215,14 @@ void clientBarterApplyPending()
     if (!gBarterOpen || gBarterEndPending || !gBarterStatePending) {
         return;
     }
-    barterFillTable(gBarterDriverInv, gPendingPids[0], gPendingQtys[0], gPendingCounts[0]);
-    barterFillTable(gBarterMerchantInv, gPendingPids[1], gPendingQtys[1], gPendingCounts[1]);
-    barterFillTable(gBarterPlayerTable, gPendingPids[2], gPendingQtys[2], gPendingCounts[2]);
-    barterFillTable(gBarterMerchantTable, gPendingPids[3], gPendingQtys[3], gPendingCounts[3]);
+    barterFillTable(gBarterDriverInv, gPendingPids[0], gPendingQtys[0], gPendingAmmoQtys[0], gPendingAmmoPids[0],
+        gPendingCounts[0]);
+    barterFillTable(gBarterMerchantInv, gPendingPids[1], gPendingQtys[1], gPendingAmmoQtys[1], gPendingAmmoPids[1],
+        gPendingCounts[1]);
+    barterFillTable(gBarterPlayerTable, gPendingPids[2], gPendingQtys[2], gPendingAmmoQtys[2], gPendingAmmoPids[2],
+        gPendingCounts[2]);
+    barterFillTable(gBarterMerchantTable, gPendingPids[3], gPendingQtys[3], gPendingAmmoQtys[3], gPendingAmmoPids[3],
+        gPendingCounts[3]);
     gBarterOfferValue = gPendingOfferValue;
     gBarterAskingValue = gPendingAskingValue;
     // Surface the latched commit result once, but only for an actual commit

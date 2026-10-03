@@ -102,11 +102,14 @@
 #include "actions.h" // actionShowDeathCallbackPtr / actionDeathDropItems — the STATE half
 #include "art.h" // artExists — "can this mover's walk be realized" (see serverAnimMoveArtAvailable)
 #include "combat.h"
+#include "critter.h" // critterGetMovementPointCostAdjustedForCrippledLegs — the dry run of a stashed walk
 #include "map.h"
 #include "movement.h"
 #include "obj_types.h"
 #include "object.h"
+#include "party_member.h" // objectIsPartyMember — companions keep their tuned follow (anim_busy)
 #include "path.h"
+#include "perk.h" // PERK_SILENT_RUNNING — a sneaking player's registered run is a walk without it
 #include "pres_record.h"
 #include "presenter.h"
 #include "presenter_network.h"
@@ -548,6 +551,92 @@ static int serverAnimSeqFail();
 
 static void serverAnimApplyCallbackState(void* a1, void* a2, void* proc);
 
+// Will the stashed walk leave its walker next to `target`? Asked when the sequence's
+// forced reach check is registered, which is before the walk is applied: the recording
+// has to end there if the answer is no (presRecordCutHere), and by the time the commit
+// knows for certain the sequence has shipped. So this is the commit's own arithmetic run
+// dry: the same path, the same stop short of an object, the same cap, and the same charge
+// per step (movementChargeApForStep: the step is taken, then paid for, and the walk ends
+// once nothing is left to pay with). A script that stops the walker on the way is the one
+// thing it cannot see; the commit's own check still decides what is TAKEN.
+static bool serverAnimDeferredWalkWillReach(Object* target)
+{
+    const DeferredWalk& w = gDeferredWalk;
+    Object* owner = w.owner;
+    if (owner == nullptr || target == nullptr) {
+        return true;
+    }
+
+    unsigned char rotations[kServerAnimMaxPath];
+    int steps = 0;
+    if (w.actionPoints != 0) {
+        if (w.toObject) {
+            if (w.target != nullptr
+                && !(owner->tile == w.target->tile && owner->elevation == w.target->elevation)) {
+                bool wasHidden = (w.target->flags & OBJECT_HIDDEN) != 0;
+                w.target->flags |= OBJECT_HIDDEN;
+                steps = playerActorIs(owner)
+                    ? _make_path_wide(owner, owner->tile, w.target->tile, rotations, 0)
+                    : _make_path(owner, owner->tile, w.target->tile, rotations, 0);
+                if (!wasHidden) {
+                    w.target->flags &= ~OBJECT_HIDDEN;
+                }
+                if (steps > 0) {
+                    steps -= (owner->flags & OBJECT_MULTIHEX) != 0 ? 2 : 1;
+                    if (w.actionPoints != -1 && w.actionPoints < steps) {
+                        steps = w.actionPoints;
+                    }
+                }
+            }
+        } else {
+            steps = playerActorIs(owner)
+                ? _make_path_wide(owner, owner->tile, w.tile, rotations, 0)
+                : _make_path(owner, owner->tile, w.tile, rotations, 0);
+            if (steps > 0 && _obj_blocking_at(owner, w.tile, w.elevation) != nullptr) {
+                steps--;
+                if (w.actionPoints != -1 && w.actionPoints < steps) {
+                    steps = w.actionPoints;
+                }
+            }
+        }
+    }
+
+    int tile = owner->tile;
+    if (steps > 0) {
+        bool chargeAp = isInCombat() && FID_TYPE(owner->fid) == OBJ_TYPE_CRITTER;
+        int ap = chargeAp ? owner->data.critter.combat.ap : 0;
+        int freeMove = _combat_free_move;
+        int cost = chargeAp ? critterGetMovementPointCostAdjustedForCrippledLegs(owner, 1) : 0;
+        for (int step = 0; step < steps; step++) {
+            tile = tileGetTileInDirection(tile, rotations[step], 1);
+            if (!chargeAp) {
+                continue;
+            }
+            int owed = cost;
+            if (owed > freeMove) {
+                owed -= freeMove;
+                freeMove = 0;
+                ap = owed > ap ? 0 : ap - owed;
+            } else {
+                freeMove -= owed;
+            }
+            if (ap + freeMove <= 0) {
+                break;
+            }
+        }
+    }
+
+    // objectGetDistanceBetween's rule, from the tile the walk will end on.
+    int distance = tileDistanceBetween(tile, target->tile);
+    if ((owner->flags & OBJECT_MULTIHEX) != 0) {
+        distance -= 1;
+    }
+    if ((target->flags & OBJECT_MULTIHEX) != 0) {
+        distance -= 1;
+    }
+    return distance <= 1;
+}
+
 static void serverAnimCommitDeferredWalk()
 {
     if (!gDeferredWalk.pending) {
@@ -697,6 +786,14 @@ static bool serverAnimMoveArtAvailable(Object* owner, bool run, bool* effectiveR
     // Vanilla passes weaponCode 0 for this probe but the real weapon code for the
     // preload; mirror that asymmetry rather than tidying it (animation.cc:737 vs :748).
     if (run && !artExists(buildFid(OBJ_TYPE_CRITTER, owner->fid & 0xFFF, ANIM_RUNNING, 0, owner->rotation + 1))) {
+        *effectiveRun = false;
+    }
+    // A sneaking player without Silent Running WALKS wherever a run is registered for
+    // them: the approach of a use, a pickup, a talk (animation.cc:729, :812; GitHub
+    // issue 29). The run they click themselves ends the sneak instead, before it gets
+    // here (serverControlMove), as _dude_run does.
+    if (run && playerActorIs(owner) && dudeHasState(DUDE_STATE_SNEAKING, owner)
+        && !perkGetRank(owner, PERK_SILENT_RUNNING)) {
         *effectiveRun = false;
     }
 
@@ -1060,6 +1157,35 @@ int animationIsBusy(Object* a1)
     return 0;
 }
 
+// ►► BUT A SCRIPT THAT ASKS anim_busy GETS THE TRUTH ABOUT WALKS (GitHub issue 43,
+// bugs/068). animationIsBusy stays 0 for the engine's own callers: they busy-wait on it
+// (`while (animationIsBusy(x)) _process_bk();`, combat.cc, combat_ai.cc), and nothing in
+// that pump advances a stepped walk, so a true answer there would spin for good.
+//
+// Scripts use it differently, as "did the move I just asked for get under way". The stock
+// idiom, in a critter's own proc: ask to walk to the target; while not anim_busy, the move
+// was refused (no path, too far), so pull the destination one hex back toward yourself and
+// ask again. With 0 always, every ask looked refused: the loop walked the destination all
+// the way back to the critter's own feet and the last ask, the one that stood, went
+// nowhere. That is Grisham's wild dogs "standing still in top of the Brahmin Pasture"
+// instead of running at the herd, and any other script that homes in this way.
+//
+// A walk under way is exactly what the registry holds, out of combat, which is where
+// these procs run; in a fight walks apply at once and nothing is ever under way.
+//
+// Companions keep the old answer on purpose. Their follow was tuned against it (bugs/027):
+// with "not busy" their script re-aims at the leader on every heartbeat, mid-walk, which
+// is what makes them keep up at a server's proc cadence. Told the truth, they would finish
+// each leg to where the leader WAS before looking again. Nothing was reported against how
+// they move, so they are left as they are.
+int animationIsBusyForScript(Object* a1)
+{
+    if (a1 == nullptr || objectIsPartyMember(a1)) {
+        return 0;
+    }
+    return serverAnimWalkInFlightFor(a1) ? 1 : 0;
+}
+
 // ---- Lifecycle (no-ops; there is no engine/sad list to manage) -----------
 
 void animationInit()
@@ -1298,10 +1424,23 @@ int animationRegisterCallbackForced(void* a1, void* a2, AnimationCallback* proc,
     // record section it is JUDGED: after the stashed walk when there is one, now when
     // there is none (see gDeferredCallbacks, GitHub issue 13).
     if (presRecordActive() && (void*)proc == actionIsNextToCallbackPtr()) {
+        // Either way a check that fails also ends what a viewer is SHOWN (GitHub issue 13,
+        // follow-up; bugs/059). The gesture registered after it was still recorded and
+        // shipped: an NPC whose walk to a dropped weapon ran out of action points crouched
+        // and grabbed at the ground from where it stopped, the weapon still hexes away.
         if (gDeferredWalk.pending && gDeferredWalk.owner == (Object*)a1) {
             gDeferredCallbacks.push_back(DeferredCallback { a1, a2, (void*)proc, true });
+            if (!serverAnimDeferredWalkWillReach((Object*)a2)) {
+                if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                    fprintf(stderr, "[anim-cb] net=%d will not be next to net=%d after its walk:"
+                                    " the viewer is shown the walk and nothing after it\n",
+                        ((Object*)a1)->netId, ((Object*)a2)->netId);
+                }
+                presRecordCutHere();
+            }
         } else if (a1 != nullptr && a2 != nullptr && objectGetDistanceBetween((Object*)a1, (Object*)a2) > 1) {
             gSeqNotNextTo = true;
+            presRecordCutHere();
         }
         return 0;
     }

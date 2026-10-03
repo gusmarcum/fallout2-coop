@@ -852,8 +852,11 @@ int main(int argc, char** argv)
             // host's turns auto-ending, and a player rejoining next to hostiles took
             // eight to ten of their turns before the join finished (GitHub issue 16).
             // The inbound drain still runs on a frozen beat, so the login that binds the
-            // first slot is served and thaws the world. A CMD-only server (no wire) and
-            // every non-keepalive run keep advancing exactly as before.
+            // first slot is served and thaws the world; and a frozen beat still sends a
+            // viewer that connected its join snapshot (serverTick), because the client
+            // will not send that login until it has the world (GitHub issue 32). A
+            // CMD-only server (no wire) and every non-keepalive run keep advancing
+            // exactly as before.
             [&]() -> bool {
                 return !(keepAlive && haveNet && !serverControlHasClaimant());
             });

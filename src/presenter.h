@@ -561,6 +561,11 @@ public:
     struct BarterStack {
         int pid;
         int quantity;
+        // What a weapon in this row is loaded with (GitHub issue 38): a viewer builds
+        // its copy of the row from the pid alone, which made every gun on its trade
+        // screen a fully loaded one. -1 = not a weapon, or not said.
+        int ammoQuantity = -1;
+        int ammoTypePid = -1;
     };
 
     // A trade opened with `merchant` (a real world object, so a netId addresses

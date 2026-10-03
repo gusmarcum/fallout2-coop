@@ -570,6 +570,24 @@ void _show_damage_to_object(Object* defender, int damage, int flags, Object* wea
         }
     } else {
         if ((flags & DAM_DEAD) != 0 && (defender->data.critter.combat.results & DAM_DEAD) == 0) {
+            // ►► A CRITTER KILLED WHERE IT LIES BLEEDS (GitHub issue 39, bugs/076). The
+            // blood is an animation chosen by the fall the critter is lying in, read
+            // here off its art. On the dedicated server a knocked-down critter keeps
+            // its STANDING art (animations are nothing there), so that read said
+            // "standing", _action_blood had no fall to match, and nothing was
+            // recorded: the kill of a knocked-down enemy was shown with no blood at
+            // all. The server keeps the fall itself now (combatKnockdownFall); a
+            // critter a script laid down is lying in the single frame of one.
+            if (serverDedicatedActive() && anim != ANIM_FALL_BACK && anim != ANIM_FALL_FRONT) {
+                if (anim == ANIM_FALL_BACK_SF) {
+                    anim = ANIM_FALL_BACK;
+                } else if (anim == ANIM_FALL_FRONT_SF) {
+                    anim = ANIM_FALL_FRONT;
+                } else {
+                    int fall = combatKnockdownFall(defender);
+                    anim = fall != -1 ? fall : ANIM_FALL_BACK;
+                }
+            }
             anim = _action_blood(defender, anim, delay);
         } else {
             return;
@@ -1989,6 +2007,24 @@ bool _is_hit_from_front(Object* a1, Object* a2)
     }
 
     return diff != 0 && diff != 1 && diff != 5;
+}
+
+// The knocked-down branch of _show_damage_to_object, without the showing: a blow from
+// the front drops a critter on its back; with knockback the fall is only swapped for
+// want of art (actionKnockdown), without it also for want of room (_pick_fall).
+int actionKnockdownFall(Object* critter, bool hitFromFront, int knockbackDistance)
+{
+    int anim = hitFromFront ? ANIM_FALL_BACK : ANIM_FALL_FRONT;
+    if (knockbackDistance != 0 && !_critter_flag_check(critter->pid, CRITTER_NO_KNOCKBACK)) {
+        if (anim == ANIM_FALL_FRONT) {
+            int fid = buildFid(OBJ_TYPE_CRITTER, critter->fid & 0xFFF, anim, (critter->fid & 0xF000) >> 12, critter->rotation + 1);
+            if (!artExists(fid)) {
+                anim = ANIM_FALL_BACK;
+            }
+        }
+        return anim;
+    }
+    return _pick_fall(critter, anim);
 }
 
 // 0x412BEC

@@ -30,9 +30,20 @@ client is connected. The inbound drain still runs on a frozen beat, so the login
 the first slot is served and thaws the world; the barrier then waits for that player as it
 always did. A CMD-only server and non-keepalive runs are unchanged.
 
-What remains: the beat in which a player drops still advances once before the freeze (the
-gate is read before the drain that releases the slot), so one or two enemy turns of the
-round in progress can run then. They would run anyway when the fight resumes.
+## Follow-up (2026-10-02, with bugs/058)
+The first version left one live beat: the gate was read before the drain that releases the
+slot, so the beat in which the last player dropped still advanced. This write-up said the
+enemy turns of that beat "would run anyway when the fight resumes", which missed the point:
+the dropped player's own turn was ended in that beat (an unbound body does not hold a turn),
+and a fight nearly always sits on the human's turn. So a player who quit mid-fight came back
+a full round behind: v1.4.1 ran four enemy turns before giving the host a turn again.
+
+`serverServe` now runs the drain first and asks the gate after it, so the beat that notices
+the drop is frozen and the turn is still theirs when they return. Their login re-arms the
+turn's idle budget and announces the turn again (bugs/058 says why the client needs that).
+
+The same release fixes what this freeze broke in v1.4.1: a frozen server sent a joining
+client no world at all, so nobody could start a session (GitHub issue 32, bugs/058).
 
 ## Verification
 `python -u tools/issue_wire_proof.py joinfreeze ...`: the host, in a fight with a raider and
@@ -42,4 +53,9 @@ connection comes back and waits four seconds before logging in, then stays silen
 | server | turns streamed before the login | after the login |
 |---|---|---|
 | v1.4.0 (`--expect-defect`, 4/4) | 12 (851, 1856, 1079, 1150, 1079, 1091, 1042, 1003, 991, **1**, 977, 1042) | none in 22 s (the fight had moved on) |
-| fixed (3/3) | none | the round in progress (1150, 1023, 1003, 991), then the host's turn, which waits |
+| v1.4.1 (3/3 at the time) | none | the round in progress (1150, 1023, 1003, 991), then the host's turn, which waits |
+
+Since the follow-up the proof drops the host on its own turn, reads "frozen" off the sim
+clock stamped on the frames sent before the login, and repeats the run for a second player
+who comes back alone (bugs/058 has the table): 9/9 on the fixed build, the turn still the
+returning player's own.

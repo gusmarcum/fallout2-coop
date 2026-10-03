@@ -908,10 +908,130 @@ Object* partyMemberAt(int index)
     return index >= 0 && index < gPartyMembersLength ? gPartyMembers[index].object : nullptr;
 }
 
+// ►► WHO A COMPANION GOES WITH (GitHub issues 20 and 41, bugs/067). Vanilla has one
+// player, so "bring the party to the dude" is the whole rule and it is asked in two
+// situations that co-op has to tell apart:
+//
+//  * ONE PLAYER CHANGED FLOOR (a ladder, stairs: objectSetLocation names the mover
+//    below). Only that player's own companions go with them, and they go to the mover,
+//    whatever floor that is. A companion that is somebody else's stays put: it used to
+//    be dragged to its owner's side every time anyone took a ladder. A companion with no
+//    recorded owner stays with whoever is still on its floor, and goes with the mover
+//    only when that leaves it alone. The old rule asked partyMemberLeader, which wants a
+//    leader on the companion's OWN floor: the owner had just left it, so the answer was
+//    "whoever stayed behind", and the companion was put beside them ("refuses to go to
+//    the next elevation ... starts to follow a remaining player").
+//  * EVERYBODY ARRIVED SOMEWHERE (a map load, a group move). Every companion is placed,
+//    beside its owner, or beside gDude when it has none. The callers run this after all
+//    the players are standing on the new map (map.cc): a companion placed beside an
+//    owner who still held a tile number from the old map landed twenty hexes off, or
+//    nowhere at all on a small map.
+static Object* gPartySyncMover = nullptr;
+
+void partyMemberSyncSetMover(Object* mover)
+{
+    gPartySyncMover = mover;
+}
+
+// Who recruited whom, for the co-op save appendix (player_sheet.cc). The owner was
+// runtime only, so every companion came back from a load belonging to nobody, and a
+// world that is always started from a save (start-server.cmd) had no owned companion in
+// it at all: whoever stood nearest was followed. Keyed by the member's object id, which
+// is what the party list itself is saved by; the slot is stable because the save's
+// account table is what hands slots out again.
+int partyMemberOwnersSave(File* stream)
+{
+    int count = 0;
+    for (int index = 1; index < gPartyMembersLength; index++) {
+        if (gPartyMembers[index].object != nullptr && gPartyMembers[index].ownerSlot >= 0) {
+            count++;
+        }
+    }
+    if (fileWriteInt32(stream, count) == -1) {
+        return -1;
+    }
+    for (int index = 1; index < gPartyMembersLength; index++) {
+        if (gPartyMembers[index].object != nullptr && gPartyMembers[index].ownerSlot >= 0) {
+            if (fileWriteInt32(stream, gPartyMembers[index].object->id) == -1) return -1;
+            if (fileWriteInt32(stream, gPartyMembers[index].ownerSlot) == -1) return -1;
+        }
+    }
+    return 0;
+}
+
+int partyMemberOwnersLoad(File* stream)
+{
+    int count;
+    if (fileReadInt32(stream, &count) == -1 || count < 0 || count > 64) {
+        return -1;
+    }
+    for (int row = 0; row < count; row++) {
+        int objectId;
+        int ownerSlot;
+        if (fileReadInt32(stream, &objectId) == -1) return -1;
+        if (fileReadInt32(stream, &ownerSlot) == -1) return -1;
+        for (int index = 1; index < gPartyMembersLength; index++) {
+            if (gPartyMembers[index].object != nullptr && gPartyMembers[index].object->id == objectId) {
+                gPartyMembers[index].ownerSlot = ownerSlot >= 0 && ownerSlot < kMaxPlayerActors ? ownerSlot : -1;
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
+// For the operator's `party` listing and `partyadd <pid> <slot>`: read and set who a
+// companion follows. -1 = nobody recorded.
+int partyMemberOwnerSlot(Object* member)
+{
+    for (int index = 1; index < gPartyMembersLength; index++) {
+        if (gPartyMembers[index].object == member) {
+            return gPartyMembers[index].ownerSlot;
+        }
+    }
+    return -1;
+}
+
+void partyMemberSetOwnerSlot(Object* member, int ownerSlot)
+{
+    for (int index = 1; index < gPartyMembersLength; index++) {
+        if (gPartyMembers[index].object == member) {
+            gPartyMembers[index].ownerSlot = ownerSlot >= 0 && ownerSlot < kMaxPlayerActors ? ownerSlot : -1;
+            return;
+        }
+    }
+}
+
+// The player who recruited this member, when they are in the game and alive.
+static Object* partyMemberOwnerOf(const PartyMemberListItem* partyMember)
+{
+    int ownerSlot = partyMember->ownerSlot;
+    if (ownerSlot < 0 || ownerSlot >= playerActorCount()) {
+        return nullptr;
+    }
+    Object* owner = playerActorAt(ownerSlot);
+    if (owner == nullptr || !playerActorOnline(ownerSlot) || critterIsDead(owner)) {
+        return nullptr;
+    }
+    return owner;
+}
+
+static bool partyAnotherPlayerOnElevation(int elevation, Object* except)
+{
+    for (int slot = 0; slot < playerActorCount(); slot++) {
+        Object* actor = playerActorAt(slot);
+        if (actor != nullptr && actor != except && playerActorOnline(slot) && !critterIsDead(actor)
+            && actor->elevation == elevation) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int _partyMemberSyncPosition()
 {
-    int clockwiseRotation = (gDude->rotation + 2) % ROTATION_COUNT;
-    int counterClockwiseRotation = (gDude->rotation + 4) % ROTATION_COUNT;
+    const bool coop = serverDedicatedActive() && playerActorCount() >= 2;
+    Object* mover = coop ? gPartySyncMover : nullptr;
 
     int n = 0;
     int distance = 2;
@@ -919,8 +1039,20 @@ int _partyMemberSyncPosition()
         PartyMemberListItem* partyMember = &(gPartyMembers[index]);
         Object* partyMemberObj = partyMember->object;
         if ((partyMemberObj->flags & OBJECT_HIDDEN) == 0 && PID_TYPE(partyMemberObj->pid) == OBJ_TYPE_CRITTER) {
-            // Co-op: gather around the member's own leader (== gDude when single).
-            Object* leader = partyMemberLeader(partyMemberObj);
+            // Single player and the goldens: the dude, exactly as before.
+            Object* leader = gDude;
+            if (coop) {
+                Object* owner = partyMemberOwnerOf(partyMember);
+                if (mover != nullptr) {
+                    if (owner != nullptr ? owner != mover
+                                         : partyAnotherPlayerOnElevation(partyMemberObj->elevation, mover)) {
+                        continue; // not the mover's, or not left alone: it stays where it is
+                    }
+                    leader = mover;
+                } else if (owner != nullptr) {
+                    leader = owner;
+                }
+            }
             int rotation;
             if ((n % 2) != 0) {
                 rotation = (leader->rotation + 2) % ROTATION_COUNT;

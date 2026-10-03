@@ -32,6 +32,7 @@
 #include "rest.h" // restPerform — the shared rest simulation
 #include "scripts.h"
 #include "server_loop.h"
+#include "server_players.h" // playerActorAt — `entermapas` stages a trip as a named player
 #include "sim_clock.h"
 #include "skill.h"
 #include "state_audit.h" // stateAuditEmit — the `audit` probe command
@@ -1012,6 +1013,46 @@ void commandDispatch(const Command& command)
         debugPrint("headless-probe: entermap %d elev=%d\n",
             transition.map, transition.elevation);
         mapSetTransition(&transition);
+    } else if (strcmp(command.name, "entermapas") == 0) {
+        // entermapas:MAP:SLOT — the same staged transition, asked for by player SLOT.
+        // That is what a script's load_map is when a player's own dialog or use runs
+        // it (Torr sending the party to the grazing area, Grisham to his pasture): the
+        // load then runs under THAT player's scope, not the host's, which is the case
+        // GitHub issue 20 turned on and which `entermap` (always the host) cannot make.
+        MapTransition transition;
+        memset(&transition, 0, sizeof(transition));
+        transition.map = command.arg;
+        transition.elevation = 0;
+        transition.tile = -1;
+        transition.rotation = ROTATION_SE;
+        Object* asker = playerActorAt(command.arg2);
+        debugPrint("headless-probe: entermapas %d slot=%d\n", transition.map, command.arg2);
+        mapSetTransitionForActor(&transition, asker);
+    } else if (strcmp(command.name, "entermapat") == 0) {
+        // entermapat:MAP:TILE — a trip that names the tile it ends on, as an exit grid
+        // does: the group is moved there AFTER the load has placed it at the map's own
+        // entrance (mapHandleTransition), which is where a companion used to be left
+        // behind (GitHub issue 41, bugs/067).
+        MapTransition transition;
+        memset(&transition, 0, sizeof(transition));
+        transition.map = command.arg;
+        transition.elevation = 0;
+        transition.tile = command.arg2;
+        transition.rotation = ROTATION_SE;
+        debugPrint("headless-probe: entermapat %d tile=%d\n", transition.map, transition.tile);
+        mapSetTransition(&transition);
+    } else if (strcmp(command.name, "elevate") == 0) {
+        // elevate:SLOT:ELEV — put player SLOT on another floor of this map, where they
+        // stand. That is a ladder's or a stairway's script: move_to(dude_obj, tile,
+        // elevation) under the scope of the player who used it, which is the one path
+        // by which a single player changes floor while the others stay (GitHub issue
+        // 20's companion half, bugs/067).
+        Object* actor = playerActorAt(command.arg);
+        if (actor != nullptr && elevationIsValid(command.arg2)) {
+            ServerActorScope scope(actor);
+            objectSetLocation(actor, actor->tile, command.arg2, nullptr);
+        }
+        debugPrint("headless-probe: elevate slot=%d elev=%d\n", command.arg, command.arg2);
     } else {
         debugPrint("headless-probe: unknown action '%s'\n", command.name);
     }

@@ -1,5 +1,6 @@
 #include "client_net.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -459,6 +460,10 @@ public:
         // ►► NO FEEDER YET (§12.5 step 1): nothing enqueues this today, so the path is
         // inert and the goldens must be byte-identical. Step 2 adds the feeder.
         kDeferredEvent,
+        // This viewer's own hit points, parked while a fight is still being shown so the
+        // counter moves where the wire put the new total: behind the attack that caused
+        // it, not at decode (GitHub issue 44, bugs/069).
+        kDudeHp,
     };
     struct PresEvent {
         PresKind kind;
@@ -466,6 +471,7 @@ public:
         int tsNetId = 0, tsIsPlayer = 0, tsAp = 0, tsDeadline = 0, tsFreeMove = 0; // kTurnStart
         int floatNetId = 0; // kFloat owner
         int moveNetId = 0, moveHops = 0; // kMoveRelease
+        int hpNetId = 0, hpValue = 0; // kDudeHp: whose total it is (the body may be rebound meanwhile) and the total
         std::vector<unsigned char> seqOps; // kRecordedSeq — the raw op buffer (played at pump time)
         int seqActorNetId = 0; // kRecordedSeq — actor whose approach glide must drain before play (0 = none)
         // kRecordedSeq — the adopt netIds this sequence INCREMENTED in _pendingAdopts at
@@ -474,6 +480,10 @@ public:
         // later state event for that netId defers against it and force-applies a full cap
         // late, forever (§12.6 trap 2, reached by a second route).
         std::vector<int> seqAdopts;
+        // kRecordedSeq: the live objects this sequence reserved at its decode, once each.
+        // Each is owed this replay (clientCombatAnimReserve) until the sequence executes
+        // or is dropped, and is told so then (clientCombatAnimNotePlayed).
+        std::vector<int> seqReserved;
         std::string text; // kConsole / kFloat / kSfx
         int consoleChannel = kMsgChannelDefault; // kConsole — message-log style (msg_channel.h)
         // kDeferredEvent — the parked state event, re-dispatched verbatim at drain.
@@ -911,6 +921,42 @@ public:
         interfaceBarRefresh();
     }
 
+    // Adopt a hit point total for this viewer's own body: the value the counter rolls
+    // toward. `netId` is the body the total was sent for; one parked across a rebind
+    // (the roster moved this screen to another actor) is not this body's and is dropped.
+    void applyDudeHp(int netId, int hp)
+    {
+        if (gDude == nullptr || lookup(netId) != gDude) {
+            return;
+        }
+        if (getenv("F2_TRACE_EVENTS") != nullptr && hp != _dudeHpAuth) {
+            fprintf(stderr, "[hp] own total %d -> %d adopted (shown %d)\n", _dudeHpAuth, hp, gDude->data.critter.hp);
+        }
+        _dudeHpAuth = hp;
+        _dudeHpSeeded = true;
+    }
+
+    // Must a new total for this viewer's own body wait on the presentation queue?
+    // Yes while a fight is still being shown: something is queued or an attack is
+    // playing, and either the fight is on or its end (or an earlier total, which this
+    // one must not overtake) is still in the line. Outside a fight the queue only ever
+    // holds another actor's door or gesture, and a heal must not wait on that.
+    bool dudeHpWaitsForPresentation() const
+    {
+        if (_presQueue.empty() && !clientCombatAnimActive()) {
+            return false;
+        }
+        if (_inCombat) {
+            return true;
+        }
+        for (const PresEvent& e : _presQueue) {
+            if (e.kind == PresKind::kExit || e.kind == PresKind::kDudeHp) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void presentationPump()
     {
         if (!clientViewerActive()) {
@@ -1027,6 +1073,7 @@ public:
             case PresKind::kFloat: applyFloat(ev.floatNetId, ev.text); break;
             case PresKind::kSfx: applySfx(ev.text); break;
             case PresKind::kMoveRelease: clientAnimRelease(lookup(ev.moveNetId), ev.moveHops); break;
+            case PresKind::kDudeHp: applyDudeHp(ev.hpNetId, ev.hpValue); break;
             case PresKind::kDeferredEvent: {
                 // Re-dispatch verbatim through the SAME handler the decoder would have
                 // used. event() expects a reader bounded to exactly this payload, which
@@ -1040,13 +1087,17 @@ public:
             }
             case PresKind::kRecordedSeq:
                 presPlayRecordedSeq(ev.seqOps.data(), (int)ev.seqOps.size(), true);
+                for (int ref : ev.seqReserved) {
+                    clientCombatAnimNotePlayed(lookup(ref));
+                }
                 // Uniform Active marking (Fable review A5/C.2): a throw/attack/wield seq's
                 // ops don't self-promote to Active (only MOVE/TAKE_OUT do), so combatAnim
                 // read 0 while such a seq was still animating — the turn-flip gate could
                 // play over it and the `[busy] STUCK combatAnim=0` misreport. Mark the actor
                 // Active (capMs=0, ownsMoveFrame=false) so every executing seq holds the
-                // pump and reaps via advanceReplays. In combat only (out-of-combat gesture/
-                // door keep their existing lifecycle). Idempotent for a MOVE seq that already
+                // pump and reaps via advanceReplays. In combat only: out of combat a gesture
+                // or a door does not hold the pump, and its reserve ends when it has played
+                // (clientCombatAnimNotePlayed above). Idempotent for a MOVE seq that already
                 // marked itself (enterReplay no-ops when already Active; capMs 0 won't shrink
                 // the move's cap; ownsMoveFrame false won't clear its frame claim).
                 if (_inCombat) {
@@ -1313,10 +1364,19 @@ private:
                 continue;
             }
             if (it->kind != PresKind::kTurnStart && it->kind != PresKind::kExit) {
+                if (it->kind == PresKind::kDudeHp) {
+                    // A total is state, not a caption: taken out of the line it is
+                    // applied, early, and the later ones still follow it in order.
+                    applyDudeHp(it->hpNetId, it->hpValue);
+                }
                 if (it->kind == PresKind::kMoveRelease) {
                     // Its held glide must not outlive its release: snap the mover to
                     // its (already authoritative) position instead of stranding it.
                     clientAnimCancel(lookup(it->moveNetId));
+                }
+                if (it->kind == PresKind::kAttack) {
+                    // Its participants were reserved for this replay and will not get it.
+                    attackNotePlayed(it->attack);
                 }
                 if (it->kind == PresKind::kRecordedSeq) {
                     // This sequence will never execute, so the mints it promised at decode
@@ -1328,6 +1388,10 @@ private:
                     // meant.
                     for (int adoptNetId : it->seqAdopts) {
                         releasePendingAdopt(adoptNetId);
+                    }
+                    // And the objects it reserved are no longer owed it.
+                    for (int ref : it->seqReserved) {
+                        clientCombatAnimNotePlayed(lookup(ref));
                     }
                 }
                 _presQueue.erase(it);
@@ -1910,6 +1974,7 @@ private:
             // recompute re-lights your crosshair highlight over the fresh list now; the
             // acting-critter outline returns on that TURN_START. No stale-netId leak (#8).
             _combatActorNetId = 0;
+            combatViewerSetTurnObject(nullptr);
             recomputeCombatOutlines();
         } else {
             setInCombat(false);
@@ -2962,8 +3027,32 @@ private:
             // SCOPE (this slice): the roll only SMOOTHS the motion; it still STARTS at
             // decode (~swing start), not the blow's action frame. Action-frame commit is
             // Pillar 1 / phase 3 — deliberately left for the deferred-commit FIFO.
-            _dudeHpAuth = hp;
-            _dudeHpSeeded = true;
+            //
+            // ►► AND IT WAITS ITS TURN WHILE A FIGHT IS STILL BEING SHOWN (issue 44). The
+            // enemy side's attacks all arrive within a beat or two and then take seconds
+            // to play, so a total adopted at decode counted the bar down to the END of
+            // the enemy phase while the first swing was still in the air: the player read
+            // off how much they were about to lose. The total is parked on the
+            // presentation queue instead and adopted where the wire put it, which since
+            // v1.4.2 is right behind the attack that caused it (objectDeltaFlushHitPoints).
+            // With nothing owed (a stimpak, a rest, a trap out of combat) it is adopted
+            // at once, as before.
+            if (!_dudeHpSeeded) {
+                _dudeHpAuth = gDude->data.critter.hp;
+                _dudeHpSeeded = true;
+            }
+            if (dudeHpWaitsForPresentation()) {
+                PresEvent e;
+                e.kind = PresKind::kDudeHp;
+                e.hpNetId = obj->netId;
+                e.hpValue = hp;
+                enqueue(e);
+                if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                    fprintf(stderr, "[hp] own total %d parked behind %d queued event(s)\n", hp, (int)_presQueue.size() - 1);
+                }
+            } else {
+                applyDudeHp(obj->netId, hp);
+            }
             dudeCombatHp = true;
         }
         if (hasHp && !dudeCombatHp) obj->data.critter.hp = hp;
@@ -3181,6 +3270,7 @@ private:
         _presQueue.clear();
         _pendingDudeTick = 0;
         _dudeApDeferring = false;
+        combatViewerSetTurnObject(nullptr); // the world it pointed into is gone
         gCombatState &= ~(COMBAT_STATE_0x01 | COMBAT_STATE_0x02);
         gCombatState |= COMBAT_STATE_0x02;
         interfaceBarEndButtonsHide(false);
@@ -3274,6 +3364,7 @@ private:
             interfaceBarRefresh();
             // No actor yet — the first TURN_START drives the outlines (#8).
             _combatActorNetId = 0;
+            combatViewerSetTurnObject(nullptr);
             recomputeCombatOutlines();
         }
         debugPrint("client_net: COMBAT ENTER\n");
@@ -3328,6 +3419,7 @@ private:
         // outlines (recompute clears since _inCombat is now false). Rebaseline/rejoin
         // self-clear (fresh object list), so this is the only path needing a clear (#8).
         _combatActorNetId = 0;
+        combatViewerSetTurnObject(nullptr);
         recomputeCombatOutlines();
         debugPrint("client_net: COMBAT EXIT applied\n");
     }
@@ -3374,8 +3466,16 @@ private:
         // netId 1 always (server assigns walk numbers dude-first, [[p5-server-plan]]).
         // Keyed on netId, never isPlayer alone (another player's turn is isPlayer
         // too — [[mp-actor-architecture-principle]] UI-driving corollary).
+        bool wasMyTurn = _myTurn;
         _myTurn = isPlayer != 0 && gDude != nullptr && netId == gDude->netId;
+        if (_myTurn && !wasMyTurn) {
+            debugPrint("client_net: turn start, this player's turn (%d action points)\n", ap);
+        }
         gCombatState |= COMBAT_STATE_0x01;
+        // Whose turn it is, for the armor class stat: a critter's unspent action points
+        // count toward it except on its own turn (GitHub issue 24). Set before the bar
+        // is redrawn below, which draws that counter.
+        combatViewerSetTurnObject(lookup(netId));
         interfaceBarEndButtonsShow(true); // idempotent: animates only the first reveal
         if (_myTurn) {
             gCombatState |= COMBAT_STATE_0x02; // free to act
@@ -3515,6 +3615,11 @@ private:
     // the pass and carried on the queued entry, so a dropped sequence can release them.
     std::vector<int> _seqAdoptIds;
 
+    // The live objects the DRY pass of the sequence being decoded has reserved, once
+    // each: a sequence names the same object in several ops, and a reserve counts one
+    // replay owed (bugs/077). Read by onPresSeq straight after the pass, like _seqAdoptIds.
+    std::vector<int> _seqReservedIds;
+
     Object* resolveSeqRef(int ref, std::unordered_map<int, Object*>& handles)
     {
         if (ref > 0) {
@@ -3537,7 +3642,12 @@ private:
     // clientCombatAnimReserve tolerates it.
     void reserveSeqRef(int ref)
     {
-        if (ref > 0) clientCombatAnimReserve(lookup(ref));
+        if (ref <= 0 || lookup(ref) == nullptr
+            || std::find(_seqReservedIds.begin(), _seqReservedIds.end(), ref) != _seqReservedIds.end()) {
+            return;
+        }
+        _seqReservedIds.push_back(ref);
+        clientCombatAnimReserve(lookup(ref));
     }
 
     // Walk the op stream. execute=false = DRY reserve pass at decode (reserve live
@@ -3773,6 +3883,7 @@ private:
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     }
                 } else {
+                    reserveSeqRef(ref);
                     clientCombatAnimArmMoveHold(lookup(ref)); // reserve + flag: hold this mover's pos/AP deltas
                 }
                 break;
@@ -3810,6 +3921,7 @@ private:
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     }
                 } else {
+                    reserveSeqRef(ref);
                     clientCombatAnimArmMoveHold(lookup(ref)); // hold the MOVER only (not the target)
                 }
                 break;
@@ -3898,8 +4010,10 @@ private:
         // moved to execute, or the same-beat corpse-fid leak regresses for every attack).
         // It also PROMISES this sequence's adopt mints, which entangles those netIds from
         // here on — the parking rule for everything that follows on the state lane.
+        _seqReservedIds.clear();
         presPlayRecordedSeq(ops.data(), (int)ops.size(), false);
         std::vector<int> promisedAdopts = _seqAdoptIds;
+        std::vector<int> reserved = _seqReservedIds;
         // In combat: always ride the pump (turn-serial ordering). Out of combat: an
         // ACTORED sequence (gesture/door) rides the pump too so it waits out that
         // actor's approach glide (pump gate 1d); an actor-less sequence (explosion)
@@ -3910,10 +4024,14 @@ private:
             e.seqOps = std::move(ops);
             e.seqActorNetId = actorNetId;
             e.seqAdopts = std::move(promisedAdopts);
+            e.seqReserved = std::move(reserved);
             enqueue(e);
         } else {
             // Plays now, so the promise is kept immediately (the execute pass releases it).
             presPlayRecordedSeq(ops.data(), (int)ops.size(), true);
+            for (int ref : reserved) {
+                clientCombatAnimNotePlayed(lookup(ref));
+            }
         }
     }
 
@@ -3939,11 +4057,23 @@ private:
 
     // Reconstruct one queued attack and start its replay. netIds are resolved HERE
     // (dequeue time), so a participant freed since the event is simply skipped.
+    // The participants of a queued attack that will not be replayed are no longer owed
+    // that replay (clientCombatAnimReserve counted it at decode).
+    void attackNotePlayed(const PendingAttack& pa)
+    {
+        clientCombatAnimNotePlayed(lookup(pa.attackerNetId));
+        clientCombatAnimNotePlayed(lookup(pa.defenderNetId));
+        for (int i = 0; i < pa.extraCount; i++) {
+            clientCombatAnimNotePlayed(lookup(pa.extraNetId[i]));
+        }
+    }
+
     void playPending(const PendingAttack& pa)
     {
         Object* attacker = lookup(pa.attackerNetId);
         Object* defender = lookup(pa.defenderNetId);
         if (attacker == nullptr || defender == nullptr) {
+            attackNotePlayed(pa);
             return;
         }
 
@@ -4163,6 +4293,9 @@ private:
     {
         // The interface bar's message log — "You were hit for N points…".
         displayMonitorAddMessageStyled(const_cast<char*>(text.c_str()), channel);
+        if (getenv("F2_TRACE_EVENTS") != nullptr) {
+            fprintf(stderr, "[console] shown: %s\n", text.c_str());
+        }
     }
 
     void onFloatText(Reader& r)
@@ -4691,6 +4824,8 @@ private:
         constexpr int kMaxRows = 64;
         static int pids[4][kMaxRows];
         static int qtys[4][kMaxRows];
+        static int ammoQtys[4][kMaxRows];
+        static int ammoPids[4][kMaxRows];
         int counts[4] = { 0, 0, 0, 0 };
 
         // Order: driver inventory, merchant inventory, player table, merchant table.
@@ -4710,11 +4845,26 @@ private:
         // the mirrors from half-read garbage pids.
         if (!clientViewerActive() || r.overflow()) return;
 
+        // What each row's weapon is loaded with rides behind the result code since
+        // v1.4.2 (GitHub issue 38). An older server sends none: the copies then keep
+        // the load their proto gives them, as before.
+        bool hasAmmo = r.remaining() >= (size_t)(counts[0] + counts[1] + counts[2] + counts[3]) * 8;
+        if (hasAmmo) {
+            for (int list = 0; list < 4; list++) {
+                for (int i = 0; i < counts[list]; i++) {
+                    ammoQtys[list][i] = r.i32();
+                    ammoPids[list][i] = r.i32();
+                }
+            }
+        }
+
         ClientBarterList lists[4];
         for (int i = 0; i < 4; i++) {
             lists[i].pids = pids[i];
             lists[i].qtys = qtys[i];
             lists[i].count = counts[i];
+            lists[i].ammoQtys = hasAmmo ? ammoQtys[i] : nullptr;
+            lists[i].ammoPids = hasAmmo ? ammoPids[i] : nullptr;
         }
         clientBarterOnState(lists[0], lists[1], lists[2], lists[3], offerValue, askingValue, resultCode);
     }
@@ -6216,6 +6366,26 @@ void clientViewerUnload(Object* item)
     char cmd[32];
     snprintf(cmd, sizeof(cmd), "unload %d", item->netId);
     gViewerConn->sendLine(cmd);
+}
+
+// Load `weapon` from the `ammo` stack the player dragged onto it, `quantity` packs of it
+// (GitHub issue 34). Both are named by netId; the server runs vanilla's own loader and the
+// rounds, the consumed packs and the ready sound come back with the inventory stream.
+void clientViewerLoadAmmo(Object* ammo, Object* weapon, int quantity)
+{
+    if (gViewerConn == nullptr || ammo == nullptr || weapon == nullptr) {
+        return;
+    }
+    if (ammo->netId == 0 || weapon->netId == 0) {
+        debugPrint("client_net: invload with an unbound item (ammo pid %d, weapon pid %d) ignored\n",
+            ammo->pid, weapon->pid);
+        return;
+    }
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "invload %d %d %d", ammo->netId, weapon->netId, quantity > 0 ? quantity : 1);
+    gViewerConn->sendLine(cmd);
+    debugPrint("client_net: invload sent, ammo pid %d into weapon pid %d, %d pack(s)\n",
+        ammo->pid, weapon->pid, quantity > 0 ? quantity : 1);
 }
 
 // USE / apply an inventory item (out-of-combat): the inventory ctx-menu USE leaf

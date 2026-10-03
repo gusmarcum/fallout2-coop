@@ -4,6 +4,128 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.4.2 (2026-10-03)
+
+Fixes the black screen that kept the first player of every v1.4.1 session out
+([issue #32](https://github.com/gusmarcum/fallout2-coop/issues/32)), and eighteen more
+player reports. Several change behaviour you will notice (see Changed). Saves from every
+earlier version load unchanged (checked with a save from each of v1.3.1, v1.3.2, v1.4.0
+and v1.4.1).
+
+### Changed
+
+- **A click on a critter in a fight looks at it
+  ([issue #31](https://github.com/gusmarcum/fallout2-coop/issues/31)).** With the arrow
+  cursor the game drew the original's binoculars and then tried to talk, which the server
+  refuses in a fight. The click now looks, as the icon says.
+- **Running ends Sneak
+  ([issue #29](https://github.com/gusmarcum/fallout2-coop/issues/29)).** Sneak stayed on at
+  a run. A run now switches it off, as in the original, unless you have Silent Running.
+- **Space during the enemy's turn does nothing
+  ([issue #30](https://github.com/gusmarcum/fallout2-coop/issues/30)).** The server works
+  out the enemy turns at once and is already waiting on you while they are still being
+  shown, so a Space pressed during the show ended a turn you had not seen begin. The key
+  is ignored until the show is over.
+- **The armor class counter follows the original
+  ([issue #24](https://github.com/gusmarcum/fallout2-coop/issues/24)).** It showed your
+  unspent action points as armor all through your own turn and lost a point with each one
+  you spent. It now stands still on your turn and shows the bonus once the turn is ended.
+- **Companions follow their own player between floors, and remember whose they are
+  ([issue #20](https://github.com/gusmarcum/fallout2-coop/issues/20),
+  [issue #41](https://github.com/gusmarcum/fallout2-coop/issues/41)).** Whoever took a
+  ladder or stairs pulled every companion along, and after a save and restart every
+  companion followed the host. A companion now goes with the player who recruited it,
+  stays put when another player changes floor, arrives beside its owner on a new map, and
+  keeps its owner across a save.
+- **The trade screen has the original's look and action menu, with Unload
+  ([issue #38](https://github.com/gusmarcum/fallout2-coop/issues/38)).** Under the arrow
+  cursor (right-click) a click on an item did nothing. It now looks at the item, and a
+  held click opens the menu. Unload works on any loaded weapon in the four lists, the
+  trader's included: the rounds go into the same inventory the weapon is in.
+
+### Fixed
+
+- **The first player of a session gets the world
+  ([issue #32](https://github.com/gusmarcum/fallout2-coop/issues/32)).** v1.4.1 froze the
+  world until a player had logged in, and the frozen server also stopped sending the
+  world to a game that was joining, which a game needs before it can log in. The game
+  that asks whether a name is known used up the one copy that was sent. Everyone who
+  joined an empty server got a black screen. A frozen server now sends the world to a
+  game that joins.
+- **Leaving on your own turn does not cost you the round
+  ([issue #16](https://github.com/gusmarcum/fallout2-coop/issues/16), follow-up).** The
+  moment the server noticed the last player had gone it still ran one live step, which
+  ended that player's turn. It freezes on that step now, and a player who comes back is
+  told the turn is theirs again.
+- **The hit point counter waits for the blow
+  ([issue #44](https://github.com/gusmarcum/fallout2-coop/issues/44)).** The counter
+  dropped to where it would be after the whole enemy phase while the first attack was
+  still being shown. It now comes down blow by blow, with each "You were hit" line.
+- **Armor taken off leaves you in your own body
+  ([issue #28](https://github.com/gusmarcum/fallout2-coop/issues/28)).** A second player
+  who took their armor off was drawn in the host's body (a man in a woman's, or the
+  other way round) until they put armor on again.
+- **The figure in the inventory shows what you are wearing
+  ([issue #28](https://github.com/gusmarcum/fallout2-coop/issues/28)).** It was one change
+  behind: bare after putting armor on, armored after taking it off.
+- **Dropping what you wear or hold drops it.** Dropping the armor you had on, or the item
+  in your hand, straight from its slot did not drop it, and the armor stopped protecting
+  you while still worn. Found while testing the report above.
+- **Night stays night on a new map
+  ([issue #37](https://github.com/gusmarcum/fallout2-coop/issues/37)).** A map entered at
+  night was drawn in full daylight until dawn, and so was the world of a player who
+  joined at night.
+- **Bess lies down until her leg is set
+  ([issue #42](https://github.com/gusmarcum/fallout2-coop/issues/42)).** A critter that a
+  script lays down with an animation (Bess in Modoc) stayed on its feet for everyone.
+- **Enemy item use and script gestures are shown
+  ([issue #40](https://github.com/gusmarcum/fallout2-coop/issues/40)).** An enemy taking a
+  stimpak or a chem, reloading, or putting a dry weapon away raises its hands again, and
+  the Den's orphans are seen making their move on your pocket.
+- **A killed enemy bleeds
+  ([issue #39](https://github.com/gusmarcum/fallout2-coop/issues/39)).** Two ways to get a
+  body with no blood under it. A kill on an enemy that was already knocked down was shown
+  with no blood, and the server left its corpse standing for anyone who joined later (it
+  also gets up with the right animation now if it lives). And an enemy killed while its
+  own last attack was still being shown on your screen was given its corpse too early,
+  then played the attack and the death over it, which left the body without its blood
+  pool and drawn like a standing figure.
+- **An opened door is open.** A door that had slid open still counted as closed in each
+  player's own copy of the map for as long as anyone on the map kept walking: the
+  movement cursor showed the red X on the tiles behind it. And a door used twice in quick
+  succession (a double click) could be left open on screen and shut on the server. Found
+  by the release checks, in v1.4.1 as well.
+- **Grisham's wild dogs go for the herd
+  ([issue #43](https://github.com/gusmarcum/fallout2-coop/issues/43)).** They stood at the
+  top of the pasture. The server told every script that nothing was ever walking, and
+  scripts that close in on a target a step at a time took that for "the move was
+  refused". Scripts are now told the truth about walks.
+- **Everyone arrives together when another player triggers a map change
+  ([issue #20](https://github.com/gusmarcum/fallout2-coop/issues/20)).** When a player
+  other than the host caused it (a dialog that loads a map), the host kept the tile
+  number it had on the old map and could land far from the party.
+- **No crouch at a weapon the walk did not reach
+  ([issue #13](https://github.com/gusmarcum/fallout2-coop/issues/13), follow-up).** An
+  enemy whose walk to a dropped weapon ran out of action points still crouched and
+  grabbed at the ground from where it stopped. The walk is shown and nothing after it.
+- **A body lists what the critter had when it died
+  ([issue #13](https://github.com/gusmarcum/fallout2-coop/issues/13), follow-up).** A
+  corpse still listed a spear its owner had thrown or a stimpak it had used, and taking
+  it answered "That item is gone."
+- **The hand slot goes back to the shot after a reload
+  ([issue #33](https://github.com/gusmarcum/fallout2-coop/issues/33)).** It stayed on
+  Reload, so the next click reloaded a full weapon.
+- **Ammo dragged onto a weapon loads it
+  ([issue #34](https://github.com/gusmarcum/fallout2-coop/issues/34)).** In the inventory,
+  onto a weapon in the list or in a hand slot.
+
+Not changed: [issue #45](https://github.com/gusmarcum/fallout2-coop/issues/45) (the rocks
+under Modoc's outhouse) works as in the original on v1.4.0, v1.4.1 and this version: arm
+the charge beside the rocks, leave the cave, and they are gone when you come back.
+[Issue #46](https://github.com/gusmarcum/fallout2-coop/issues/46) (an armor reward goes
+to every player) is the co-op rule for armor a script hands out, not a fault in that
+quest.
+
 ## v1.4.1 (2026-10-01)
 
 Fixes for the follow-ups on three v1.4.0 reports and eight new player reports. Three of
