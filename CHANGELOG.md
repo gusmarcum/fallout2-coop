@@ -4,7 +4,7 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
-## v1.4.2 (2026-10-02)
+## v1.4.2 (2026-10-03)
 
 Fixes the black screen that kept the first player of every v1.4.1 session out
 ([issue #32](https://github.com/gusmarcum/fallout2-coop/issues/32)), and eighteen more
