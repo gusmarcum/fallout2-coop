@@ -563,7 +563,8 @@ static void interactionFireBody(int verb, Object* actor, Object* target, int arg
             preQty, interactionCarriedQty(actor, prePid));
         break;
     }
-    case kInteractSkill:
+    case kInteractSkill: {
+        PresenterFeedbackScope feedback(actor->netId);
         // In combat this is a REFUSAL for seven of the eight skilldex skills —
         // actionUseSkill answers first aid / doctor / lockpick / steal / traps /
         // science / repair with proto msg 902 ("you cannot use that skill in
@@ -573,6 +574,7 @@ static void interactionFireBody(int verb, Object* actor, Object* target, int arg
         // all. Sneak is the exception and toggles as normal (actions.cc:1760).
         actionUseSkill(actor, target, arg);
         break;
+    }
     case kInteractTalk:
         // _talk_to's body: latch a dialog request consumed by scriptsHandleRequests
         // this same tick. actionTalk itself cannot be used — its outcome rides a
@@ -662,7 +664,7 @@ static void interactionFireBody(int verb, Object* actor, Object* target, int arg
                 if (!interactionChargeReviveAp(actor)) {
                     break;
                 }
-                if (critterRevive(target)) {
+                if (critterRevive(target, actor)) {
                     // Consume exactly one authoritative unit. itemRemove peels one object
                     // off a stack but deliberately does not destroy that detached object;
                     // normal drug/item use finishes the same lifecycle with _obj_destroy.
@@ -701,7 +703,7 @@ static void interactionFireBody(int verb, Object* actor, Object* target, int arg
         if (!interactionChargeReviveAp(actor)) {
             break;
         }
-        if (critterRevive(target)) {
+        if (critterRevive(target, actor)) {
             char who[64];
             snprintf(who, sizeof(who), "%s", critterGetName(actor));
             char line[160];

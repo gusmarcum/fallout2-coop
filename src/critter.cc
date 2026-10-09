@@ -1105,7 +1105,7 @@ void critterKill(Object* critter, int anim, bool a3)
 // The single HP is load-bearing: critterIsDead reports dead on DAM_DEAD OR
 // current-HP <= 0, so clearing the flag without giving back a hit point would
 // leave the critter dead by the second test.
-bool critterRevive(Object* critter)
+bool critterRevive(Object* critter, Object* reviver)
 {
     if (critter == nullptr || PID_TYPE(critter->pid) != OBJ_TYPE_CRITTER) {
         return false;
@@ -1145,6 +1145,15 @@ bool critterRevive(Object* critter)
     // render gotcha), and refreshes. fid = -1 lets it choose STAND vs FIRE_DANCE. The
     // fid / position / flag / HP changes all stream to viewers via the object-delta +
     // actor-HP channels regardless of the (server-noop) local refresh.
+    // Record the patient's get-up before applying the final standing fid. The viewer
+    // reserves this actor when it decodes the sequence, so the following fid/flags
+    // delta stays held until the animation completes. Use the reviver as the sequence
+    // lane when present: its earlier crouch/reach must finish before the patient rises.
+    if (serverDedicatedActive() && presRecordEnabled()) {
+        _dude_standup(critter, reviver != nullptr ? reviver->netId : 0);
+    }
+    // The authoritative server state is already standing; the recorded sequence above
+    // is the viewer-side presentation of that change.
     _dude_stand(critter, critter->rotation, -1);
 
     // Brought back in the middle of a fight: give the body its turns back. A
@@ -1806,7 +1815,7 @@ void _dude_stand(Object* obj, int rotation, int fid)
 }
 
 // 0x418574
-void _dude_standup(Object* a1)
+void _dude_standup(Object* a1, int sequenceActorNetId)
 {
     // ►► RECORD THE STAND-UP, or nobody sees it. This registers a real animation
     // (ANIM_BACK_TO_STANDING / ANIM_PRONE_TO_STANDING), but on the dedicated server the
@@ -1852,7 +1861,8 @@ void _dude_standup(Object* a1)
 
     if (recording) {
         presRecordSectionEnd();
-        presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), a1->netId);
+        presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(),
+            sequenceActorNetId > 0 ? sequenceActorNetId : a1->netId);
     }
 
     a1->data.critter.combat.results &= ~DAM_KNOCKED_DOWN;

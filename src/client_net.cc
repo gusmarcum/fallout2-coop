@@ -492,6 +492,7 @@ public:
         unsigned int defEntryId = 0; // wire v4 total-order id, replayed into event()
         int defNetId = 0; // the object this event addresses — what the gate waits on
         unsigned int defCapAt = 0; // getTicks() deadline; 0 = set on first gate check
+        bool defInteractionFeedback = false; // gesture/approach feedback gets a longer backstop
     };
     // ►► netId -> count of OBJ_CREATEs adopting it that have been DECODED but not yet
     // EXECUTED (§12.2). Half of the "presentation-entangled" test the feeder uses; both
@@ -521,6 +522,9 @@ public:
     // never "drop" — the server's event is always applied, only late. Sibling of the
     // move-replay cap in client_present.cc.
     static constexpr unsigned int kDeferredEventCapMs = 4000;
+    // Allow the movement replay's 8-second backstop plus a gesture. Fidgets
+    // never hold interaction feedback; a stuck action still cannot lock it forever.
+    static constexpr unsigned int kInteractionFeedbackCapMs = 12000;
 
     // A server holodisk is meant to be a page or two of text. Bounds an untrusted
     // wire line count before anything is allocated for it.
@@ -950,7 +954,8 @@ public:
             return true;
         }
         for (const PresEvent& e : _presQueue) {
-            if (e.kind == PresKind::kExit || e.kind == PresKind::kDudeHp) {
+            if (e.kind == PresKind::kExit || e.kind == PresKind::kDudeHp
+                || e.defInteractionFeedback) {
                 return true;
             }
         }
@@ -1043,9 +1048,13 @@ public:
                 if (_presQueue.front().defCapAt == 0) {
                     _presQueue.front().defCapAt = getTicks();
                 }
-                bool expired = getTicksSince(_presQueue.front().defCapAt) >= kDeferredEventCapMs;
+                unsigned int capMs = front.defInteractionFeedback
+                    ? kInteractionFeedbackCapMs : kDeferredEventCapMs;
+                bool expired = getTicksSince(_presQueue.front().defCapAt) >= capMs;
                 Object* subject = lookup(front.defNetId);
-                bool busy = subject != nullptr && animationIsBusy(subject) != 0;
+                bool busy = subject != nullptr && (front.defInteractionFeedback
+                    ? (animationIsBusyIgnoringFidgets(subject) || clientAnimPlayableActiveFor(subject))
+                    : animationIsBusy(subject) != 0);
                 if (busy && !expired) {
                     break;
                 }
@@ -1113,6 +1122,7 @@ public:
         if (_presQueue.empty() && !clientCombatAnimActive()) {
             clientAnimReleaseAll();
         }
+        drainTransitionEvents();
     }
 
     // True while the viewer still owes combat presentation: a replay in flight or any
@@ -1121,6 +1131,47 @@ public:
     bool combatPresentationBusy() const
     {
         return clientCombatAnimActive() || !_presQueue.empty();
+    }
+
+    // A world transition must not destroy an approach that is still being shown.
+    // Keep the entire subsequent stream together, including blob chunks and roster,
+    // until the old map's presentation drains. Replaying preserves wire order.
+    std::vector<PresEvent> _transitionEvents;
+    bool _transitionWaiting = false;
+    bool _replayingTransition = false;
+
+    bool transitionPresentationBusy() const
+    {
+        return !_presQueue.empty() || clientCombatAnimActive()
+            || clientAnimAnyPlayableActive()
+            || (gDude != nullptr && animationIsBusyIgnoringFidgets(gDude));
+    }
+
+    void drainTransitionEvents()
+    {
+        if (!_transitionWaiting || transitionPresentationBusy()) return;
+        std::vector<PresEvent> events;
+        events.swap(_transitionEvents);
+        _transitionWaiting = false;
+        _replayingTransition = true;
+        for (const PresEvent& ev : events) {
+            Reader reader(ev.defBytes.data(), ev.defBytes.size());
+            event(ev.defEvType, reader, ev.defEntryId);
+        }
+        _replayingTransition = false;
+    }
+
+    void parkEvent(unsigned char type, Reader& reader, unsigned int entryId, int actor)
+    {
+        PresEvent ev;
+        ev.kind = PresKind::kDeferredEvent;
+        ev.defEvType = type;
+        ev.defEntryId = entryId;
+        ev.defNetId = actor;
+        ev.defInteractionFeedback = true;
+        ev.defBytes.assign(reader.here(), reader.here() + reader.remaining());
+        reader.skip(reader.remaining());
+        enqueue(ev);
     }
 
     // Apply one length-prefixed event payload (the reader is positioned at the
@@ -1132,6 +1183,38 @@ public:
         // ("applied through N", §4 P2b) and the outbox keys releases on (§4 P2). Phase
         // 1 only STAMPS it; deferral/outbox/ack consume it in later phases.
         _lastEntryId = entryId;
+        if (clientViewerActive() && !_replayingTransition && !_applyingDeferredEvent
+            && (_transitionWaiting || ((_loaded && (type == EVENT_MAP_TRANSITION
+                || type == EVENT_WORLDMAP_BEGIN)) && transitionPresentationBusy()))) {
+            _transitionWaiting = true;
+            PresEvent ev;
+            ev.defEvType = type;
+            ev.defEntryId = entryId;
+            ev.defBytes.assign(r.here(), r.here() + r.remaining());
+            r.skip(r.remaining());
+            _transitionEvents.push_back(std::move(ev));
+            return;
+        }
+        if (clientViewerActive() && _loaded && !_applyingDeferredEvent) {
+            int feedbackActor = 0;
+            Reader probe = r;
+            if (type == EVENT_CONSOLE) {
+                probe.str();
+                if (probe.remaining() >= 4) probe.i32(); // recipient
+                int channel = probe.remaining() >= 4 ? probe.i32() : kMsgChannelDefault;
+                if (probe.remaining() >= 4 && channel != kMsgChannelRefusal)
+                    feedbackActor = probe.i32();
+            } else if (type == EVENT_FADE_OUT || type == EVENT_FADE_IN) {
+                probe.i32(); // recipient
+                if (probe.remaining() >= 4) feedbackActor = probe.i32();
+            } else if (type == EVENT_LOOT_GRANT && _inCombat) {
+                feedbackActor = probe.i32();
+            }
+            if (feedbackActor != 0 && !probe.overflow()) {
+                parkEvent(type, r, entryId, feedbackActor);
+                return;
+            }
+        }
         // A mid-stream joiner can receive the tail of the beat it connected
         // during — events addressing a world it hasn't loaded yet. The
         // rebaseline blob that follows (same beat, C.4) carries all of that
@@ -2164,6 +2247,18 @@ private:
         bool run = r.remaining() >= 4 ? (r.i32() != 0) : false;
         Object* obj = lookup(netId);
         if (obj != nullptr) {
+            // _dude_stand re-buckets a revived patient at its existing tile. This
+            // zero-distance MOVE must not cancel the reserved get-up sequence and
+            // release its final standing pose before the reviver's gesture ends.
+            // Hold only a zero-duration refresh of the object's current location;
+            // actual relocations and ordinary movement keep their existing path.
+            if (clientViewerActive() && durMs <= 0
+                && fromTile == toTile && fromElev == toElev
+                && obj->tile == toTile && obj->elevation == toElev
+                && clientCombatAnimDeferSnapMove(obj, toTile, toElev)) {
+                return;
+            }
+
             // In-combat recorded MOVE: this mover's walk is being replayed from the record
             // channel, which owns its motion. HOLD the authoritative position (applied at
             // walk completion, resolveHeld) — do NOT snap/glide/kMoveRelease/notifyReposition
@@ -4278,7 +4373,7 @@ private:
             _inCombat ? 1 : 0, channel,
             (_inCombat && channel != kMsgChannelRefusal) ? "QUEUED (paced)" : "shown now",
             text.c_str());
-        if (_inCombat && channel != kMsgChannelRefusal) {
+        if (_inCombat && channel != kMsgChannelRefusal && !_applyingDeferredEvent) {
             PresEvent e;
             e.kind = PresKind::kConsole;
             e.text = text;

@@ -731,7 +731,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                     ? ROLL_FAILURE
                     : skillRoll(obj, skill, criticalChance, &hpToHeal);
                 if ((roll == ROLL_SUCCESS || roll == ROLL_CRITICAL_SUCCESS)
-                    && critterRevive(target)) {
+                    && critterRevive(target, obj)) {
                     skillUpdateLastUse(SKILL_FIRST_AID);
                     successCount = 1;
                     char line[128];
@@ -860,7 +860,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                     roll = randomRoll(skillValue, criticalChance, &hpToHeal);
                 }
                 if ((roll == ROLL_SUCCESS || roll == ROLL_CRITICAL_SUCCESS)
-                    && critterRevive(target)) {
+                    && critterRevive(target, obj)) {
                     skillUpdateLastUse(SKILL_DOCTOR);
                     successCount = 1;
                     char line[128];

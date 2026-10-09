@@ -26,6 +26,19 @@ struct PlayerRosterRow {
     bool alive;
 };
 
+// Feedback emitted by an interaction waits for this actor's recorded gesture.
+// This is presentation metadata, separate from the message recipient.
+int presenterFeedbackActor();
+class PresenterFeedbackScope {
+public:
+    explicit PresenterFeedbackScope(int actorNetId);
+    ~PresenterFeedbackScope();
+    PresenterFeedbackScope(const PresenterFeedbackScope&) = delete;
+    PresenterFeedbackScope& operator=(const PresenterFeedbackScope&) = delete;
+private:
+    int _previous;
+};
+
 // ►► Whose point of view world narration is currently being rendered from, as an
 // actor netId; 0 = nobody in particular, i.e. broadcast (single-player, and every
 // call site that predates this). Read by Presenter::consoleNarration.

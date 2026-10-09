@@ -57,6 +57,21 @@ PresenterNarrationScope::~PresenterNarrationScope()
     gNarrationActorNetId = _previous;
 }
 
+static int gFeedbackActorNetId = 0;
+
+int presenterFeedbackActor() { return gFeedbackActorNetId; }
+
+PresenterFeedbackScope::PresenterFeedbackScope(int actorNetId)
+    : _previous(gFeedbackActorNetId)
+{
+    gFeedbackActorNetId = actorNetId;
+}
+
+PresenterFeedbackScope::~PresenterFeedbackScope()
+{
+    gFeedbackActorNetId = _previous;
+}
+
 // -- TIME-SKIP MOVE COALESCING (see presenter.h for the why) ---------------
 
 namespace {

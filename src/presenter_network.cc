@@ -1407,6 +1407,11 @@ public:
         }
         beginEvent(EVENT_CONSOLE, 0);
         putString(text);
+        if (presenterFeedbackActor() != 0) {
+            putI32(0); // broadcast recipient
+            putI32(kMsgChannelDefault);
+            putI32(presenterFeedbackActor());
+        }
         endEvent();
     }
 
@@ -1426,6 +1431,10 @@ public:
         beginEvent(EVENT_CONSOLE, 0);
         putString(text);
         putI32(actorNetId); // TRAILING: absent on broadcast, read only if bytes remain
+        if (presenterFeedbackActor() != 0) {
+            putI32(kMsgChannelDefault);
+            putI32(presenterFeedbackActor());
+        }
         endEvent();
     }
 
@@ -1450,6 +1459,7 @@ public:
         putString(text);
         putI32(actorNetId);
         putI32(channel);
+        if (presenterFeedbackActor() != 0) putI32(presenterFeedbackActor());
         endEvent();
     }
 
@@ -1504,6 +1514,7 @@ public:
         objectDeltaScan();
         beginEvent(EVENT_FADE_OUT, 0);
         putI32(actorNetId);
+        if (presenterFeedbackActor() != 0) putI32(presenterFeedbackActor());
         endEvent();
         flushFrame();
     }
@@ -1514,6 +1525,7 @@ public:
         objectDeltaScan(); // see screenFadeOut: the change happens BETWEEN the two
         beginEvent(EVENT_FADE_IN, 0);
         putI32(actorNetId);
+        if (presenterFeedbackActor() != 0) putI32(presenterFeedbackActor());
         endEvent();
         flushFrame(); // the black period ends here; do not sit on it until the tail
     }

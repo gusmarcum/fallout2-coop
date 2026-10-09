@@ -152,7 +152,7 @@ int _dude_move(int actionPoints);
 int _dude_run(int actionPoints);
 void _dude_fidget();
 void _dude_stand(Object* obj, int rotation, int fid);
-void _dude_standup(Object* a1);
+void _dude_standup(Object* a1, int sequenceActorNetId = 0);
 void animationStop();
 
 int animationRegisterSetLightIntensity(Object* owner, int lightDistance, int lightIntensity, int delay);

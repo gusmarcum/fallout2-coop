@@ -758,6 +758,13 @@ static void viewerPollPendingLoot(ClientConnection& conn)
     // adjacency poll below stays as the fallback for a container opened without a
     // grant, but the grant is what normally lands, and it ends the deadlock where the
     // server thought we had arrived and we did not.
+    // A server grant confirms authoritative arrival, but this actor's combat
+    // replay may still be walking there. Wait before consuming the grant, so
+    // it retains its authority over the adjacency fallback when we do open.
+    if (conn.inCombat() && gDude != nullptr
+        && (animationIsBusyIgnoringFidgets(gDude) || clientAnimActiveFor(gDude))) {
+        return;
+    }
     int granted = conn.takeLootGrant();
     if (granted != 0) {
         gViewerPendingLootNetId = granted;
