@@ -469,7 +469,8 @@ int critterAdjustPoison(Object* critter, int amount)
     if (newPoison > 0) {
         critter->data.critter.poison = newPoison;
 
-        _queue_clear_type(EVENT_TYPE_POISON, nullptr);
+		// Reschedule only this player's poison; other players keep their timers.
+		queueRemoveEventsByType(critter, EVENT_TYPE_POISON);
         queueAddEvent(10 * (505 - 5 * newPoison), critter, nullptr, EVENT_TYPE_POISON);
 
         // You have been poisoned!
