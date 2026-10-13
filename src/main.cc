@@ -1918,6 +1918,49 @@ static int mainClientViewer(const char* connectSpec)
             conn.sendLine("cstart");
         }
 
+        // These vanilla shortcuts affect only this viewer. Never forward arbitrary
+        // keys to gameHandleKey: its other branches can run the local simulation.
+        switch (keyCode) {
+        case KEY_LOWERCASE_M:
+        case KEY_UPPERCASE_M:
+        case KEY_HOME:
+        case KEY_SLASH:
+        case KEY_QUESTION:
+        case KEY_F1:
+        case KEY_MINUS:
+        case KEY_UNDERSCORE:
+        case KEY_EQUAL:
+        case KEY_PLUS:
+            gameHandleKey(keyCode, conn.inCombat());
+            clientViewerFlushDeferredItemFrees();
+            break;
+        case KEY_COMMA:
+        case KEY_LESS:
+        case KEY_DOT:
+        case KEY_GREATER:
+            if (gDude != nullptr && !critterIsDead(gDude)
+                && !(conn.inCombat() ? combatBusy : oocBusy)
+                && (!conn.inCombat() || conn.myTurn())) {
+                conn.sendLine(keyCode == KEY_COMMA || keyCode == KEY_LESS
+                    ? "rot -1" : "rot 1");
+            }
+            break;
+        case KEY_LOWERCASE_R:
+        case KEY_UPPERCASE_R:
+            if (gDude != nullptr && !critterIsDead(gDude)
+                && !(conn.inCombat() ? combatBusy : oocBusy)
+                && (!conn.inCombat() || conn.myTurn())) {
+                Object* weapon = nullptr;
+                if (interfaceGetActiveItem(&weapon) != -1 && weapon != nullptr
+                    && itemGetType(weapon) == ITEM_TYPE_WEAPON) {
+                    char cmd[32];
+                    snprintf(cmd, sizeof(cmd), "reload %d", interfaceGetCurrentHand());
+                    conn.sendLine(cmd);
+                }
+            }
+            break;
+        }
+
         // Weapon interface-bar controls, in OR out of combat (vanilla lets you set these
         // anytime): 'N' / right-click the weapon slot cycles the active hand's attack
         // mode (primary→aimed→secondary→burst; e.g. punch↔kick is the two empty hands),
@@ -2159,7 +2202,8 @@ static int mainClientViewer(const char* connectSpec)
             char reviveLine[96]; // a copy: the log wraps by writing into its argument
             snprintf(reviveLine, sizeof(reviveLine), "%s", "You cannot get up on your own. A teammate has to revive you.");
             displayMonitorAddMessage(reviveLine);
-        } else if (keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P) {
+        } else if (keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P
+            || keyCode == KEY_UPPERCASE_Z || keyCode == KEY_LOWERCASE_Z) {
             // 'P' → the pipboy. Owner-reported as a dead button: this dispatch is the
             // viewer's OWN and deliberately never calls gameHandleKey, so until now there
             // was no 'P' branch — and the interface bar's PIP button is registered with
@@ -2185,7 +2229,8 @@ static int mainClientViewer(const char* connectSpec)
                 showDialogBox(title, nullptr, 0, 192, 116, _colorTable[32328], nullptr, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(PIPBOY_OPEN_INTENT_UNSPECIFIED);
+                pipboyOpen(keyCode == KEY_UPPERCASE_Z || keyCode == KEY_LOWERCASE_Z
+                    ? PIPBOY_OPEN_INTENT_REST : PIPBOY_OPEN_INTENT_UNSPECIFIED);
                 // Uniform with 'I'/'C'/'S': reap deferred frees, let the main loop drain a
                 // blob that buffered while the screen blocked.
                 clientViewerFlushDeferredItemFrees();

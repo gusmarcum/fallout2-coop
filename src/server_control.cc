@@ -3219,7 +3219,12 @@ void serverControlLine(int sessionId, const char* line)
             serverControlSupersedePending(sessionId, "a fresh action");
             reg_anim_clear(gDude); // and stops any in-flight approach walk
             Rect rect;
-            objectRotateClockwise(gDude, &rect);
+            // Keep bare `rot` clockwise for existing clients.
+            if (n >= 2 && arg == -1) {
+                objectRotateCounterClockwise(gDude, &rect);
+            } else {
+                objectRotateClockwise(gDude, &rect);
+            }
             fprintf(stderr, "f2_server: control rot\n");
             return;
         }

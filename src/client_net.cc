@@ -249,7 +249,7 @@ unsigned int crc32Of(const unsigned char* data, int length)
 static const int kViewerModalMask = GameMode::kInventory | GameMode::kSkilldex
     | GameMode::kEditor | GameMode::kPipboy | GameMode::kLoot | GameMode::kUseOn
     | GameMode::kDialog | GameMode::kWorldmap | GameMode::kBarter
-    | GameMode::kPreferences | GameMode::kAutomap;
+    | GameMode::kPreferences | GameMode::kAutomap | GameMode::kHelp;
 
 // ─── Combat outlines on the wire viewer (COMBAT_CLIENT_DESIGN #8) ────────────
 // Vanilla draws colored critter outlines in combat (red=hostile / green=friendly by
@@ -6131,7 +6131,7 @@ static void showPendingYesNoPrompt()
 // them. A fight that STARTS while one is open still closes it; one opened DURING the
 // fight stays until the player closes it (bugs/035).
 static const int kViewerFreeInCombatMask = GameMode::kEditor | GameMode::kPreferences
-    | GameMode::kSkilldex;
+    | GameMode::kSkilldex | GameMode::kHelp;
 
 // Whether the ticker's last call saw the viewer in combat, and whether the fight began
 // while the screen that is open now was already up. Both are updated at the top of

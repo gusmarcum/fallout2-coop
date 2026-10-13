@@ -644,7 +644,7 @@ void inventoryOpen()
         inventoryFrames++;
 
         // SFALL: Close with 'I'.
-        if (keyCode == KEY_ESCAPE || keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I) {
+        if (keyCode == KEY_ESCAPE || keyCode == KEY_RETURN || keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I) {
             if (clientViewerActive()) debugPrint("inventory: closed by key %d after %d frames\n", keyCode, inventoryFrames);
             break;
         }
