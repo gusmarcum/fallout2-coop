@@ -986,30 +986,17 @@ int _proto_dude_update_gender()
     return 0;
 }
 
-// Re-derive the co-op EXTRA player actors' native (unarmored) look — the N-actor
-// generalization of the gDude tail of _proto_dude_update_gender above. The
-// vault-suit look is a WORLD fact (the single MOVIE_VSUIT flag: everyone who left
-// the Temple wears the suit), but the base-art FID is gender-specific, so each
-// extra re-derives from its OWN gender against its OWN sheet proto row
-// (playerActorSheetPid). Vanilla's derive re-fids gDude alone, which is why only
-// the host got the suit ([[vault-suit-appearance-gap]]).
-//
-// This is a DERIVE, not a one-time event: idempotent (same flag + gender + armor
-// state -> same fid), so it is driven from serverEmitBaseline — the one choke
-// every map switch / load / restart / join / reconnect funnels through — and a
-// body always re-materializes with the correct look no matter which of those
-// rebuilt it. Server-authoritative by construction (serverEmitBaseline is
-// server-only) and golden-inert: the headless probe registers no extras, so the
-// loop is empty and every golden stays byte-identical.
-//
-// Deliberately leaves the _art_vault_guy_num GLOBAL alone (it stays the host's):
-// the mixed-skin / script-refid / inventory-refid reads of that global are a
-// separate, still-open facet of the same bug, banked not fixed here.
+// Re-derive every registered player's native look before baseline serialization.
+// Map scripts can run with gDude scoped to the transition initiator, so the
+// vanilla gender update does not necessarily update slot 0. Include the host
+// explicitly instead of assuming its appearance is already current.
+// Each actor uses its own gender and armor; dead actors retain their corpse art.
+// Leave the UI's _art_vault_guy_num global untouched.
 void protoPlayerActorsUpdateLook()
 {
     int nativeLook = gameMovieIsSeen(MOVIE_VSUIT) ? DUDE_NATIVE_LOOK_JUMPSUIT : DUDE_NATIVE_LOOK_TRIBAL;
 
-    for (int slot = 1; slot < playerActorCount(); slot++) {
+    for (int slot = 0; slot < playerActorCount(); slot++) {
         Object* actor = playerActorAt(slot);
         if (actor == nullptr) {
             continue;

@@ -137,8 +137,8 @@ int objectDataRead(Object* obj, File* stream);
 int objectDataWrite(Object* obj, File* stream);
 int _proto_update_init(Object* obj);
 int _proto_dude_update_gender();
-// Co-op: re-derive the EXTRA player actors' native (unarmored) vault-suit look —
-// the N-actor generalization of the gDude tail of _proto_dude_update_gender.
+// Co-op: re-derive all registered players' native (unarmored) vault-suit look,
+// including slot 0 regardless of which actor is currently scoped as gDude.
 // Idempotent derive from (MOVIE_VSUIT world flag, per-actor gender, armor state);
 // drive it from the baseline choke so every rebuild carries the right fid.
 void protoPlayerActorsUpdateLook();
