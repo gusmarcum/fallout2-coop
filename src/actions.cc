@@ -20,6 +20,7 @@
 #include "game_sound.h"
 #include "geometry.h"
 #include "interface.h"
+#include "inventory.h"
 #include "item.h"
 #include "map.h"
 #include "memory.h"
@@ -1014,6 +1015,12 @@ int _action_ranged(Attack* attack, int anim)
                     // bullets, where the tail never reads it.
                     if (anim == ANIM_THROW_ANIM) {
                         weaponFid = weapon->fid;
+                        // Consumption happens later on the state arm. Preview its
+                        // replacement now so the recorded tail draws the next weapon
+                        // instead of leaving the viewer empty-handed.
+                        if (presRecordActive()) {
+                            replacedWeapon = itemReplacementAfterUse(attack->attacker, weapon);
+                        }
                     }
                     objectCreateWithFidPid(&projectile, projectileProto->fid, -1);
 
@@ -1317,6 +1324,13 @@ void actionThrowConsumeHeadless(Attack* attack)
     itemRemove(attack->attacker, weapon, 1);
     itemReplace(attack->attacker, weapon, weaponFlags & OBJECT_IN_ANY_HAND);
     _cAIPrepWeaponItem(attack->attacker, weapon);
+
+    // The server has no throw-animation tail to clear the old weapon pose.
+    // Match the remaining equipped items now, including NPCs, so a later wield
+    // does not record a put-away for a weapon that has already been thrown.
+    if (serverDedicatedActive() && !critterIsDead(attack->attacker)) {
+        invenRederiveWeaponFid(attack->attacker);
+    }
 
     // itemRemove detaches `weapon` (owner cleared) but does NOT free it — reconnect it to
     // the world (spear) or destroy it (grenade), else it orphans.

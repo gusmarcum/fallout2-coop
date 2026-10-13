@@ -1118,6 +1118,54 @@ int itemIsQueued(Object* obj)
 }
 
 // 0x478154
+// Match itemRemove + itemReplace without mutating the authoritative inventory.
+Object* itemReplacementAfterUse(Object* owner, Object* item)
+{
+    if (owner == nullptr || item == nullptr) {
+        return nullptr;
+    }
+
+    Object consumed = *item;
+    consumed.flags &= ~OBJECT_EQUIPPED;
+    Inventory* inventory = &owner->data.inventory;
+    for (int index = 0; index < inventory->length; index++) {
+        InventoryItem* entry = &inventory->items[index];
+        Object candidate = *entry->item;
+        if (entry->item == item) {
+            if (entry->quantity <= 1) {
+                continue;
+            }
+            // itemRemove copies the remaining stack BEFORE clearing the thrown
+            // item's equip flags. That copy remains in hand even if itemReplace
+            // finds nothing, so the recorded throw must still draw its weapon.
+            if ((candidate.flags & OBJECT_IN_ANY_HAND) != 0) {
+                return entry->item;
+            }
+        }
+        if (_item_identical(&candidate, &consumed)) {
+            return entry->item;
+        }
+        // A previous stack split can leave another inventory entry equipped
+        // in the same hand. itemReplace rejects equipped entries, but that
+        // surviving entry still supplies the server's weapon pose. Include it
+        // in the recorded tail, comparing copies without changing equip flags.
+        if (entry->item != item
+            && (candidate.flags & item->flags & OBJECT_IN_ANY_HAND) != 0) {
+            candidate.flags &= ~OBJECT_EQUIPPED;
+            if (_item_identical(&candidate, &consumed)) {
+                return entry->item;
+            }
+        }
+        if (itemGetType(entry->item) == ITEM_TYPE_CONTAINER) {
+            Object* replacement = itemReplacementAfterUse(entry->item, item);
+            if (replacement != nullptr) {
+                return replacement;
+            }
+        }
+    }
+    return nullptr;
+}
+
 Object* itemReplace(Object* owner, Object* itemToReplace, int flags)
 {
     if (owner == nullptr) {

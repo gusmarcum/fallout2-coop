@@ -4072,8 +4072,11 @@ private:
                         // the take-out mid-draw → the wield is never seen), and (2) the held
                         // armed-fid OBJECT_DELTA resolves when the draw completes (not on the
                         // 5 s reserve-stall backstop). The generic recorded-seq path doesn't
-                        // promote to Active on its own. 0 = generic replay cap (a draw is <1 s).
-                        clientCombatAnimMarkActive(o, 0);
+                        // promote to Active on its own. The cap covers the WHOLE
+                        // sequence, including a preceding throw or put-away, not
+                        // just the draw. Keep a bounded fallback without cutting
+                        // off the replacement weapon's take-out after two seconds.
+                        clientCombatAnimMarkActive(o, kMoveReplayCapMs);
                     }
                 } else {
                     reserveSeqRef(ref);
