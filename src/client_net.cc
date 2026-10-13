@@ -67,6 +67,7 @@
 #include "skill.h" // skillsPlayerActorSeed — per-actor sheet rows
 #include "trait.h" // traitsPlayerActorSeed — per-actor sheet rows
 #include "text_object.h" // floating combat text (§3.e S2)
+#include "svga.h" // screenGetWidth / screenGetVisibleHeight: is the local actor on the screen
 #include "tile.h" // tileWindowRefreshRect (float-text redraw)
 #include "wire_defs.h" // kWireVersion / kWirePreambleLen / kNoSessionId
 
@@ -1649,6 +1650,34 @@ private:
     // Point gDude at the actor this session owns (MP_PROPOSAL.md Ch 5.6). A
     // session with no roster row is a SPECTATOR: gDude stays the host actor and
     // it renders P1's view, which is exactly what extra viewers do today.
+    // ►► THE CAMERA GOES TO THIS VIEWER'S OWN CHARACTER (GitHub issue 47, pull request
+    // 74). After a load or a rebind the view was left where the save or the host had it.
+    //
+    // Scrolled there a tile at a time, the way the Home key does it, so that it stops at
+    // the map's scroll blockers: a character can stand beyond them (by an exit grid), and
+    // a camera jumped out there cannot be scrolled back in. If that scroll stops so short
+    // that the character is not even on the screen (something lay in the straight line),
+    // the jump is the lesser evil, and it is what this code did before for a joiner.
+    void centerOnLocalActor()
+    {
+        if (gDude == nullptr || gDude->tile < 0) {
+            return;
+        }
+        if (gDude->elevation != gElevation) {
+            mapSetElevation(gDude->elevation);
+        }
+        _tile_scroll_to(gDude->tile, 0x02);
+        int x = 0;
+        int y = 0;
+        tileToScreenXY(gDude->tile, &x, &y, gElevation);
+        bool inView = x >= 0 && x < screenGetWidth() && y >= 0 && y < screenGetVisibleHeight();
+        if (!inView) {
+            tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW);
+        }
+        debugPrint("client_net: camera brought to the local actor (tile %d, centre %d, %s)\n",
+            gDude->tile, gCenterTile, inView ? "scrolled" : "jumped: the scroll stopped short");
+    }
+
     void rebindLocalActor()
     {
         if (!clientViewerActive() || gClientHostDude == nullptr) {
@@ -1754,15 +1783,7 @@ private:
 
         // The camera and the render elevation belong to MY actor, not the host's
         // — without this a rebound viewer keeps looking at P1.
-        if (gDude != nullptr) {
-            if (gDude->elevation != gElevation) {
-                mapSetElevation(gDude->elevation);
-            }
-            // Follow the existing Home-key camera path: a direct jump can
-            // land beyond a map's scroll-blocker boundary and trap the view
-            // on its outer side. Stop at the first blocked intermediate tile.
-            _tile_scroll_to(gDude->tile, 0x02);
-        }
+        centerOnLocalActor();
 
         debugPrint("client_net: session %d bound to actor netId %d\n", _mySessionId,
             gDude != nullptr ? gDude->netId : 0);
@@ -1974,14 +1995,8 @@ private:
         // A reload can keep the same local actor (especially slot 0), in which
         // case rebindLocalActor returns without updating the camera. Center once
         // the new world and local actor are available, just like the Home key.
-        if (clientViewerActive() && gDude != nullptr && gDude->tile >= 0) {
-            if (gDude->elevation != gElevation) {
-                mapSetElevation(gDude->elevation);
-            }
-            // Follow the existing Home-key camera path: a direct jump can
-            // land beyond a map's scroll-blocker boundary and trap the view
-            // on its outer side. Stop at the first blocked intermediate tile.
-            _tile_scroll_to(gDude->tile, 0x02);
+        if (clientViewerActive()) {
+            centerOnLocalActor();
         }
 
         _loaded = true;
