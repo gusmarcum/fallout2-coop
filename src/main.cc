@@ -739,8 +739,12 @@ static const unsigned int kViewerLootApproachTimeoutMs = 16000;
 
 static void viewerArmPendingLoot(ClientConnection& conn, int netId)
 {
-    // One request per pending open; repeated input must not charge AP twice.
-    if (gViewerPendingLootNetId == netId) {
+    // One request per click: a second click on the same container while the first
+    // request is still on its way must not send it again (a double click in a fight was
+    // charged twice). "On its way" is a second, not the whole approach: a request the
+    // server refuses (not this player's turn, too few action points) is never granted,
+    // and for the sixteen seconds the pending open lives the player could not ask again.
+    if (gViewerPendingLootNetId == netId && getTicksSince(gViewerPendingLootSince) < 1000) {
         return;
     }
     char cmd[32];
