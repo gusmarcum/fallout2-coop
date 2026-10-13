@@ -971,7 +971,9 @@ int _proto_dude_update_gender()
 
     _art_vault_guy_num = frmId;
 
-    if (critterGetArmor(gDude) == nullptr) {
+    // Keep the world corpse art; the native look and prototype still update
+    // for the inventory paper doll and future resurrection.
+    if (!critterIsDead(gDude) && critterGetArmor(gDude) == nullptr) {
         int v1 = 0;
         if (critterGetItem2(gDude) != nullptr || critterGetItem1(gDude) != nullptr) {
             v1 = (gDude->fid & 0xF000) >> 12;

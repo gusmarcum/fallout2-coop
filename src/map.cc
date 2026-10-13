@@ -1766,7 +1766,8 @@ static void _map_place_dude_and_mouse()
     _obj_clear_seen();
 
     if (gDude != nullptr) {
-        if (FID_ANIM_TYPE(gDude->fid) != ANIM_STAND) {
+        // Map entry must not replace a dead player's corpse art with a standing pose.
+        if (!critterIsDead(gDude) && FID_ANIM_TYPE(gDude->fid) != ANIM_STAND) {
             objectSetFrame(gDude, 0, nullptr);
             gDude->fid = buildFid(OBJ_TYPE_CRITTER, gDude->fid & 0xFFF, ANIM_STAND, (gDude->fid & 0xF000) >> 12, gDude->rotation + 1);
         }
@@ -1776,10 +1777,12 @@ static void _map_place_dude_and_mouse()
             objectSetRotation(gDude, gMapHeader.enteringRotation, nullptr);
         }
 
-        objectSetLight(gDude, 4, 0x10000, nullptr);
         gDude->flags |= OBJECT_NO_SAVE;
 
-        _dude_stand(gDude, gDude->rotation, gDude->fid);
+        if (!critterIsDead(gDude)) {
+            objectSetLight(gDude, 4, 0x10000, nullptr);
+            _dude_stand(gDude, gDude->rotation, gDude->fid);
+        }
         // The companions are placed BELOW, after every other player is standing on
         // this map: each goes beside its own player, and beside a player who still
         // held a tile number from the map just left it landed twenty hexes off, or
@@ -1822,7 +1825,7 @@ static void _map_place_dude_and_mouse()
             continue;
         }
 
-        if (FID_ANIM_TYPE(actor->fid) != ANIM_STAND) {
+        if (!critterIsDead(actor) && FID_ANIM_TYPE(actor->fid) != ANIM_STAND) {
             objectSetFrame(actor, 0, nullptr);
             actor->fid = buildFid(OBJ_TYPE_CRITTER, actor->fid & 0xFFF, ANIM_STAND, (actor->fid & 0xF000) >> 12, actor->rotation + 1);
         }
@@ -1831,9 +1834,12 @@ static void _map_place_dude_and_mouse()
         objectSetLocation(actor, tile != -1 ? tile : gDude->tile, gDude->elevation, nullptr);
         objectSetRotation(actor, gMapHeader.enteringRotation, nullptr);
 
-        objectSetLight(actor, 4, 0x10000, nullptr);
         actor->flags |= OBJECT_NO_SAVE;
-        _dude_stand(actor, actor->rotation, actor->fid);
+        // Preserve the corpse frame and the light disabled by critterKill.
+        if (!critterIsDead(actor)) {
+            objectSetLight(actor, 4, 0x10000, nullptr);
+            _dude_stand(actor, actor->rotation, actor->fid);
+        }
     }
 
     if (gDude != nullptr) {
