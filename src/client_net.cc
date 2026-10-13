@@ -2443,6 +2443,28 @@ private:
             // Unlink from the owning inventory FIRST, so the object is only ever in
             // one place. Doing it here also covers a stale/re-minted netId that
             // happens to resolve to a carried item.
+            // Equipped items are parked outside gDude's inventory while a modal
+            // is open. CONNECT transfers this exact object to the ground, so clear
+            // its parked slots before the next reconcile can reattach it and then
+            // remove/free it as absent from the server's inventory.
+            bool droppedEquipment = false;
+            if (gInventoryLeftHandItem == obj) {
+                gInventoryLeftHandItem = nullptr;
+                droppedEquipment = true;
+            }
+            if (gInventoryRightHandItem == obj) {
+                gInventoryRightHandItem = nullptr;
+                droppedEquipment = true;
+            }
+            if (gInventoryArmor == obj) {
+                gInventoryArmor = nullptr;
+                droppedEquipment = true;
+            }
+            if (droppedEquipment) {
+                obj->flags &= ~OBJECT_EQUIPPED;
+                obj->owner = nullptr;
+                gDudeInvDirty = true;
+            }
             unlinkFromAnyInventory(obj);
             // ►► REPAINT THE ARRIVAL TILE, for the same reason onDisconnect repaints the
             // vacated one: _obj_connect only links the object into the tile list, it draws
