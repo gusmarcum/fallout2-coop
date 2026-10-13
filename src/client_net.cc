@@ -3540,22 +3540,13 @@ private:
             // free-roam motion before establishing combat chrome, exactly as enter does.
             presStandDownAll();
         }
-        // Apply the new turn's AP only after earlier presentation
-        // events and movement have finished.
-        if (!_presQueue.empty()
-            || clientCombatAnimActive()
-            || clientAnimAnyPlayableActive()) {
-            PresEvent e;
-            e.kind = PresKind::kTurnStart;
-            e.tsNetId = netId;
-            e.tsIsPlayer = isPlayer;
-            e.tsAp = ap;
-            e.tsDeadline = deadline;
-            e.tsFreeMove = freeMove;
-            enqueue(e);
-        } else {
-            applyTurnStart(netId, isPlayer, ap, deadline, freeMove);
-        }
+        // Applied as it arrives, never queued behind what is still being shown (the
+        // comment above says why; a turn start waiting on the queue is also lost to a
+        // rebaseline that empties the queue in the middle of a fight, and the player
+        // then sits out a turn the server is holding for them). The Bonus Move dots do
+        // not need the wait: what used to eat them was other critters' replayed steps
+        // spending this player's budget, and those no longer do (animation.cc).
+        applyTurnStart(netId, isPlayer, ap, deadline, freeMove);
     }
 
     // Apply TURN_START: flip _myTurn and paint the AP dots / lights. Run by
@@ -3618,6 +3609,9 @@ private:
             interfaceBarEndButtonsRenderGreenLights();
         } else {
             gCombatState &= ~COMBAT_STATE_0x02; // another actor's turn
+            // The Bonus Move budget is this player's, for this player's turn: what was
+            // left of it goes when the turn does, as in the original.
+            _combat_free_move = 0;
             interfaceRenderActionPoints(-1, -1); // all dots red — not your turn
             interfaceBarEndButtonsRenderRedLights();
         }

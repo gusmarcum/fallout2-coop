@@ -4078,8 +4078,12 @@ static CombatPlayerPhase combatSessionPlayerTurnBegin(CombatSession& s, Object* 
 {
     _combat_turn_obj = obj;
 
-    // Initialize Bonus Move before TURN_START sends it to the client.
-    _combat_free_move = 2 * perkGetRank(obj, PERK_BONUS_MOVE);
+    // The Bonus Move budget of the turn that is starting, set BEFORE the turn start is
+    // sent: that message carries it to the players, and it used to go out first with
+    // what the last turn had left, which is nothing (GitHub issue 58: no yellow dots).
+    // A turn that is about to be skipped has no budget, as before.
+    bool skipped = (obj->data.critter.combat.results & (DAM_KNOCKED_OUT | DAM_DEAD | DAM_LOSE_TURN)) != 0;
+    _combat_free_move = skipped ? 0 : 2 * perkGetRank(obj, PERK_BONUS_MOVE);
 
     // isPlayer=true is right for every actor here by construction — the barrier is
     // only entered for registry members. Each viewer decides "is it MY turn" by
@@ -4089,7 +4093,7 @@ static CombatPlayerPhase combatSessionPlayerTurnBegin(CombatSession& s, Object* 
 
     attackInit(&_main_ctd, obj, nullptr, HIT_MODE_PUNCH, HIT_LOCATION_TORSO);
 
-    if ((obj->data.critter.combat.results & (DAM_KNOCKED_OUT | DAM_DEAD | DAM_LOSE_TURN)) != 0) {
+    if (skipped) {
         obj->data.critter.combat.results &= ~DAM_LOSE_TURN;
         return CombatPlayerPhase::kFinalizeNoRun;
     }
