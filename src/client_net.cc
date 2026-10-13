@@ -863,7 +863,7 @@ public:
             // Glide ended — reconcile the bar to the authoritative AP.
             if (_dudeApShown != _dudeApAuth) {
                 _dudeApShown = _dudeApAuth;
-                interfaceRenderActionPoints(_dudeApShown, 0);
+                interfaceRenderActionPoints(_dudeApShown, _combat_free_move);
                 interfaceBarRefresh();
             }
             _dudeApDeferring = false;
@@ -877,7 +877,7 @@ public:
             }
             if (shown != _dudeApShown) {
                 _dudeApShown = shown;
-                interfaceRenderActionPoints(_dudeApShown, 0);
+                interfaceRenderActionPoints(_dudeApShown, _combat_free_move);
                 interfaceBarRefresh();
             }
         }
@@ -3185,11 +3185,11 @@ private:
                 if (obj->data.critter.combat.ap < prevAp && clientAnimActiveFor(gDude)) {
                     _dudeApDeferring = true;
                     _dudeApMoveHops = clientAnimHopsRemaining(gDude);
-                    interfaceRenderActionPoints(_dudeApShown, 0); // unchanged (pre-move)
+                    interfaceRenderActionPoints(_dudeApShown, _combat_free_move); // unchanged (pre-move)
                 } else {
                     _dudeApShown = obj->data.critter.combat.ap;
                     _dudeApDeferring = false;
-                    interfaceRenderActionPoints(_dudeApShown, 0);
+                    interfaceRenderActionPoints(_dudeApShown, _combat_free_move);
                 }
                 touched = true;
             }
@@ -3522,7 +3522,22 @@ private:
             // free-roam motion before establishing combat chrome, exactly as enter does.
             presStandDownAll();
         }
-        applyTurnStart(netId, isPlayer, ap, deadline, freeMove);
+        // Apply the new turn's AP only after earlier presentation
+        // events and movement have finished.
+        if (!_presQueue.empty()
+            || clientCombatAnimActive()
+            || clientAnimAnyPlayableActive()) {
+            PresEvent e;
+            e.kind = PresKind::kTurnStart;
+            e.tsNetId = netId;
+            e.tsIsPlayer = isPlayer;
+            e.tsAp = ap;
+            e.tsDeadline = deadline;
+            e.tsFreeMove = freeMove;
+            enqueue(e);
+        } else {
+            applyTurnStart(netId, isPlayer, ap, deadline, freeMove);
+        }
     }
 
     // Apply TURN_START: flip _myTurn and paint the AP dots / lights. Run by

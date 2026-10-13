@@ -4078,6 +4078,9 @@ static CombatPlayerPhase combatSessionPlayerTurnBegin(CombatSession& s, Object* 
 {
     _combat_turn_obj = obj;
 
+    // Initialize Bonus Move before TURN_START sends it to the client.
+    _combat_free_move = 2 * perkGetRank(obj, PERK_BONUS_MOVE);
+
     // isPlayer=true is right for every actor here by construction — the barrier is
     // only entered for registry members. Each viewer decides "is it MY turn" by
     // matching the netId against its own actor, so the other players' clients read
@@ -4093,7 +4096,6 @@ static CombatPlayerPhase combatSessionPlayerTurnBegin(CombatSession& s, Object* 
 
     keyboardReset();
     presenter()->hudArmorClass(true);
-    _combat_free_move = 2 * perkGetRank(obj, PERK_BONUS_MOVE);
     presenter()->hudActionPoints(obj->data.critter.combat.ap, _combat_free_move);
 
     bool scriptOverrides = false;
