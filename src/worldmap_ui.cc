@@ -200,6 +200,9 @@ static int wmWorldMapFunc(int a1)
         return -1;
     }
 
+    // Open at the current party position instead of the last scrolled view.
+    // Initialization (including its network pumping) has completed at this point.
+    wmInterfaceCenterOnParty();
     wmFadeIn();
 
     wmMatchWorldPosToArea(wmGenData.worldPosX, wmGenData.worldPosY, &(wmGenData.currentAreaId));
@@ -257,12 +260,9 @@ static int wmWorldMapFunc(int a1)
             // event happens to force a repaint.
             if (gWorldmapStateDirty) {
                 gWorldmapStateDirty = false;
-                if (wmGenData.isWalking) {
-                    // Follow the party while travelling. Vanilla gets this from
-                    // wmInterfaceScrollPixel inside wmPartyWalkingStep, which is
-                    // suppressed server-side (it is pure chrome).
-                    wmInterfaceCenterOnParty();
-                }
+                // Position updates repaint the marker without changing the
+                // viewer's scroll position. Centering belongs to map opening
+                // and the player's explicit Home command.
                 wmInterfaceRefresh();
             }
         } else if (wmGenData.isWalking) {
