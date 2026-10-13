@@ -2896,6 +2896,14 @@ void serverControlLine(int sessionId, const char* line)
     if (strcmp(verb, "sneak") == 0) {
         dudeToggleState(DUDE_STATE_SNEAKING, actor);
         bool sneaking = dudeHasState(DUDE_STATE_SNEAKING, actor);
+        // A run already in flight bypasses the run-registration sneak check.
+        // Stop the current free-roam approach when entering sneak, unless the
+        // actor can legitimately sneak while running with Silent Running.
+        if (sneaking && !isInCombat() && !perkGetRank(actor, PERK_SILENT_RUNNING)) {
+            serverControlSupersedePending(sessionId, "sneak enabled");
+            gMoveRetries.erase(actor);
+            reg_anim_clear(actor);
+        }
         fprintf(stderr, "f2_server: control sneak=%d (session %d)\n", sneaking ? 1 : 0, sessionId);
         return;
     }
