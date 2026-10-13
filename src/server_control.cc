@@ -768,6 +768,11 @@ static int interactionGestureAnim(int verb, Object* target)
 // server-only presenter event — no-op on the headless/golden path.
 static void interactionEmitGesture(int verb, Object* actor, Object* target)
 {
+    // Combat GET already records the complete approach and pickup in actionPickUp.
+    // A separate player-only gesture would replay the same crouch twice.
+    if (verb == kInteractGet && isInCombat() && presRecordEnabled()) {
+        return;
+    }
     int anim = interactionGestureAnim(verb, target);
     if (anim < 0) {
         return;

@@ -739,6 +739,10 @@ static const unsigned int kViewerLootApproachTimeoutMs = 16000;
 
 static void viewerArmPendingLoot(ClientConnection& conn, int netId)
 {
+    // One request per pending open; repeated input must not charge AP twice.
+    if (gViewerPendingLootNetId == netId) {
+        return;
+    }
     char cmd[32];
     snprintf(cmd, sizeof(cmd), "loot %d", netId);
     conn.sendLine(cmd);
@@ -779,7 +783,8 @@ static void viewerPollPendingLoot(ClientConnection& conn)
         gViewerPendingLootNetId = 0;
         return;
     }
-    if (granted != 0 || objectGetDistanceBetween(gDude, container) <= 1) {
+    // Adjacency alone can open once before the grant, then again on its arrival.
+    if (granted != 0) {
         gViewerPendingLootNetId = 0;
         // The client's belief at the moment it decides to open the screen, to be read
         // against the server's "not adjacent" line (server_control.cc). If the tiles
