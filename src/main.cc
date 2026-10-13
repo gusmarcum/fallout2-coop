@@ -1933,6 +1933,11 @@ static int mainClientViewer(const char* connectSpec)
         case KEY_PLUS:
             gameHandleKey(keyCode, conn.inCombat());
             clientViewerFlushDeferredItemFrees();
+            if ((keyCode == KEY_LOWERCASE_M || keyCode == KEY_UPPERCASE_M) && conn.inCombat()) {
+                // The cursor mode decides which critters are outlined in a fight, so
+                // they are worked out again, as after the right-click that cycles it.
+                conn.recomputeCombatOutlines();
+            }
             break;
         case KEY_COMMA:
         case KEY_LESS:
