@@ -24,6 +24,7 @@
 #include "game_movie.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "input.h" // getTicks / getTicksBetween — how long a script's anim() is on screen (issue 55)
 #include "interface.h"
 #include "inventory.h" // invenActiveHandFor — the active hand every hand-reading opcode asks for
 #include "item.h"
@@ -1500,6 +1501,55 @@ static void scriptGestureRecordShip(bool recording, Object* actor)
                 actor->netId, actor->pid, presRecordOpCount());
         }
         presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), actor->netId);
+    }
+}
+
+// ►► ONE anim() AT A TIME ON A CRITTER (GitHub issue 55, bugs/079).
+//
+// The real engine refuses to register an animation on a critter that is still inside
+// another sequence (_check_registry), and scripts lean on that. The Temple's spear traps
+// call anim(source_obj, dodge) once for every hex the spear flies, seven to ten times in
+// one run of the script, and in the real engine the player flinches once. On the server
+// an animation is nothing, so a critter is never "still inside" one, and since bugs/074
+// every one of those calls was recorded and sent: a viewer queued them all behind each
+// other and its player stood through ten dodges in a row.
+//
+// So the server remembers, per critter, until when the last anim() it sent is on the
+// players' screens (the recorder's own figure for it), and sends no other anim() for that
+// critter before then. What the opcode does to the critter's state is applied every time,
+// as it always was: only the showing is refused, which is all the real engine refuses.
+struct ScriptAnimShown {
+    int netId;
+    unsigned int at;
+    unsigned int durationMs;
+};
+static std::vector<ScriptAnimShown> gScriptAnimShown;
+
+static bool scriptAnimStillShown(Object* object)
+{
+    if (gScriptAnimShown.empty()) {
+        return false;
+    }
+    unsigned int now = getTicks();
+    bool shown = false;
+    for (size_t index = 0; index < gScriptAnimShown.size();) {
+        const ScriptAnimShown& entry = gScriptAnimShown[index];
+        if (getTicksBetween(now, entry.at) >= entry.durationMs) {
+            gScriptAnimShown.erase(gScriptAnimShown.begin() + index);
+            continue;
+        }
+        if (entry.netId == object->netId) {
+            shown = true;
+        }
+        index++;
+    }
+    return shown;
+}
+
+static void scriptAnimNoteShown(Object* object, int durationMs)
+{
+    if (durationMs > 0) {
+        gScriptAnimShown.push_back(ScriptAnimShown { object->netId, getTicks(), (unsigned int)durationMs });
     }
 }
 
@@ -3752,7 +3802,15 @@ static void opAnim(Program* program)
         // once. The same ops, registered once more into a record section, are what a
         // viewer plays through its own engine, ending in the art the server now holds
         // (obj->fid). A Den orphan raising its hands at a pocket is this opcode.
-        if (scriptGestureRecordBegin(obj)) {
+        //
+        // One at a time: a second anim() on a critter whose last one is still being
+        // shown is not sent (scriptAnimStillShown, GitHub issue 55).
+        if (scriptAnimStillShown(obj)) {
+            if (getenv("F2_TRACE_EVENTS") != nullptr) {
+                fprintf(stderr, "[gesture] net=%d pid=0x%X: anim %d not sent, its last one is still being shown\n",
+                    obj->netId, obj->pid, anim);
+            }
+        } else if (scriptGestureRecordBegin(obj)) {
             reg_anim_begin(ANIMATION_REQUEST_UNRESERVED);
             if (frame == 0) {
                 animationRegisterAnimate(obj, anim, 0);
@@ -3765,6 +3823,7 @@ static void opAnim(Program* program)
             }
             reg_anim_end();
             scriptGestureRecordShip(true, obj);
+            scriptAnimNoteShown(obj, presRecordCostMs());
         }
     } else if (anim == 1000) {
         if (frame < ROTATION_COUNT) {

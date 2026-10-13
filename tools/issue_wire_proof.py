@@ -84,12 +84,17 @@ so no game window is needed.
             the corpse given a lying art in its blood (the server recorded no blood for a
             critter killed while down, and left its corpse in its standing art).
 
+  trap      issue 55. The host walks onto the first spear trap of the Temple of Trials.
+            Its script asks for the walker's dodge (or flinch) once for every hex the
+            spear flies; the players must be sent it once, as the real engine plays it
+            once (v1.4.2 sent every one, and the walker dodged ten times in a row).
+
 --expect-defect inverts the checks of the fix, to show each defect on an older build.
 
 Nothing here touches a live world: point it at a sandbox. Each mode empties the sandbox's
 save slots and working maps first.
 
-usage: python -u issue_wire_proof.py <timer|templexp|rest|cancel|create|reach|retry|lvlsfx|ownline|joinfreeze|entryring|sneakrun|hostplace|companions|dogs|rocks|armoroff|bess|bunload|gestures|pronekill|orders|all> <f2_server.exe>
+usage: python -u issue_wire_proof.py <timer|templexp|rest|cancel|create|reach|retry|lvlsfx|ownline|joinfreeze|entryring|sneakrun|hostplace|companions|dogs|rocks|armoroff|bess|bunload|gestures|pronekill|orders|trap|all> <f2_server.exe>
                                      <game dir> <net port> <cmd port> [--expect-defect]
                                      [--no-crouch-check]
 """
@@ -1845,11 +1850,59 @@ def prove_pronekill():
     shutdown()
 
 
+ARCAVES = 3
+# The first spear trap of the Temple of Trials: the floor trigger of script ATSrTrp0, on
+# the Temple's second level. Its spear starts seven hexes away, at tile 28492, and flies
+# to the walker (a hit) or three hexes past (a miss).
+SPEAR_TRAP_TILE, SPEAR_TRAP_FLOOR, SPEAR_PID = 28499, 1, 0x05000007
+ANIM_DODGE, ANIM_HIT_FROM_FRONT, ANIM_HIT_FROM_BACK = 13, 14, 15
+
+
+def prove_trap():
+    # Issue 55: "1.4.2: In Arroyo temple, setting off a trap will force character into an
+    # uninterruptable 10+ dodge loop. It was not present in prior versions."
+    #
+    # The trap's script moves its spear one hex at a time, all in one run, and at every hex
+    # calls anim() on whoever stepped on it: a dodge if the spear is going to miss, a flinch
+    # if it hits. The real engine plays the first and refuses the rest, because the walker
+    # is still inside the first. On the server an animation is nothing, so nothing was ever
+    # "still inside" one, and since v1.4.2 (which made anim() something the players are
+    # shown) every call went out: a viewer played them one after another.
+    #
+    # The host is put on the Temple's second level, a hex from the trap, and walks onto it.
+    # What the wire then carries for the host is counted.
+    boot("arcaves.map")
+    host = Client("Tester")
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    host_net = net_of_slot(0)
+    at = int(re.findall(r"\[actors\] srv slot=0 obj=\S+ netId=\d+ pid=\S+ tile=(-?\d+)", logtext())[-1])
+    admin("elevate 0 %d" % SPEAR_TRAP_FLOOR, 2.0)
+    admin("warp %d" % (SPEAR_TRAP_TILE + 1 - at), 1.5)
+    seen = len(host.events(EVENT_PRES_SEQ))
+    mark = len(logtext())
+    host.send("mv %d 0" % SPEAR_TRAP_TILE, 8.0)
+    text = logtext()[mark:]
+    spears = re.findall(r"\[evt\] SPAWN\s+net=\d+ pid=%d\b" % SPEAR_PID, text)
+    reactions = [anim for body in host.events(EVENT_PRES_SEQ)[seen:] for ref, anim in sequence_animations(body)
+                 if ref == host_net and anim in (ANIM_DODGE, ANIM_HIT_FROM_FRONT, ANIM_HIT_FROM_BACK)]
+    refused = len(re.findall(r"\[gesture\] net=%d pid=\S+ anim \d+ not sent" % host_net, text))
+    check("the host walked onto the Temple's first spear trap and set it off",
+          host_net is not None and len(spears) >= 1,
+          "host net %s, on tile %d before the walk; spears thrown: %d" % (host_net, SPEAR_TRAP_TILE + 1, len(spears)))
+    fixed("the walker's reaction to the spear is sent to the players once",
+          len(reactions) == 1,
+          "reactions sent for the host: %s (13 = dodge, 14 and 15 = flinch); the script's other calls, not sent: %d"
+          % (reactions, refused))
+    shutdown()
+
+
 modes = {"timer": prove_timer, "templexp": prove_templexp, "rest": prove_rest,
          "cancel": prove_cancel, "create": prove_create, "reach": prove_reach, "retry": prove_retry,
          "lvlsfx": prove_lvlsfx, "ownline": prove_ownline, "joinfreeze": prove_joinfreeze,
          "entryring": prove_entryring, "sneakrun": prove_sneakrun, "hostplace": prove_hostplace, "companions": prove_companions, "dogs": prove_dogs, "rocks": prove_rocks, "armoroff": prove_armoroff,
-         "bess": prove_bess, "bunload": prove_bunload, "gestures": prove_gestures, "pronekill": prove_pronekill, "orders": prove_orders}
+         "bess": prove_bess, "bunload": prove_bunload, "gestures": prove_gestures, "pronekill": prove_pronekill, "orders": prove_orders,
+         "trap": prove_trap}
 try:
     for name in (modes if what == "all" else [what]):
         if name not in modes:
