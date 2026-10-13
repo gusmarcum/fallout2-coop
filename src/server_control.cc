@@ -2265,6 +2265,12 @@ void serverControlLine(int sessionId, const char* line)
         return;
     }
 
+	if (serverUiLockActive()) {
+		// A scripted scene owns the simulation until it leaves the map.
+		serverControlRefuse(sessionId, "The party is occupied by a scripted scene.");
+		return;
+	}
+
     if (strcmp(verb, "platform") == 0) {
         // `platform <name>` — the client's OS, remembered per session for the join
         // greeting. One word; anything odd is just ignored.
