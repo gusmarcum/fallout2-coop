@@ -72,7 +72,9 @@ int queueRemoveEventsByType(Object* owner, int eventType);
 bool queueHasEvent(Object* owner, int eventType);
 int queueProcessEvents();
 void queueClear();
-void _queue_clear_type(int eventType, QueueEventHandler* fn);
+// A non-null owner limits both the callback and removal to that object.
+// Omitting the owner preserves the existing all-owners behavior.
+void _queue_clear_type(int eventType, QueueEventHandler* fn, Object* owner = nullptr);
 unsigned int queueGetNextEventTime();
 void _queue_leaving_map();
 bool queueIsEmpty();

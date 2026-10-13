@@ -621,7 +621,7 @@ int _critter_check_rads(Object* obj)
 
     _old_rad_level = 0;
 
-    _queue_clear_type(EVENT_TYPE_RADIATION, _get_rad_damage_level);
+    _queue_clear_type(EVENT_TYPE_RADIATION, _get_rad_damage_level, obj);
 
     // NOTE: Uninline
     int radiation = critterGetRadiation(obj);
@@ -774,7 +774,7 @@ int radiationEventProcess(Object* obj, void* data)
         // Schedule healing stats event in 7 days.
         RadiationEvent* newRadiationEvent = (RadiationEvent*)internal_malloc(sizeof(*newRadiationEvent));
         if (newRadiationEvent != nullptr) {
-            _queue_clear_type(EVENT_TYPE_RADIATION, _clear_rad_damage);
+            _queue_clear_type(EVENT_TYPE_RADIATION, _clear_rad_damage, obj);
             newRadiationEvent->radiationLevel = radiationEvent->radiationLevel;
             newRadiationEvent->isHealing = 1;
             queueAddEvent(GAME_TIME_TICKS_PER_DAY * 7, obj, newRadiationEvent, EVENT_TYPE_RADIATION);
