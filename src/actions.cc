@@ -1614,7 +1614,10 @@ int actionPickUp(Object* critter, Object* item)
     animationRegisterCallback(critter, item, (AnimationCallback*)_check_scenery_ap_cost, -1);
 
     if (canPickup) {
-        animationRegisterAnimate(critter, ANIM_MAGIC_HANDS_GROUND, 0);
+        // Recorded playback omits the server-only callbacks above. Keep an
+        // explicit barrier so the approach finishes before the pickup pose
+        // starts; otherwise both tasks advance the same object's frames.
+        animationRegisterAnimate(critter, ANIM_MAGIC_HANDS_GROUND, -1);
 
         int fid = buildFid(OBJ_TYPE_CRITTER, critter->fid & 0xFFF, ANIM_MAGIC_HANDS_GROUND, (critter->fid & 0xF000) >> 12, critter->rotation + 1);
 

@@ -4015,12 +4015,23 @@ private:
                     // target's multihex approach).
                     int heldTile = o ? clientCombatAnimHeldMoveTile(o) : -1;
                     if (o && heldTile >= 0) {
-                        if (anim == ANIM_RUNNING) animationRegisterRunToTile(o, heldTile, o->elevation, ap, delay);
-                        else animationRegisterMoveToTile(o, heldTile, o->elevation, ap, delay);
+                        // A zero-length path fails during execution and aborts the
+                        // whole sequence, including its waiting pickup animation.
+                        if (o->tile != heldTile) {
+                            if (anim == ANIM_RUNNING) animationRegisterRunToTile(o, heldTile, o->elevation, ap, delay);
+                            else animationRegisterMoveToTile(o, heldTile, o->elevation, ap, delay);
+                        }
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     } else if (o && target) {
-                        if (anim == ANIM_RUNNING) animationRegisterRunToObject(o, target, ap, delay);
-                        else animationRegisterMoveToObject(o, target, ap, delay);
+                        // Inventory reconciliation may already have disconnected
+                        // this target. With no held movement endpoint, retain the
+                        // current pose and play the remaining gesture in place.
+                        // An adjacent target also needs no approach task.
+                        if (target->tile >= 0 && target->owner == nullptr
+                            && objectGetDistanceBetween(o, target) > ((o->flags & OBJECT_MULTIHEX) != 0 ? 2 : 1)) {
+                            if (anim == ANIM_RUNNING) animationRegisterRunToObject(o, target, ap, delay);
+                            else animationRegisterMoveToObject(o, target, ap, delay);
+                        }
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     } else if (o) {
                         // No held position AND no target — nothing to walk to; the reap snaps
