@@ -84,6 +84,32 @@ so no game window is needed.
             the corpse given a lying art in its blood (the server recorded no blood for a
             critter killed while down, and left its corpse in its standing art).
 
+  orderspages  issue 22, follow-up. A companion's Combat Control menu had ten lines and
+            a conversation window shows eight: "Wear your best armor" and "Done" could
+            not be seen. It is two pages now, and each must fit the window.
+
+  healcap   issue 59. Two hurt players, both good at First Aid. The host uses up its
+            three for the day; the second player must still have three of its own,
+            and a save and a restart must keep its count.
+
+  deadentry  pull request 73. A player who is dead when the party enters a map must
+            still be a body on the ground there (it was stood up, dead).
+
+  vaultsuit  pull request 72. The second player asks for the map after the Temple;
+            the host must arrive in the vault suit too (it kept its tribal clothes).
+
+  horrigan  issue 48. After day 35 the party sets off across the world map: it must
+            be taken to the Horrigan scene's map, and be able to travel on after it
+            (the server sat on a world map that took no clicks).
+
+  cartracks  issue 53. The second player walks onto the stolen car's parking spot in
+            New Reno and answers the conversation the spot opens: the conversation
+            must end and the world run on (the answer was dropped and the server
+            waited for ever).
+
+  rotkeys   pull request 65. `rot -1` turns the character the other way, and a bare
+            `rot` still turns it clockwise.
+
   trap      issue 55. The host walks onto the first spear trap of the Temple of Trials.
             Its script asks for the walker's dodge (or flinch) once for every hex the
             spear flies; the players must be sent it once, as the real engine plays it
@@ -94,7 +120,7 @@ so no game window is needed.
 Nothing here touches a live world: point it at a sandbox. Each mode empties the sandbox's
 save slots and working maps first.
 
-usage: python -u issue_wire_proof.py <timer|templexp|rest|cancel|create|reach|retry|lvlsfx|ownline|joinfreeze|entryring|sneakrun|hostplace|companions|dogs|rocks|armoroff|bess|bunload|gestures|pronekill|orders|trap|all> <f2_server.exe>
+usage: python -u issue_wire_proof.py <timer|templexp|rest|cancel|create|reach|retry|lvlsfx|ownline|joinfreeze|entryring|sneakrun|hostplace|companions|dogs|rocks|armoroff|bess|bunload|gestures|pronekill|orders|trap|orderspages|healcap|deadentry|vaultsuit|horrigan|cartracks|rotkeys|all> <f2_server.exe>
                                      <game dir> <net port> <cmd port> [--expect-defect]
                                      [--no-crouch-check]
 """
@@ -941,12 +967,10 @@ def dialog_nodes(client):
     return nodes
 
 
-def prove_orders():
-    # Issue 22. A party member's Combat Control is a text node in co-op; it offered the
-    # disposition and the six orders, never the window's "use best weapon" and "wear best
-    # armor". A villager is made a party member, the host talks to him and presses Combat
-    # Control (`dparty`); the node must list the two new lines, and picking one must run
-    # the window's handler (the server logs it).
+def orders_open():
+    """Boot, make a spawned villager a party member, talk to him and press Combat Control.
+    Returns (the host's seat, the companion's netId, the partyadd reply, how many nodes the
+    talk had sent before Combat Control was pressed)."""
     boot("arvillag.map")
     host = Client("Tester")
     time.sleep(2.5)
@@ -962,8 +986,57 @@ def prove_orders():
     out = admin("partyadd 89", 1.0)
     host.send("talk %d" % villager, 8.0)  # walk-then-talk
     before = len(dialog_nodes(host))
-    talking = before >= 1
     host.send("dparty", 3.0)
+    return host, villager, out, before
+
+
+def prove_orderspages():
+    # Issue 22, follow-up: "'Wear your best armor' doesn't show, it may be because Fallout
+    # engine can only show 8 lines of text on one page and this would be the 9th. If I
+    # press '9', NPC actually puts the best armor on, but this option is hidden."
+    #
+    # The one-page Combat Control menu of v1.4.1 had ten lines. It is two pages now: the
+    # two one-shots, a line that opens the orders, and Done; then the preset, the six
+    # orders and Back. Every page the server sends must fit the eight lines a
+    # conversation window shows, and every line must still be reachable.
+    host, villager, out, before = orders_open()
+    nodes = dialog_nodes(host)
+    first = nodes[-1][3] if len(nodes) > before else []
+    check("a spawned companion joined the party and the host opened his Combat Control",
+          villager > 0 and "rc=0" in out and before >= 1 and len(first) >= 1,
+          "companion net %d; %s; first page %r" % (villager, out[:40], first))
+    armor = next((i for i, text in enumerate(first) if "best armor" in text.lower()), -1)
+    more = next((i for i, text in enumerate(first) if "how you fight" in text.lower()), -1)
+    fixed("the page that opens fits the window, with \"Wear your best armor\" on it",
+          1 <= len(first) <= 8 and armor >= 0, "%d lines: %r" % (len(first), first))
+    second = []
+    if more >= 0:
+        host.send("dsay %d" % more, 2.5)
+        second = dialog_nodes(host)[-1][3]
+    # A line arrives with the window's bullet in front of it (character 149 and a space).
+    plain = [text.lstrip(chr(149) + " ").strip() for text in second]
+    fixed("the orders are one line further in, on a page that fits the window too",
+          more >= 0 and len(second) == 8 and plain[0].startswith("Disposition") and second != first,
+          "%d lines: %r" % (len(second), plain))
+    back = next((i for i, text in enumerate(plain) if text.lower() == "back"), -1)
+    again = []
+    if back >= 0:
+        host.send("dsay %d" % back, 2.5)
+        again = dialog_nodes(host)[-1][3]
+    fixed("and its last line leads back to the first page", back >= 0 and again == first and len(first) >= 1,
+          "back at line %d; then %r" % (back, again))
+    host.send("dend", 1.5)
+    shutdown()
+
+
+def prove_orders():
+    # Issue 22. A party member's Combat Control is a text node in co-op; it offered the
+    # disposition and the six orders, never the window's "use best weapon" and "wear best
+    # armor". A villager is made a party member, the host talks to him and presses Combat
+    # Control (`dparty`); the node must list the two new lines, and picking one must run
+    # the window's handler (the server logs it).
+    host, villager, out, before = orders_open()
+    talking = before >= 1
     nodes = dialog_nodes(host)
     orders = nodes[-1] if len(nodes) > before else None
     options = orders[3] if orders else []
@@ -1850,6 +1923,86 @@ def prove_pronekill():
     shutdown()
 
 
+SKILL_FIRST_AID = 6
+TAXED = ("You've taxed your ability", "You're too tired", "The strain might kill you")
+
+
+def raise_skill(client, slot, skill):
+    """Ninety-nine points into one skill, through the player's own sheet."""
+    admin("sp %d 99" % slot, 0.5)
+    client.send("sheetopen", 0.3)
+    for _ in range(99):
+        client.send("skillup %d" % skill, 0.02)
+    client.send("sheetclose", 1.0)
+
+
+def first_aid(client, net, tries):
+    """The player uses First Aid on its own character until the game refuses, `tries`
+    times at most. What its own message log said each time: 'healed', 'failed' (the roll
+    missed, which does not count against the day), 'taxed' (the day's uses are spent) or
+    '?'."""
+    said = []
+    for _ in range(tries):
+        before = len(client.console())
+        client.send("skill %d %d" % (net, SKILL_FIRST_AID), 2.5)
+        lines = [text for text, addr, _channel in client.console()[before:] if addr == net]
+        if any(text.startswith(TAXED) for text in lines):
+            said.append("taxed")
+            break
+        if any(text.startswith("You heal ") for text in lines):
+            said.append("healed")
+        elif any("fail to do any healing" in text for text in lines):
+            said.append("failed")
+        else:
+            said.append("?")
+    return said
+
+
+def prove_healcap():
+    # Issue 59: "Current behaviour: Only 3 succesful First aid / Doctor use is allowed for
+    # the entire party a day. Expected behaviour: Daily succesful First aid / Doctor limit
+    # should be 3 per individual player."
+    #
+    # The original keeps one table of the day's uses, for its one player. Every player's
+    # use was written to it. Each extra player has a table of its own now, saved in its
+    # own section at the end of the save.
+    #
+    # Two players, both hurt and both good at First Aid. The host heals itself until the
+    # game says it has done enough for one day. The second player must then still be
+    # able to; it goes on until it is refused too, the world is saved, the server is
+    # started again, and it must still be refused (the day is not over).
+    boot("arvillag.map")
+    host, second = two_players()
+    host_net, second_net = net_of_slot(0), net_of_slot(1)
+    for slot in (0, 1):
+        admin("xp %d 30000" % slot, 0.5)
+    raise_skill(host, 0, SKILL_FIRST_AID)
+    raise_skill(second, 1, SKILL_FIRST_AID)
+    admin("hurt 40", 0.5)
+    admin("kill 1", 1.5)
+    admin("revive 1", 1.5)
+    mine = first_aid(host, host_net, 12)
+    check("two hurt players; the host healed itself three times and was then told it had done enough for the day",
+          host_net is not None and second_net is not None and mine.count("healed") == 3 and mine[-1] == "taxed",
+          "the host's tries: %s" % " ".join(mine))
+    theirs = first_aid(second, second_net, 12)
+    fixed("the second player can still use First Aid, three times of its own",
+          theirs.count("healed") == 3 and theirs[-1] == "taxed",
+          "the second player's tries: %s" % " ".join(theirs))
+    if expect_defect:
+        shutdown()
+        return
+    saved = admin("save 5", 3.0)
+    shutdown()
+    boot(None, load_slot=5)
+    host, second = two_players()
+    host_net, second_net = net_of_slot(0), net_of_slot(1)
+    after = first_aid(second, second_net, 2)
+    fixed("a save and a restart keep the second player's count: it is still refused that day",
+          after == ["taxed"], "after the restart: %s (%s)" % (" ".join(after), saved[:40]))
+    shutdown()
+
+
 ARCAVES = 3
 # The first spear trap of the Temple of Trials: the floor trigger of script ATSrTrp0, on
 # the Temple's second level. Its spear starts seven hexes away, at tile 28492, and flies
@@ -1897,12 +2050,267 @@ def prove_trap():
     shutdown()
 
 
+def fid_now(client, net):
+    """The art the stream holds for `net` now: its row in the newest snapshot, or a delta
+    that came after it. None if the newest snapshot does not have it."""
+    data = bytes(client.buf)
+    fid = None
+    if data[:4] != b"F2NS":
+        return fid
+    pos = 10
+    while pos + 18 <= len(data):
+        length = struct.unpack_from("<I", data, pos + 8)[0]
+        if pos + 18 + length > len(data):
+            break
+        payload = data[pos + 18:pos + 18 + length]
+        pos += 18 + length
+        ep = 0
+        while ep + 4 <= len(payload):
+            etype, _flags, elen = struct.unpack_from("<BBH", payload, ep)
+            if etype == EVENT_MAP_TRANSITION:
+                fid = None
+            elif etype == EVENT_SNAPSHOT_OBJECT and elen >= 20:
+                row = struct.unpack_from("<iiiii", payload, ep + 4)
+                if row[0] == net:
+                    fid = row[4]
+            elif etype == EVENT_OBJECT_DELTA and elen >= 10:
+                who, mask = struct.unpack_from("<iH", payload, ep + 4)
+                if who == net and mask & 1:
+                    fid = struct.unpack_from("<i", payload, ep + 10)[0]
+            ep += 4 + elen
+    return fid
+
+
+def prove_deadentry():
+    # Pull request 73: "A player who died during world map travel could appear standing
+    # after the party entered a new map, even though the game still treated them as dead."
+    #
+    # Entering a map stands every player's character up, to clear whatever pose it was in
+    # when the party left. That included a corpse. Two players; the second is killed, the
+    # party goes to another map, and the art the new map's snapshot gives the dead player
+    # is read off the wire: it must still be a body on the ground. Revived, it must stand.
+    boot("arvillag.map")
+    host, second = two_players()
+    admin("kill 1", 2.0)
+    before = fid_now(host, net_of_slot(1))
+    admin("entermap %d" % DENBUS1, 9.0)
+    admin("movdone", 1.0)
+    net = net_of_slot(1)
+    after = fid_now(host, net)
+    check("the second player lay dead when the party left the map",
+          before is not None and art_anim(before) >= 20, "art animation %s" % (None if before is None else art_anim(before)))
+    fixed("on the new map the dead player is still a body on the ground",
+          after is not None and art_anim(after) >= 48,
+          "art animation in the new map's snapshot: %s (0 is standing, 48 and up are bodies)"
+          % (None if after is None else art_anim(after)))
+    out = admin("revive 1", 2.5)
+    stood = fid_now(host, net)
+    check("revived there, the player stands again",
+          stood is not None and art_anim(stood) == 0, "art animation %s; %s" % (None if stood is None else art_anim(stood), out[:40]))
+    shutdown()
+
+
+def prove_vaultsuit():
+    # Pull request 72: "When a non-host player left the Temple of Trials, the host could
+    # keep the tribal appearance instead of switching to the vault suit."
+    #
+    # The suit comes with the first map after the Temple: the game dresses "the player"
+    # when that map loads. A map change asked for by another player loads under that
+    # player's name, so the game dressed the one who asked, and the pass that then dresses
+    # the others started at the second player. Nobody dressed the host.
+    #
+    # Two players in the Temple; the SECOND asks for the village (`entermapas`, which is a
+    # script's load_map under that player). Both must arrive in the vault suit.
+    boot("artemple.map")
+    host, second = two_players()
+    tribal = [fid_now(host, net_of_slot(slot)) for slot in (0, 1)]
+    admin("entermapas %d 1" % ARVILLAG, 3.0)
+    for _ in range(6):
+        admin("movdone", 1.5)
+    suits = [fid_now(host, net_of_slot(slot)) for slot in (0, 1)]
+    arts = lambda fids: [None if fid is None else fid & 0xFFF for fid in fids]
+    check("two players stood in the Temple in their tribal clothes, and the second asked for the village",
+          None not in tribal and None not in suits and "entermapas" in logtext(),
+          "body art in the Temple %s, in the village %s" % (arts(tribal), arts(suits)))
+    fixed("the host arrives in the vault suit, like the player who asked",
+          None not in tribal and None not in suits and arts(suits)[0] != arts(tribal)[0] and arts(suits)[0] == arts(suits)[1],
+          "host %s -> %s, second player %s -> %s" % (arts(tribal)[0], arts(suits)[0], arts(tribal)[1], arts(suits)[1]))
+    shutdown()
+
+
+GAMMOVIE = 149
+HORRIGAN_PID = 0x01000120
+
+
+def prove_horrigan():
+    # Issue 48: "Encounter Frank Horrigan killing family during traveling. ... Few frames
+    # of the event are visible for some players, but mostly players are stuck at map view
+    # and have to wait for the event to end."
+    #
+    # The scene is forced on the party's first trip after day 35. The original loads its
+    # map from inside the travel step. On the server the world map is a session of its
+    # own that owns map loading, and that load from inside it left the session running
+    # with no map staged: the players sat on a world map that took no clicks. The scene's
+    # map is staged like a random encounter's now, and the session ends and loads it.
+    #
+    # The calendar is moved past day 35, the world map is opened and the host sets off.
+    boot("arvillag.map")
+    host = Client("Tester")
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    admin("timeskip 43200", 2.0)
+    admin("timeskip 10080", 2.0)
+    mark = len(logtext())
+    admin("entermap 0", 5.0)  # map 0 in a transition is the world map
+    host.send("wmmove 320 122", 1.0)
+    entered = []
+    until = time.time() + 45
+    while time.time() < until and GAMMOVIE not in entered:
+        entered = [int(n) for n in re.findall(r"\[wmsrv\] entered map=(\d+)", logtext()[mark:])]
+        time.sleep(0.5)
+    check("after day 35 the host opened the world map and set off",
+          "control wmmove 320 122" in logtext()[mark:], "maps entered since: %s" % entered)
+    fixed("the party is taken to the scene's map", GAMMOVIE in entered, "maps entered: %s" % entered)
+    # The scene plays itself out: Horrigan and his two soldiers shoot the family and walk
+    # off. The party is left standing on that map, as in the original (the way out is its
+    # exit grid), and must be free to move there.
+    gone = False
+    until = time.time() + 90
+    while time.time() < until and not gone:
+        gone = re.search(r"DESTROY net=\d+ pid=%d" % HORRIGAN_PID, logtext()[mark:]) is not None
+        time.sleep(1.0)
+    time.sleep(3.0)
+    host_net = net_of_slot(0)
+    at = int(re.findall(r"\[wmsrv\] entered map=%d elev=\d+ dudeTile=(-?\d+)" % GAMMOVIE, logtext())[-1]) if GAMMOVIE in entered else -1
+    steps = lambda: len(re.findall(r"\[evt\] MOVE    net=%s " % host_net, logtext()[mark:]))
+    before = steps()
+    for delta in (3, -3, 203, -203):
+        host.send("mv %d 0" % (at + delta), 3.0)
+        if steps() > before:
+            break
+    if not expect_defect:
+        check("Horrigan leaves when the scene is over, and the party is free to move on that map",
+              gone and steps() > before,
+              "Horrigan gone: %s; steps the host took afterwards: %d" % (gone, steps() - before))
+    shutdown()
+
+
+NEWR1 = 54
+EVENT_DIALOG_END = 33
+GVAR_NEW_RENO_STOLEN_CAR = 348
+CAR_SPOT_TILE = 25321  # Virgin Street: the floor triggers ntCar1 (11 hexes) and ntCar2 (6) sit here
+
+
+def car_spot_talk(answer):
+    """A fresh world with the car stolen; the SECOND player walks onto its parking spot
+    and answers the conversation the spot opens. Returns what was seen."""
+    boot("arvillag.map")
+    host, second = two_players()
+    admin("gvar %d 1" % GVAR_NEW_RENO_STOLEN_CAR, 0.5)
+    admin("stat 1 pe 8", 0.5)  # the script wants Perception above 6, or a Lockpick roll
+    admin("entermap %d" % NEWR1, 10.0)  # Virgin Street, by its own entrance
+    admin("movdone", 1.0)
+    second_net = net_of_slot(1)
+    nodes_before = len(dialog_nodes(second))
+    ends_before = len(second.events(EVENT_DIALOG_END))
+    second.send("mv %d 0" % (CAR_SPOT_TILE + 1), 1.0)  # the hex beside the spot: about twenty steps
+    until = time.time() + 20
+    while time.time() < until and len(dialog_nodes(second)) == nodes_before:
+        time.sleep(0.5)
+    time.sleep(1.0)
+    nodes = dialog_nodes(second)[nodes_before:]
+    node = nodes[-1] if nodes else None
+    clock = second.sim_times()[-1] if second.sim_times() else 0
+    mark = len(logtext())
+    maps_before = len(second.events(EVENT_MAP_TRANSITION))
+    if node is not None:
+        second.send("dsay %d" % answer, 4.0)
+    time.sleep(3.0)
+    text = logtext()[mark:]
+    seen = {
+        "second": second_net,
+        "node": node,
+        "ended": len(second.events(EVENT_DIALOG_END)) > ends_before,
+        "ran on": (second.sim_times()[-1] if second.sim_times() else 0) > clock,
+        "dropped": "dropped" in text and "dsay" in text,
+        "maps": re.findall(r"\[wmsrv\] entered map=(\d+)|mapLoad[^\n]*?(\d+)", text),
+        "maps before": maps_before,
+    }
+    return host, second, seen
+
+
+def prove_cartracks():
+    # Issue 53: "Dialog box for stolen car makes black screen. ... Whichever dialog option
+    # is selected the screen goes black and nothing else happens, it is locked and only
+    # Alt + F4 seem to work."
+    #
+    # The car's parking spot in New Reno is a floor trigger that opens a conversation by
+    # itself when a player with good eyes walks onto it. The page names that player as the
+    # one being asked. The server decided who may answer from a note only the talk and
+    # use verbs leave, found none, and fell back to "the host": the player who was shown
+    # the two lines was refused, the host was shown none, and the server waited on the
+    # page with the whole world stopped behind it.
+    #
+    # The second player walks onto the spot and picks "leave it" (the second line): the
+    # conversation must end and the world must run on. Then, in a fresh world, the first
+    # line: the party must be taken to another map (the chop shop).
+    host, second, seen = car_spot_talk(1)
+    node = seen["node"]
+    check("the car is stolen, and the second player walking onto its parking spot is asked what to do",
+          node is not None and node[1] == seen["second"] and len(node[3]) == 2,
+          "page for net %s with %d lines: %r" % (node[1] if node else None, len(node[3]) if node else 0,
+                                                 node[3] if node else None))
+    fixed("picking \"leave it\" ends the conversation and the world runs on",
+          seen["ended"] and seen["ran on"],
+          "conversation ended: %s; the server's clock moved on: %s; the answer was dropped: %s"
+          % (seen["ended"], seen["ran on"], seen["dropped"]))
+    shutdown()
+    if expect_defect:
+        return
+    host, second, seen2 = car_spot_talk(0)
+    time.sleep(8.0)
+    admin("movdone", 1.0)
+    after = len(second.events(EVENT_MAP_TRANSITION))
+    check("picking \"follow the tracks\" takes the party to another map",
+          seen2["node"] is not None and seen2["ended"] and after > seen2["maps before"],
+          "conversation ended: %s; map changes the second player had seen before the answer: %d, after it: %d"
+          % (seen2["ended"], seen2["maps before"], after))
+    shutdown()
+
+
+def prove_rotkeys():
+    # Pull request 65 gives the < and > keys back. The server's `rot` verb turned the
+    # character one step clockwise whatever it was sent; it takes a direction now, and a
+    # bare `rot` (what an older game sends) still turns clockwise.
+    boot("arvillag.map")
+    host = Client("Tester")
+    time.sleep(2.5)
+    host.send("login Tester", 3.0)
+    net = net_of_slot(0)
+    faced = []
+    for line in ("rot 1", "rot -1", "rot -1", "rot"):
+        seen = len(host.events(EVENT_OBJECT_DELTA))
+        host.send(line, 1.5)
+        rots = [fields["rot"] for body in host.events(EVENT_OBJECT_DELTA)[seen:]
+                for who, fields in [delta_fields(body)] if who == net and "rot" in fields]
+        faced.append(rots[-1] if rots else None)
+    a, b, c, d = faced
+    check("the host turned four times and the server said which way it faced each time",
+          None not in faced, "facing after `rot 1`, `rot -1`, `rot -1`, `rot`: %s" % faced)
+    fixed("`rot -1` turns the other way, and a bare `rot` still turns clockwise",
+          None not in faced and b == (a - 1) % 6 and c == (b - 1) % 6 and d == (c + 1) % 6,
+          "facings %s (of six, clockwise is +1)" % faced)
+    shutdown()
+
+
 modes = {"timer": prove_timer, "templexp": prove_templexp, "rest": prove_rest,
          "cancel": prove_cancel, "create": prove_create, "reach": prove_reach, "retry": prove_retry,
          "lvlsfx": prove_lvlsfx, "ownline": prove_ownline, "joinfreeze": prove_joinfreeze,
          "entryring": prove_entryring, "sneakrun": prove_sneakrun, "hostplace": prove_hostplace, "companions": prove_companions, "dogs": prove_dogs, "rocks": prove_rocks, "armoroff": prove_armoroff,
          "bess": prove_bess, "bunload": prove_bunload, "gestures": prove_gestures, "pronekill": prove_pronekill, "orders": prove_orders,
-         "trap": prove_trap}
+         "trap": prove_trap, "orderspages": prove_orderspages, "healcap": prove_healcap,
+         "deadentry": prove_deadentry, "vaultsuit": prove_vaultsuit, "horrigan": prove_horrigan,
+         "cartracks": prove_cartracks, "rotkeys": prove_rotkeys}
 try:
     for name in (modes if what == "all" else [what]):
         if name not in modes:

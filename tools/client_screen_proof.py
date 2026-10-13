@@ -167,6 +167,10 @@ of what it draws (F2_VIEWER_SHOT_EVERY) and what the server receives from it.
   nightmap2  Issue 37 with the real client in the second seat. Both nightmap proofs end
          with the player leaving and joining again at midnight.
 
+  bonusdots  GitHub issue 58. The player has the Bonus Move perk and a raider walks up
+         from twelve hexes away. In each of the player's turns two of the action point
+         lights must be yellow (they never were).
+
   combatheal  GitHub issue 54. The player is hurt and in a fight, opens the inventory on
          its own turn and leaves it open; its character then takes a stimpak. The hit
          point counter must move while the inventory is still open (in v1.4.2 the new
@@ -179,7 +183,7 @@ folder's save slots and working maps before it starts. Needs Pillow for hp, invh
 
 usage: python -u client_screen_proof.py <firstjoin|heldturn|hp|chat|sheet|invhp|clock|hands|fidget|cancelui|
                                          createui|npcloot|corpseloot|lvlup|dialogdots|stealgear|musicline|lookclick|earlyspace|reloads|hpcount|armorview|nightmap|
-                                         tradeunload|acturn|syncwalk|auditwatch|syncwalk2|doorsync|doorsync2|fightprobe|corpsesync|corpsesync2|oldsave|nightmap2|hpcount2|combatheal|tradescroll>
+                                         tradeunload|acturn|syncwalk|auditwatch|syncwalk2|doorsync|doorsync2|fightprobe|corpsesync|corpsesync2|oldsave|nightmap2|hpcount2|combatheal|bonusdots|tradescroll>
                                         <f2_server.exe> <fallout2-ce.exe> <game dir> <net port>
                                         <cmd port> [--expect-defect] [--keep <dir>]
 """
@@ -2612,7 +2616,7 @@ def prove_oldsave():
     # the map has) is what the new server must hold after loading it, and the real
     # client's copy must match the new server's field for field.
     olds = [(label, os.path.join(gamedir, name)) for label, name in
-            (("v1.4.1", "f2_server-v141.exe"), ("v1.4.0", "f2_server-v140.exe"),
+            (("v1.4.2", "f2_server-v142.exe"), ("v1.4.1", "f2_server-v141.exe"), ("v1.4.0", "f2_server-v140.exe"),
              ("v1.3.2", "f2_server-v132.exe"), ("v1.3.1", "f2_server-v131.exe"))
             if os.path.exists(os.path.join(gamedir, name))]
     check("released servers to make the saves with are in the sandbox", len(olds) >= 1,
@@ -2848,6 +2852,78 @@ def prove_combatheal():
               "after the stimpak: %d total(s) parked, %d adopted" % (len(parked), len(adopted)))
 
 
+PERK_BONUS_MOVE = 3
+
+
+def dot_colours(strip):
+    """The ten action point lights, read off a 90x5 picture of their strip (interface bar
+    x 316, y 14, one light every 9 pixels): 'g' green, 'y' yellow, 'r' red, '.' dark."""
+    out = ""
+    for index in range(10):
+        at = (2 * 90 + index * 9 + 2) * 3  # the middle row, the light's middle pixel
+        r, g, b = strip[at], strip[at + 1], strip[at + 2]
+        if r > 120 and g > 120 and b < 110:
+            out += "y"
+        elif g > 110 and r < 110:
+            out += "g"
+        elif r > 110 and g < 90:
+            out += "r"
+        else:
+            out += "."
+    return out
+
+
+def prove_bonusdots():
+    global game
+    # GitHub issue 58: "Bonus Move perk action points are not shown in yellow."
+    #
+    # Two things hid them. The server sent the turn start before it had set the new
+    # turn's Bonus Move budget, so the message carried the last turn's leftover: none.
+    # And on a client the budget was spent by any critter's replayed steps, so an enemy
+    # still seen walking when the turn came round used it up before the player moved.
+    #
+    # The real client is the only player and has the perk; its Agility is set so that it
+    # has seven action points, which leaves room on the ten lights for both bonus ones. A
+    # raider is set on it from twelve hexes away, so the raider spends its turns walking
+    # up. The player ends two turns (Space). The lights are read off screenshots taken
+    # every 8 frames, at the end of each of the player's first three turns: the picture
+    # just before each Space, and one a few seconds after the second. Each must show two
+    # yellow lights behind the green ones.
+    write_keys([(1900, KEY_SPACE), (2900, KEY_SPACE)])
+    drop_screenshots()
+    game = join({"F2_INPUT_REPLAY": tracepath, "F2_VIEWER_SHOT_EVERY": "8"})
+    bar = bar_width()
+    watcher = ShotWatcher(lambda w, h: [((w - bar) // 2 + bar - 640 + 316, h - 100 + 14,
+                                         (w - bar) // 2 + bar - 640 + 406, h - 100 + 19)])
+    time.sleep(14)
+    joined = "control claimed by session" in logtext()
+    admin("xp 0 30000", 1.0)  # hit points to outlive the proof
+    admin("stat 0 ag 5", 0.5)  # seven action points
+    admin("perk %d" % PERK_BONUS_MOVE, 1.0)
+    out = admin("spawn %s 1 %d" % (RAIDER, host_tile(logtext()) + 12), 1.0)
+    follower = LogFollower()
+    admin("aggro 1", 1.0)
+    time.sleep(62)
+    alive = leave(game)
+    game = None
+    follower.stop = True
+    os.remove(tracepath)
+    rows = [(when, dot_colours(strip)) for when, strip in watcher.finish()]
+    ends = [when for when, line in follower.lines if "control cendturn slot=0" in line]
+    moments = [when - 0.4 for when in ends[:2]] + ([ends[1] + 7.0] if len(ends) >= 2 else [])
+    settled = []
+    for moment in moments:
+        seen = [dots for when, dots in rows if when <= moment]
+        if seen:
+            settled.append(seen[-1])
+    check("the player has the Bonus Move perk and seven action points, and ended two turns of a fight with a raider walking up",
+          alive and joined and "placed 1/1" in out and len(ends) >= 2 and len(settled) == 3,
+          "the player ended %d turns; lights at the end of each of its first three: %s" % (len(ends), " ".join(settled)))
+    fixed("in each of the player's turns two of the action point lights are yellow",
+          len(settled) == 3 and all(dots == "gggggggyy." for dots in settled),
+          "lights (g green, y yellow, r red, . dark): %s" % " ".join(settled))
+
+
 for path in glob.glob(os.path.join(gamedir, "data", "SAVEGAME", "SLOT*")):
     shutil.rmtree(path, ignore_errors=True)
 for path in glob.glob(os.path.join(gamedir, "data", "MAPS", "*.SAV")):
@@ -2934,6 +3010,8 @@ try:
         prove_hpcount2()
     elif what == "combatheal":
         prove_combatheal()
+    elif what == "bonusdots":
+        prove_bonusdots()
     else:
         raise SystemExit("unknown proof '%s' (firstjoin, heldturn, hp, chat, sheet, invhp, clock, hands,"
                          " fidget, cancelui, createui, npcloot, corpseloot, lvlup, dialogdots, stealgear, lookclick, earlyspace, reloads, hpcount, armorview, nightmap, tradeunload, acturn, syncwalk, auditwatch, syncwalk2, doorsync, doorsync2, fightprobe, corpsesync, corpsesync2, oldsave, nightmap2, hpcount2, musicline or"
