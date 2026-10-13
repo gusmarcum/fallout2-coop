@@ -510,19 +510,25 @@ int worldmapServerDriver()
         wmTransitionResumeScripts();
         wmTransitionSaveMap();
         wmTransitionSuspendScripts();
-		
-		if (map == MAP_IN_GAME_MOVIE1) {
-			// This map was staged through encounterMapId only to leave the worldmap loop.
-			// Do not let the loader treat it as a random encounter.
-			wmEncounterStagingClear();
-		}
+        
+        if (map == MAP_IN_GAME_MOVIE1) {
+            // This map was staged through encounterMapId only to leave the worldmap loop.
+            // Do not let the loader treat it as a random encounter.
+            wmEncounterStagingClear();
+        }
 
         mapLoadById(map);
         if (map == MAP_IN_GAME_MOVIE1) {
             // Horrigan's worldmap-triggered scene is a party cutscene. Broadcast the
-            // lock after the movie map exists so every connected player loses movement,
-            // combat and interaction input until the next map transition releases it.
+            // lock after the movie map exists, so every viewer takes its own controls
+            // away for the scene; the next map transition gives them back.
             // actorNetId=0 deliberately means all viewers.
+            //
+            // The lock is the viewers' own, as for every scripted scene (bugs/025): the
+            // server refuses no verb because of it, and a viewer frees its controls by
+            // itself after fifteen seconds if no release has come. A lock the server
+            // enforced would also refuse `login` and `say`, with nothing to end it if
+            // the scene never did.
             serverUiLockSet(true, 0);
         }
         // ►► NOW that emissions are live again, say what this place is. The line is
@@ -532,8 +538,8 @@ int worldmapServerDriver()
         // "You have encountered: some radscorpions fighting some cannibals" and we said
         // nothing. No-op for an ordinary city arrival.
         if (map != MAP_IN_GAME_MOVIE1) {
-			wmEncounterDescriptionFlush();
-		}
+            wmEncounterDescriptionFlush();
+        }
         fprintf(stderr, "[wmsrv] entered map=%d elev=%d dudeTile=%d gen=%d\n",
             mapGetCurrentMap(), gElevation,
             gDude != nullptr ? gDude->tile : -1, mapGetLoadGeneration());
