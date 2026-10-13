@@ -2653,17 +2653,17 @@ private:
                 // drain) instead of written through — a mid-glide write would trip the walk's
                 // fid check and stand-slide the run (PRESENTATION_FSM_DESIGN §4.1a). A
                 // non-gliding fid applies immediately via the pose helper (frame-gotcha safe).
-				if (!(clientViewerActive() && clientAnimDeferFid(obj, fid))) {
-					clientApplyPose(obj, fid);
+                if (!(clientViewerActive() && clientAnimDeferFid(obj, fid))) {
+                    clientApplyPose(obj, fid);
 
-					// Repaint the authoritative appearance behind the inventory.
-					// This redraws the world without advancing animations.
-					if (clientViewerActive()
-						&& obj == gDude
-						&& (GameMode::getCurrentGameMode() & GameMode::kInventory) != 0) {
-						tileWindowRefresh();
-					}
-				}
+                    // Repaint the authoritative appearance behind the inventory.
+                    // This redraws the world without advancing animations.
+                    if (clientViewerActive()
+                        && obj == gDude
+                        && (GameMode::getCurrentGameMode() & GameMode::kInventory) != 0) {
+                        tileWindowRefresh();
+                    }
+                }
             }
             if (hasFlags) objectApplyWireFlags(obj, flags);
             if (hasRot) {
