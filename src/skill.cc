@@ -1388,7 +1388,6 @@ int skillUpdateLastUse(int skill, Object* subject)
     }
 
     times[slot] = gameTimeGetTime();
-    playerSheetMarkDirty(subject != nullptr ? subject : gDude);
 
     return 0;
 }
@@ -1419,8 +1418,10 @@ int skill_use_slot_clear()
     return 0;
 }
 
-// Extra-player usage rides the versioned sheet block; host disk storage stays
-// in the vanilla skillsUsageSave section for backwards-compatible loading.
+// An extra player's usage is saved in its own tail section of the save appendix
+// (player_sheet.cc, 'PASU'), never in the sheet block: that block is also what a client
+// is sent, and no client reads this table. The host's stays in the vanilla
+// skillsUsageSave section.
 int skillsUsageRowWrite(File* stream, int slot)
 {
     if (slot < 0 || slot >= kMaxPlayerActors) return -1;

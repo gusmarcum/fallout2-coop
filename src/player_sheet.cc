@@ -26,19 +26,22 @@ namespace fallout {
 // silent misread rather than a short read — and the first thing a misread would
 // scribble on is the host's live sheet (slot 0 is gDudeProto itself). Cheap
 // enough to be worth it at once per join.
-// Three versions, all still readable:
+// TWO versions, both still readable:
 //   'PSHT' (v1) — six rows: proto, perk ranks, PC stats, traits, tagged skills, name.
 //   'PSH2' (v2) — appends the OWED FREE PERK PICK byte (perk.cc), the level-up
 //                 entitlement a player spends through the sheet edit intents. A v1
 //                 row simply leaves the flag at whatever the seed left, i.e. owing
 //                 nothing, which is what an actor saved before the flag existed had.
-//   'PSH3' (v3) — appends per-player daily skill-use timestamps.
-// Writes v3; the reader accepts v1/v2 as well. Older saves have no extra-player
-// usage history, so seeded extras retain an empty usage table.
+// Writes v2; the reader accepts either, so co-op saves taken before this change
+// still load.
+//
+// ►► THIS BLOCK IS ALSO WHAT A CLIENT IS SENT (the join blob's tail, and every sheet
+// delta), and a client refuses a block whose magic it does not know: it stops loading
+// the world there. A new field here therefore locks every older client out, with the
+// wire version unchanged and nothing to tell the player why. What only the server
+// needs goes in a tail section of the save appendix instead (see 'PASU' below).
 static constexpr int kPlayerSheetBlockMagic = 0x50534854; // 'PSHT' (v1)
 static constexpr int kPlayerSheetBlockMagicV2 = 0x50534832; // 'PSH2' (v2)
-// v3 appends each actor's daily skill-use timestamps. Readers retain v1/v2 support.
-static constexpr int kPlayerSheetBlockMagicV3 = 0x50534833; // 'PSH3' (v3)
 
 // Sentinel ahead of the DISK appendix (extra actor bodies + sheets). Doubles as
 // the "is there an appendix" probe: the loader reads this word at the tail and
@@ -68,6 +71,11 @@ static constexpr int kPlayerActorEventsMagic = 0x50414556; // 'PAEV'
 // Tail section after the events: which player each companion follows (bugs/067). Same
 // self-delimiting rule: absent in an older save, ignored by an older server.
 static constexpr int kPlayerActorOwnersMagic = 0x50414F57; // 'PAOW'
+// Tail section after the owners: when each extra player last used First Aid, Doctor and
+// Repair with success, which is what the three-a-day limit counts (GitHub issue 59; the
+// host's table is in the vanilla part of the save). Same rule again: absent in an older
+// save (the extras start the day fresh), ignored by an older server.
+static constexpr int kPlayerActorSkillUsageMagic = 0x50415355; // 'PASU'
 
 // Per-slot "sheet row changed this beat" bits, set by playerSheetMarkDirty and
 // drained by playerSheetDeltaEmit. A runtime sheet mutation (drug, level-up,
@@ -113,10 +121,10 @@ static int playerSheetRowWrite(File* stream, int slot)
         return -1;
     }
 
-    return skillsUsageRowWrite(stream, slot);
+    return 0;
 }
 
-static int playerSheetRowRead(File* stream, int slot, bool withOwedPick, bool withUsage)
+static int playerSheetRowRead(File* stream, int slot, bool withOwedPick)
 {
     if (protoPlayerActorRowRead(stream, slot) == -1) {
         return -1;
@@ -148,7 +156,7 @@ static int playerSheetRowRead(File* stream, int slot, bool withOwedPick, bool wi
         }
     }
 
-    return withUsage ? skillsUsageRowRead(stream, slot) : 0;
+    return 0;
 }
 
 int playerSheetBlockWrite(File* stream, int firstSlot)
@@ -161,7 +169,7 @@ int playerSheetBlockWrite(File* stream, int firstSlot)
         return 0;
     }
 
-    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV3) == -1) {
+    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV2) == -1) {
         return -1;
     }
 
@@ -189,8 +197,7 @@ int playerSheetBlockRead(File* stream)
         return -1;
     }
 
-    bool v3 = magic == kPlayerSheetBlockMagicV3;
-    bool v2 = magic == kPlayerSheetBlockMagicV2 || v3;
+    bool v2 = magic == kPlayerSheetBlockMagicV2;
     if (magic != kPlayerSheetBlockMagic && !v2) {
         debugPrint("player_sheet: bad block magic 0x%08x\n", magic);
         return -1;
@@ -216,7 +223,7 @@ int playerSheetBlockRead(File* stream)
     }
 
     for (int slot = firstSlot; slot < firstSlot + count; slot++) {
-        if (playerSheetRowRead(stream, slot, v2, v3) == -1) {
+        if (playerSheetRowRead(stream, slot, v2) == -1) {
             debugPrint("player_sheet: slot %d row read failed\n", slot);
             return -1;
         }
@@ -307,6 +314,16 @@ int playerActorAppendixSave(File* stream)
     }
     if (partyMemberOwnersSave(stream) == -1) {
         return -1;
+    }
+
+    // Each extra's daily skill uses (GitHub issue 59). Last, behind its own magic.
+    if (fileWriteInt32(stream, kPlayerActorSkillUsageMagic) == -1) {
+        return -1;
+    }
+    for (int slot = 1; slot <= extras; slot++) {
+        if (skillsUsageRowWrite(stream, slot) == -1) {
+            return -1;
+        }
     }
 
     return 0;
@@ -500,6 +517,25 @@ int playerActorAppendixLoad(File* stream)
         return -1;
     }
 
+    // Each extra's daily skill uses (GitHub issue 59). EOF = a save from before the
+    // section existed: the seeds above left every extra's table empty. A COUNTED read.
+    unsigned char usageMagicBytes[4];
+    if (fileRead(usageMagicBytes, 1, sizeof(usageMagicBytes), stream) != sizeof(usageMagicBytes)) {
+        return 0;
+    }
+    int usageMagic = (usageMagicBytes[0] << 24) | (usageMagicBytes[1] << 16)
+        | (usageMagicBytes[2] << 8) | usageMagicBytes[3];
+    if (usageMagic != kPlayerActorSkillUsageMagic) {
+        fprintf(stderr, "player_sheet: bad appendix SKILL USE magic 0x%08x, refusing the save\n", usageMagic);
+        return -1;
+    }
+    for (int slot = 1; slot <= extras; slot++) {
+        if (skillsUsageRowRead(stream, slot) == -1) {
+            fprintf(stderr, "player_sheet: appendix skill use row %d read failed\n", slot);
+            return -1;
+        }
+    }
+
     return 0;
 }
 
@@ -507,7 +543,7 @@ int playerActorAppendixLoad(File* stream)
 // firstSlot=slot + count=1 + the row). Used by the live delta channel.
 static int playerSheetBlockWriteOne(File* stream, int slot)
 {
-    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV3) == -1) {
+    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV2) == -1) {
         return -1;
     }
     if (fileWriteInt32(stream, slot) == -1) {
