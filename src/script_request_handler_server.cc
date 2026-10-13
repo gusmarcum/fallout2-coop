@@ -44,6 +44,16 @@ public:
         if (serverControlDialogDriveActive()) {
             return;
         }
+        // ►► WHO MAY ANSWER A CONVERSATION A SCRIPT OPENED BY ITSELF (GitHub issue 53,
+        // bugs/083). The page is sent with one player named as the one being asked:
+        // `gDude` at that moment, which under a floor trigger is whoever stepped on it
+        // (the stolen car's parking spot in New Reno). The server took its idea of who
+        // may answer from a note that only the talk and use verbs leave, and nobody
+        // had left one: the answer fell to "the host", or to whoever had last used
+        // something. So the player shown the lines was refused, the host was shown
+        // none, and the server waited on the page with the whole world stopped behind
+        // it. The player the page names is the player who answers it.
+        serverControlSetPendingDialogRequester(playerActorSlotOf(gDude));
         serverControlBeginDialogDrive();
         _scriptedDrive = true;
     }

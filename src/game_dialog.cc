@@ -919,11 +919,17 @@ int _gdialogInitFromScript(int headFid, int reaction)
     // server records them even though it builds no window.
     gGameDialogFidget = reaction;
 
-    if (_dialogue_state == 1) {
+    // ►► ON THE SERVER THIS IS NOT ASKED TWICE (GitHub issue 53, bugs/083). The two
+    // early returns below are about windows that are already up. The server has none,
+    // and the first of them was reached with a flag a trade leaves set for good
+    // (serverDialogRunPendingBarter ends on _dialogue_state 1 and nothing on this side
+    // clears it): after the first trade of a session no conversation a script opened
+    // by itself was given anybody to answer it. The server's part comes first now.
+    if (!serverLoopActive() && _dialogue_state == 1) {
         return -1;
     }
 
-    if (_gdialog_state == 1) {
+    if (!serverLoopActive() && _gdialog_state == 1) {
         return 0;
     }
 
