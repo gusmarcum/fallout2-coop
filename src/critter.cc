@@ -1148,6 +1148,13 @@ bool critterRevive(Object* critter)
     // actor-HP channels regardless of the (server-noop) local refresh.
     _dude_stand(critter, critter->rotation, -1);
 
+    // A player's own light, which the kill switched off (critterKill). Nothing else
+    // gave it back but the next map entry, and since a body is left as it lies on a map
+    // entry (pull request 73) a player carried in dead and revived there stayed dark.
+    if (playerActorIs(critter)) {
+        objectSetLight(critter, 4, 0x10000, nullptr);
+    }
+
     // Brought back in the middle of a fight: give the body its turns back. A
     // corpse's roster entry is swept out of the combatant block at round end and
     // nothing re-admits it (vanilla never resurrects), so a mid-combat revive used to
