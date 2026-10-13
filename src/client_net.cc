@@ -3098,6 +3098,11 @@ private:
         if (hasHp && !dudeCombatHp) obj->data.critter.hp = hp;
         if (hasRad) obj->data.critter.radiation = rad;
         if (hasPoison) obj->data.critter.poison = poison;
+        // Re-derive status labels after applying the authoritative values,
+        // including while inventory is open. This does not advance animations.
+        if (clientViewerActive() && obj == gDude && (hasRad || hasPoison)) {
+            indicatorBarRefresh();
+        }
         // In-combat recorded MOVE: HOLD the mover's authoritative AP until the replayed walk
         // completes (the client's real engine charges AP per step from the pre-walk pool, so
         // it re-walks the identical tiles instead of dying on step 1 with a drained pool).
