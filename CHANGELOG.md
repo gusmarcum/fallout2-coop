@@ -4,6 +4,86 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
+## v1.4.3 (2026-10-13)
+
+Fixes two things v1.4.2 broke (a trap that made you dodge ten times in a row, and healing
+in a fight that did not show until the inventory was closed), a server lock in New Reno,
+and more than a dozen other reports. Sixteen of the changes are pull requests from
+[szokevarangy](https://github.com/szokevarangy), the first code a player has sent in.
+Saves from every earlier version load unchanged (checked with a save from each of v1.3.1,
+v1.3.2, v1.4.0, v1.4.1 and v1.4.2).
+
+### Changed
+
+- **First Aid, Doctor and Repair are limited per player
+  ([issue #59](https://github.com/gusmarcum/fallout2-coop/issues/59), by szokevarangy).**
+  The three successful uses a day were shared by the whole party. Each player has three
+  of their own now, and the count is kept across a save.
+- **The original's keys are back
+  ([issue #56](https://github.com/gusmarcum/fallout2-coop/issues/56), by szokevarangy).**
+  M changes the cursor, Home centers on your character, `?` shows the date, F1 opens the
+  help screen, `-` and `+` change the brightness, `<` and `>` turn your character, Z
+  opens the clock, and Page Up works in every list. New: R reloads the weapon in hand.
+- **A companion's Combat Control menu is two pages
+  ([issue #22](https://github.com/gusmarcum/fallout2-coop/issues/22), follow-up).** It
+  had ten lines and the window shows eight, so "Wear your best armor" and "Done" could
+  not be seen. The first page has the two one-shot lines, a line that opens the orders,
+  and Done.
+- **The world map opens on the party and follows it at the edge of the view
+  ([issue #47](https://github.com/gusmarcum/fallout2-coop/issues/47), by szokevarangy).**
+  Some players saw it open on Arroyo. During a trip it used to snap back to the party on
+  every step; it now scrolls only when the party is about to leave the view, so you can
+  look around the map while you travel.
+- **Switching Sneak on stops your run (by szokevarangy).** A run that was already under
+  way carried on in Sneak. It stops now, unless you have Silent Running.
+
+### Fixed
+
+- **A trap makes you flinch once
+  ([issue #55](https://github.com/gusmarcum/fallout2-coop/issues/55), new in v1.4.2).**
+  The Temple's spear traps ask for the dodge once for every hex their spear flies. The
+  original plays the first and ignores the rest; since v1.4.2 the server sent every one,
+  and you stood through seven to ten in a row.
+- **A healing item used in a fight moves the counter at once
+  ([issue #54](https://github.com/gusmarcum/fallout2-coop/issues/54), new in v1.4.2).**
+  With the inventory open in a fight, "You gained" and the new total waited until the
+  inventory was closed.
+- **The stolen car's parking spot does not lock the server
+  ([issue #53](https://github.com/gusmarcum/fallout2-coop/issues/53)).** Stepping onto the
+  spot in New Reno opens a conversation by itself. The server had nobody down as allowed
+  to answer it: the player who was shown the two lines was refused, and the server
+  waited on the answer with the whole world stopped. The player who is asked is now the
+  player who answers. The same fault was in every conversation a floor trigger or a used
+  object opens by itself.
+- **The Horrigan scene plays
+  ([issue #48](https://github.com/gusmarcum/fallout2-coop/issues/48), by szokevarangy).**
+  It left the party on a world map that took no clicks.
+- **Bonus Move's action points are yellow
+  ([issue #58](https://github.com/gusmarcum/fallout2-coop/issues/58), by szokevarangy).**
+  The server told the game about them too early, as zero, and an enemy still seen
+  walking when your turn began used them up on your screen.
+- **Poison and radiation run for every player
+  ([issue #57](https://github.com/gusmarcum/fallout2-coop/issues/57), by szokevarangy).**
+  Only the player poisoned last took the damage and recovered; the others kept a status
+  that never changed. The two status lights also update as soon as the value changes.
+- **An enemy that picks up or throws a spear is drawn with it
+  ([issue #13](https://github.com/gusmarcum/fallout2-coop/issues/13), by szokevarangy).**
+  The crouch started while the enemy was still walking and could loop, and an enemy
+  that threw one spear of a stack, or took up a weapon with empty hands, was shown
+  unarmed for the rest of the fight.
+- **A loot window opens once (by szokevarangy).** Next to a container a click opened it
+  twice, and a double click in a fight was charged twice.
+- **The host gets the vault suit when another player leaves the Temple (by
+  szokevarangy).**
+- **A player who is dead when the party enters a map stays down (by szokevarangy).** The
+  body was stood up, dead. A revived player also has their light back.
+- **Gear dropped straight from a hand or armor slot shows on the ground for the player
+  who dropped it (by szokevarangy).**
+- **Your character's look updates behind the open inventory
+  ([issue #28](https://github.com/gusmarcum/fallout2-coop/issues/28), follow-up, by
+  szokevarangy).**
+- **After a load the view is on your own character (by szokevarangy).**
+
 ## v1.4.2 (2026-10-03)
 
 Fixes the black screen that kept the first player of every v1.4.1 session out
