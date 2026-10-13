@@ -54,10 +54,10 @@ SCREEN = ["firstjoin", "heldturn", "hp", "chat", "sheet", "invhp", "clock", "han
           "createui", "npcloot", "corpseloot", "lvlup", "dialogdots", "stealgear", "musicline", "lookclick", "earlyspace", "reloads", "tradescroll",
           "hpcount", "armorview", "nightmap", "tradeunload", "acturn",
           "syncwalk", "syncwalk2", "doorsync", "doorsync2", "corpsesync", "corpsesync2", "oldsave",
-          "nightmap2", "hpcount2"]
+          "nightmap2", "hpcount2", "combatheal"]
 WIRE = ["timer", "templexp", "rest", "cancel", "create", "reach", "retry", "lvlsfx", "ownline",
         "joinfreeze", "entryring", "sneakrun", "hostplace", "companions", "dogs", "rocks", "orders",
-        "armoroff", "bess", "bunload", "gestures", "pronekill"]
+        "armoroff", "bess", "bunload", "gestures", "pronekill", "trap"]
 
 runs = []
 for mode in SCREEN:

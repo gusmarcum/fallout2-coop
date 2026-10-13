@@ -167,6 +167,11 @@ of what it draws (F2_VIEWER_SHOT_EVERY) and what the server receives from it.
   nightmap2  Issue 37 with the real client in the second seat. Both nightmap proofs end
          with the player leaving and joining again at midnight.
 
+  combatheal  GitHub issue 54. The player is hurt and in a fight, opens the inventory on
+         its own turn and leaves it open; its character then takes a stimpak. The hit
+         point counter must move while the inventory is still open (in v1.4.2 the new
+         total waited on the presentation queue, which stands still under a screen).
+
 --expect-defect inverts the verdict, to show the defect on a build older than the fix.
 
 Nothing here reads or writes a live world: point it at a sandbox copy. It empties that
@@ -174,7 +179,7 @@ folder's save slots and working maps before it starts. Needs Pillow for hp, invh
 
 usage: python -u client_screen_proof.py <firstjoin|heldturn|hp|chat|sheet|invhp|clock|hands|fidget|cancelui|
                                          createui|npcloot|corpseloot|lvlup|dialogdots|stealgear|musicline|lookclick|earlyspace|reloads|hpcount|armorview|nightmap|
-                                         tradeunload|acturn|syncwalk|auditwatch|syncwalk2|doorsync|doorsync2|fightprobe|corpsesync|corpsesync2|oldsave|nightmap2|hpcount2|tradescroll>
+                                         tradeunload|acturn|syncwalk|auditwatch|syncwalk2|doorsync|doorsync2|fightprobe|corpsesync|corpsesync2|oldsave|nightmap2|hpcount2|combatheal|tradescroll>
                                         <f2_server.exe> <fallout2-ce.exe> <game dir> <net port>
                                         <cmd port> [--expect-defect] [--keep <dir>]
 """
@@ -2765,6 +2770,84 @@ def prove_hpcount2():
               % (len(parked), len(adopted), len(behind)))
 
 
+STIMPAK = 40
+
+
+def prove_combatheal():
+    global game
+    # GitHub issue 54: "I already posted something similar in #9 ... The difference is: it
+    # still persists during combat. After consuming a healing item, HP will only be added
+    # after inventory is closed." New in v1.4.2.
+    #
+    # In a fight every message line waits its turn on the client's presentation queue, and
+    # since v1.4.2 a new hit point total for the player waits on that queue too whenever
+    # anything is on it (so the counter cannot run ahead of a blow that has not been shown
+    # yet). The inventory switches the world off and the queue stands still under it. So
+    # "You gained 14 hit points" was queued, the total was parked behind it, and neither
+    # moved until the inventory was closed.
+    #
+    # The real client is the only player, hurt, in a fight with a raider. On its own turn
+    # it opens the inventory (I: the server prices it at four action points and grants it)
+    # and leaves it open. The operator then has the character take a stimpak, which is the
+    # call the inventory's own Use makes. The hit point counter is read off screenshots,
+    # one every 8 frames: it must move while the inventory is still open.
+    write_keys([(2100, KEY_I)])
+    drop_screenshots()
+    game = join({"F2_INPUT_REPLAY": tracepath, "F2_VIEWER_SHOT_EVERY": "8", "F2_TRACE_EVENTS": "1"})
+    watcher = ShotWatcher()
+    time.sleep(14)
+    text = logtext()
+    joined = "control claimed by session" in text
+    admin("xp 0 30000", 1.0)  # a few levels of hit points, so there is room to be hurt and healed
+    admin("hurt 25", 0.5)
+    admin("give %d" % STIMPAK, 0.5)
+    placed = admin("spawn %s 1 %d" % (RAIDER, host_tile(text) + 2), 0.5)
+    follower = LogFollower()
+    clientlog = LogFollower(clientlogpath)
+    admin("aggro 1", 1.0)
+    opened = None
+    until = time.time() + 90
+    while time.time() < until and opened is None:
+        opened = next((when for when, line in follower.lines if "control invopen granted slot=0" in line), None)
+        time.sleep(0.1)
+    time.sleep(3.0)  # the screen is up and its first pictures are taken
+    used = time.time()
+    admin("usedrug %d" % STIMPAK, 0.5)
+    time.sleep(7.0)
+    alive = leave(game)
+    game = None
+    follower.stop = True
+    clientlog.stop = True
+    os.remove(tracepath)
+    rows = watcher.finish()
+    debug = client_debug_log()
+    still_open = "inventory: screen up" in debug and "inventory: closed" not in debug
+    closed_by_server = any("control invclose slot=0" in line for when, line in follower.lines if when >= (opened or 0))
+    before = [row for row in rows if row[0] < used - 0.2]
+    after = [row for row in rows if row[0] >= used]
+    steady = len(before) >= 3 and before[-1][1] == before[-2][1] == before[-3][1]
+    gained = [line for when, line in follower.lines if when >= used - 0.2 and "usedrug" in line]
+    check("the player was alone in a fight, opened the inventory on its own turn and kept it open while a stimpak was taken",
+          alive and joined and "placed 1/1" in placed and opened is not None and still_open and not closed_by_server and steady,
+          "inventory granted %s; still open at the end: %s; counter steady before the stimpak: %s; %d screenshots before, %d after"
+          % ("%.1f s before the stimpak" % (used - opened) if opened else "never", still_open, steady, len(before), len(after)))
+    moved = next((row[0] for row in after if before and row[1] != before[-1][1]), None)
+    fixed("the hit point counter moves while the inventory is still open",
+          moved is not None,
+          "counter first moved: %s" % ("%.1f s after the stimpak" % (moved - used) if moved else "not before the client was stopped, 7 s on"))
+    trace = [(when, line) for when, line in clientlog.lines if when >= used - 0.2 and line.startswith("[hp] own total")]
+    parked = [line for _when, line in trace if "parked" in line]
+    adopted = [line for _when, line in trace if "adopted" in line]
+    if not expect_defect:
+        check("the client says so too: the new total was taken up under the open screen",
+              len(adopted) >= 1,
+              "after the stimpak: %d total(s) parked, %d adopted; %s" % (len(parked), len(adopted), (adopted or parked or ["no [hp] line"])[-1][:70]))
+    else:
+        check("(defect shown) the client parked the new total and did not take it up",
+              len(parked) >= 1 and len(adopted) == 0,
+              "after the stimpak: %d total(s) parked, %d adopted" % (len(parked), len(adopted)))
+
+
 for path in glob.glob(os.path.join(gamedir, "data", "SAVEGAME", "SLOT*")):
     shutil.rmtree(path, ignore_errors=True)
 for path in glob.glob(os.path.join(gamedir, "data", "MAPS", "*.SAV")):
@@ -2849,6 +2932,8 @@ try:
         prove_nightmap2()
     elif what == "hpcount2":
         prove_hpcount2()
+    elif what == "combatheal":
+        prove_combatheal()
     else:
         raise SystemExit("unknown proof '%s' (firstjoin, heldturn, hp, chat, sheet, invhp, clock, hands,"
                          " fidget, cancelui, createui, npcloot, corpseloot, lvlup, dialogdots, stealgear, lookclick, earlyspace, reloads, hpcount, armorview, nightmap, tradeunload, acturn, syncwalk, auditwatch, syncwalk2, doorsync, doorsync2, fightprobe, corpsesync, corpsesync2, oldsave, nightmap2, hpcount2, musicline or"

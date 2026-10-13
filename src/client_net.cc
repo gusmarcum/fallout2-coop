@@ -957,6 +957,46 @@ public:
         return false;
     }
 
+    // ►► WHAT A SCREEN THAT HIDES THE WORLD CAN STILL SHOW (GitHub issue 54, bugs/080).
+    //
+    // The inventory, the pipboy, the character sheet and the like switch the world off,
+    // and the presentation pump with it: nothing on the queue moves until the screen
+    // closes. In a fight that queue holds every message line, and since bugs/069 a new
+    // hit point total for this player waits on it whenever anything is queued. So a
+    // healing item used from the inventory in a fight went: "You gained 12 hit points"
+    // queued, the new total parked behind it, and both stood there until the inventory
+    // was closed (the counter moved only then, which is the report).
+    //
+    // A message line, a sound and this player's own hit points need no world to be
+    // shown. When they are ALL that is queued, they are let through here, in order. With
+    // anything else in the line (an attack, a recorded sequence, a turn start, the end of
+    // the fight) nothing is touched: a total parked behind a blow still waits for that
+    // blow to be shown, which is what the parking is for.
+    void screenPump()
+    {
+        if (clientViewerActive() && !_presQueue.empty() && !clientCombatAnimActive()) {
+            bool needsNoWorld = true;
+            for (const PresEvent& e : _presQueue) {
+                if (e.kind != PresKind::kConsole && e.kind != PresKind::kSfx && e.kind != PresKind::kDudeHp) {
+                    needsNoWorld = false;
+                    break;
+                }
+            }
+            while (needsNoWorld && !_presQueue.empty()) {
+                PresEvent ev = _presQueue.front();
+                _presQueue.pop_front();
+                clientAnimNotePresentationProgress();
+                switch (ev.kind) {
+                case PresKind::kConsole: applyConsole(ev.text, ev.consoleChannel); break;
+                case PresKind::kSfx: applySfx(ev.text); break;
+                case PresKind::kDudeHp: applyDudeHp(ev.hpNetId, ev.hpValue); break;
+                default: break;
+                }
+            }
+        }
+        rollDudeHp();
+    }
+
     void presentationPump()
     {
         if (!clientViewerActive()) {
@@ -5445,7 +5485,7 @@ public:
     bool inCombat() const { return _decoder.inCombat(); }
     bool myTurn() const { return _decoder.myTurn(); }
     void presentationPump() { _decoder.presentationPump(); }
-    void hudPump() { _decoder.rollDudeHp(); }
+    void hudPump() { _decoder.screenPump(); }
     void recomputeCombatOutlines() { _decoder.recomputeCombatOutlines(); }
     bool everBoundToSlot() const { return _decoder.everBoundToSlot(); }
     bool combatPresentationBusy() const { return _decoder.combatPresentationBusy(); }
