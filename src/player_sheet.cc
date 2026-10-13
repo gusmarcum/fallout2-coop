@@ -26,16 +26,19 @@ namespace fallout {
 // silent misread rather than a short read — and the first thing a misread would
 // scribble on is the host's live sheet (slot 0 is gDudeProto itself). Cheap
 // enough to be worth it at once per join.
-// TWO versions, both still readable:
+// Three versions, all still readable:
 //   'PSHT' (v1) — six rows: proto, perk ranks, PC stats, traits, tagged skills, name.
 //   'PSH2' (v2) — appends the OWED FREE PERK PICK byte (perk.cc), the level-up
 //                 entitlement a player spends through the sheet edit intents. A v1
 //                 row simply leaves the flag at whatever the seed left, i.e. owing
 //                 nothing, which is what an actor saved before the flag existed had.
-// Writes v2; the reader accepts either, so co-op saves taken before this change
-// still load.
+//   'PSH3' (v3) — appends per-player daily skill-use timestamps.
+// Writes v3; the reader accepts v1/v2 as well. Older saves have no extra-player
+// usage history, so seeded extras retain an empty usage table.
 static constexpr int kPlayerSheetBlockMagic = 0x50534854; // 'PSHT' (v1)
 static constexpr int kPlayerSheetBlockMagicV2 = 0x50534832; // 'PSH2' (v2)
+// v3 appends each actor's daily skill-use timestamps. Readers retain v1/v2 support.
+static constexpr int kPlayerSheetBlockMagicV3 = 0x50534833; // 'PSH3' (v3)
 
 // Sentinel ahead of the DISK appendix (extra actor bodies + sheets). Doubles as
 // the "is there an appendix" probe: the loader reads this word at the tail and
@@ -110,10 +113,10 @@ static int playerSheetRowWrite(File* stream, int slot)
         return -1;
     }
 
-    return 0;
+    return skillsUsageRowWrite(stream, slot);
 }
 
-static int playerSheetRowRead(File* stream, int slot, bool withOwedPick)
+static int playerSheetRowRead(File* stream, int slot, bool withOwedPick, bool withUsage)
 {
     if (protoPlayerActorRowRead(stream, slot) == -1) {
         return -1;
@@ -145,7 +148,7 @@ static int playerSheetRowRead(File* stream, int slot, bool withOwedPick)
         }
     }
 
-    return 0;
+    return withUsage ? skillsUsageRowRead(stream, slot) : 0;
 }
 
 int playerSheetBlockWrite(File* stream, int firstSlot)
@@ -158,7 +161,7 @@ int playerSheetBlockWrite(File* stream, int firstSlot)
         return 0;
     }
 
-    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV2) == -1) {
+    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV3) == -1) {
         return -1;
     }
 
@@ -186,7 +189,8 @@ int playerSheetBlockRead(File* stream)
         return -1;
     }
 
-    bool v2 = magic == kPlayerSheetBlockMagicV2;
+    bool v3 = magic == kPlayerSheetBlockMagicV3;
+    bool v2 = magic == kPlayerSheetBlockMagicV2 || v3;
     if (magic != kPlayerSheetBlockMagic && !v2) {
         debugPrint("player_sheet: bad block magic 0x%08x\n", magic);
         return -1;
@@ -212,7 +216,7 @@ int playerSheetBlockRead(File* stream)
     }
 
     for (int slot = firstSlot; slot < firstSlot + count; slot++) {
-        if (playerSheetRowRead(stream, slot, v2) == -1) {
+        if (playerSheetRowRead(stream, slot, v2, v3) == -1) {
             debugPrint("player_sheet: slot %d row read failed\n", slot);
             return -1;
         }
@@ -503,7 +507,7 @@ int playerActorAppendixLoad(File* stream)
 // firstSlot=slot + count=1 + the row). Used by the live delta channel.
 static int playerSheetBlockWriteOne(File* stream, int slot)
 {
-    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV2) == -1) {
+    if (fileWriteInt32(stream, kPlayerSheetBlockMagicV3) == -1) {
         return -1;
     }
     if (fileWriteInt32(stream, slot) == -1) {

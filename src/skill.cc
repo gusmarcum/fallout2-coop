@@ -54,7 +54,7 @@ typedef struct SkillDescription {
 } SkillDescription;
 
 static void _show_skill_use_messages(Object* obj, int skill, Object* target, int successCount, int criticalChanceModifier);
-static int skillGetFreeUsageSlot(int skill);
+static int skillGetFreeUsageSlot(int skill, Object* subject = nullptr);
 static int skill_use_slot_clear();
 
 // Damage flags which can be repaired using "Repair" skill.
@@ -114,6 +114,18 @@ int _gStealSize = 0;
 
 // 0x667F98
 static int _timesSkillUsed[SKILL_COUNT][SKILLS_MAX_USES_PER_DAY];
+static int gPlayerSkillUsage[kMaxPlayerActors - 1][SKILL_COUNT][SKILLS_MAX_USES_PER_DAY];
+
+static int (*skillUsageRow(int slot))[SKILLS_MAX_USES_PER_DAY]
+{
+    return slot > 0 && slot < kMaxPlayerActors
+        ? gPlayerSkillUsage[slot - 1] : _timesSkillUsed;
+}
+
+static int* skillUsageTimes(int skill, Object* subject)
+{
+    return skillUsageRow(playerActorSlotOf(subject != nullptr ? subject : gDude))[skill];
+}
 
 // 0x668070
 static int gTaggedSkills[NUM_TAGGED_SKILLS];
@@ -257,6 +269,8 @@ void skillsPlayerActorSeedSlot(int slot)
     if (slot < 1 || slot >= kMaxPlayerActors) {
         return;
     }
+
+    memset(gPlayerSkillUsage[slot - 1], 0, sizeof(gPlayerSkillUsage[slot - 1]));
 
     for (int index = 0; index < NUM_TAGGED_SKILLS; index++) {
         gPlayerActorTaggedSkills[slot - 1][index] = gTaggedSkills[index];
@@ -708,7 +722,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
 
     switch (skill) {
     case SKILL_FIRST_AID:
-        if (skillGetFreeUsageSlot(SKILL_FIRST_AID) == -1) {
+        if (skillGetFreeUsageSlot(SKILL_FIRST_AID, obj) == -1) {
             // 590: You've taxed your ability with that skill. Wait a while.
             // 591: You're too tired.
             // 592: The strain might kill you.
@@ -732,7 +746,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                     : skillRoll(obj, skill, criticalChance, &hpToHeal);
                 if ((roll == ROLL_SUCCESS || roll == ROLL_CRITICAL_SUCCESS)
                     && critterRevive(target)) {
-                    skillUpdateLastUse(SKILL_FIRST_AID);
+                    skillUpdateLastUse(SKILL_FIRST_AID, obj);
                     successCount = 1;
                     char line[128];
                     snprintf(line, sizeof(line), "%s revived %s with First Aid.",
@@ -791,7 +805,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
 
                 target->data.critter.combat.maneuver &= ~CRITTER_MANUEVER_FLEEING;
 
-                skillUpdateLastUse(SKILL_FIRST_AID);
+                skillUpdateLastUse(SKILL_FIRST_AID, obj);
 
                 successCount = 1;
 
@@ -837,7 +851,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
 
         break;
     case SKILL_DOCTOR:
-        if (skillGetFreeUsageSlot(SKILL_DOCTOR) == -1) {
+        if (skillGetFreeUsageSlot(SKILL_DOCTOR, obj) == -1) {
             // 590: You've taxed your ability with that skill. Wait a while.
             // 591: You're too tired.
             // 592: The strain might kill you.
@@ -861,7 +875,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                 }
                 if ((roll == ROLL_SUCCESS || roll == ROLL_CRITICAL_SUCCESS)
                     && critterRevive(target)) {
-                    skillUpdateLastUse(SKILL_DOCTOR);
+                    skillUpdateLastUse(SKILL_DOCTOR, obj);
                     successCount = 1;
                     char line[128];
                     snprintf(line, sizeof(line), "%s revived %s with Doctor.",
@@ -921,7 +935,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                             // 521: You heal the %s.
                             prefix.num = (target == gDude ? 520 : 521);
 
-                            skillUpdateLastUse(SKILL_DOCTOR);
+                            skillUpdateLastUse(SKILL_DOCTOR, obj);
 
                             successCount = 1;
                             skillUseSlotAdded = 1;
@@ -971,7 +985,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                 }
 
                 if (!skillUseSlotAdded) {
-                    skillUpdateLastUse(SKILL_DOCTOR);
+                    skillUpdateLastUse(SKILL_DOCTOR, obj);
                 }
 
                 target->data.critter.combat.maneuver &= ~CRITTER_MANUEVER_FLEEING;
@@ -1055,7 +1069,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
             return -1;
         }
 
-        if (skillGetFreeUsageSlot(SKILL_REPAIR) == -1) {
+        if (skillGetFreeUsageSlot(SKILL_REPAIR, obj) == -1) {
             // 590: You've taxed your ability with that skill. Wait a while.
             // 591: You're too tired.
             // 592: The strain might kill you.
@@ -1106,7 +1120,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                         // 520: You heal your %s.
                         // 521: You heal the %s.
                         prefix.num = (target == gDude ? 520 : 521);
-                        skillUpdateLastUse(SKILL_REPAIR);
+                        skillUpdateLastUse(SKILL_REPAIR, obj);
 
                         successCount = 1;
                         skillUseSlotAdded = 1;
@@ -1150,7 +1164,7 @@ int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier)
                 }
 
                 if (!skillUseSlotAdded) {
-                    skillUpdateLastUse(SKILL_REPAIR);
+                    skillUpdateLastUse(SKILL_REPAIR, obj);
                 }
 
                 target->data.critter.combat.maneuver &= ~CRITTER_MANUEVER_FLEEING;
@@ -1337,16 +1351,17 @@ int skillGetGameDifficultyModifier(int skill)
 }
 
 // 0x4ABE44
-static int skillGetFreeUsageSlot(int skill)
+static int skillGetFreeUsageSlot(int skill, Object* subject)
 {
+    int* times = skillUsageTimes(skill, subject);
     for (int slot = 0; slot < SKILLS_MAX_USES_PER_DAY; slot++) {
-        if (_timesSkillUsed[skill][slot] == 0) {
+        if (times[slot] == 0) {
             return slot;
         }
     }
 
     unsigned int time = gameTimeGetTime();
-    int hoursSinceLastUsage = (time - _timesSkillUsed[skill][0]) / GAME_TIME_TICKS_PER_HOUR;
+    int hoursSinceLastUsage = (time - times[0]) / GAME_TIME_TICKS_PER_HOUR;
     if (hoursSinceLastUsage <= 24) {
         return -1;
     }
@@ -1355,33 +1370,39 @@ static int skillGetFreeUsageSlot(int skill)
 }
 
 // 0x4ABEB8
-int skillUpdateLastUse(int skill)
+int skillUpdateLastUse(int skill, Object* subject)
 {
-    int slot = skillGetFreeUsageSlot(skill);
+    if (!skillIsValid(skill)) {
+        return -1;
+    }
+    int* times = skillUsageTimes(skill, subject);
+    int slot = skillGetFreeUsageSlot(skill, subject);
     if (slot == -1) {
         return -1;
     }
 
-    if (_timesSkillUsed[skill][slot] != 0) {
+    if (times[slot] != 0) {
         for (int i = 0; i < slot; i++) {
-            _timesSkillUsed[skill][i] = _timesSkillUsed[skill][i + 1];
+            times[i] = times[i + 1];
         }
     }
 
-    _timesSkillUsed[skill][slot] = gameTimeGetTime();
+    times[slot] = gameTimeGetTime();
+    playerSheetMarkDirty(subject != nullptr ? subject : gDude);
 
     return 0;
 }
 
-int skillGetUsesToday(int skill)
+int skillGetUsesToday(int skill, Object* subject)
 {
     if (!skillIsValid(skill)) {
         return 0;
     }
 
+    int* times = skillUsageTimes(skill, subject);
     int uses = 0;
     for (int slot = 0; slot < SKILLS_MAX_USES_PER_DAY; slot++) {
-        if (_timesSkillUsed[skill][slot] != 0) {
+        if (times[slot] != 0) {
             uses++;
         }
     }
@@ -1394,7 +1415,22 @@ int skillGetUsesToday(int skill)
 int skill_use_slot_clear()
 {
     memset(_timesSkillUsed, 0, sizeof(_timesSkillUsed));
+    memset(gPlayerSkillUsage, 0, sizeof(gPlayerSkillUsage));
     return 0;
+}
+
+// Extra-player usage rides the versioned sheet block; host disk storage stays
+// in the vanilla skillsUsageSave section for backwards-compatible loading.
+int skillsUsageRowWrite(File* stream, int slot)
+{
+    if (slot < 0 || slot >= kMaxPlayerActors) return -1;
+    return fileWriteInt32List(stream, (int*)skillUsageRow(slot), SKILL_COUNT * SKILLS_MAX_USES_PER_DAY);
+}
+
+int skillsUsageRowRead(File* stream, int slot)
+{
+    if (slot < 0 || slot >= kMaxPlayerActors) return -1;
+    return fileReadInt32List(stream, (int*)skillUsageRow(slot), SKILL_COUNT * SKILLS_MAX_USES_PER_DAY);
 }
 
 // 0x4ABF3C

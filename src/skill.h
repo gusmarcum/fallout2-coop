@@ -50,10 +50,12 @@ int skillGetFrmId(int skill);
 int skillUse(Object* obj, Object* target, int skill, int criticalChanceModifier);
 int skillsPerformStealing(Object* a1, Object* a2, Object* item, bool isPlanting);
 int skillGetGameDifficultyModifier(int skill);
-int skillUpdateLastUse(int skill);
+int skillUpdateLastUse(int skill, Object* subject = nullptr);
 // Number of non-expired usage slots recorded for `skill` today (the anti-spam
 // cooldown state). Exposed for state-dump visibility.
-int skillGetUsesToday(int skill);
+int skillGetUsesToday(int skill, Object* subject = nullptr);
+int skillsUsageRowWrite(File* stream, int slot);
+int skillsUsageRowRead(File* stream, int slot);
 int skillsUsageSave(File* stream);
 int skillsUsageLoad(File* stream);
 char* skillsGetGenericResponse(Object* critter, bool isDude);
