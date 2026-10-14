@@ -395,13 +395,9 @@ static void serverEmitBaseline()
 {
     gBaselineGeneration = mapGetLoadGeneration();
 
-    // Co-op: re-derive every EXTRA player actor's vault-suit look from the world
-    // MOVIE_VSUIT flag + their own gender, BEFORE the blob/snapshot below serialize
-    // their bodies. This is THE choke every map switch / load / restart / join /
-    // reconnect funnels through, so every baseline carries the correct fid and only
-    // the host-gets-the-suit bug is fixed for all N ([[vault-suit-appearance-gap]]).
-    // gDude's own look is already current here (vanilla _proto_dude_update_gender on
-    // map load / restore). No-op at N==1, so goldens stay byte-identical.
+    // Refresh every registered player's native look before serializing bodies.
+    // The map initiator can be scoped as gDude during the vanilla gender update,
+    // so slot 0 must be included even when another player triggered the movie.
     protoPlayerActorsUpdateLook();
 
     // STEP 4: the full-world blob rides its own frame(s) BEFORE the SNAPSHOT_OBJECT

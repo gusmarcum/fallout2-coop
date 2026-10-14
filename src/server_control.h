@@ -45,7 +45,7 @@ struct Object;
 //   look <net>         examine any object at netId — streams its description as
 //                      console text. No approach, no AP, legal in combat.
 //   push <net>         shove a pushable critter at netId. No approach.
-//   rot                rotate the actor one step clockwise. No target.
+//   rot [-1|1]         rotate one step (default clockwise). No target.
 //   skill <net> <sk>   use skilldex skill <sk> on netId (walk-then-skill). <sk> is
 //                      allow-listed to the eight skilldex skills. In combat vanilla
 //                      refuses seven of them with proto msg 902 and toggles Sneak.

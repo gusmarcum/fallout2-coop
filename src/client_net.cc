@@ -67,6 +67,7 @@
 #include "skill.h" // skillsPlayerActorSeed — per-actor sheet rows
 #include "trait.h" // traitsPlayerActorSeed — per-actor sheet rows
 #include "text_object.h" // floating combat text (§3.e S2)
+#include "svga.h" // screenGetWidth / screenGetVisibleHeight: is the local actor on the screen
 #include "tile.h" // tileWindowRefreshRect (float-text redraw)
 #include "wire_defs.h" // kWireVersion / kWirePreambleLen / kNoSessionId
 
@@ -248,7 +249,7 @@ unsigned int crc32Of(const unsigned char* data, int length)
 static const int kViewerModalMask = GameMode::kInventory | GameMode::kSkilldex
     | GameMode::kEditor | GameMode::kPipboy | GameMode::kLoot | GameMode::kUseOn
     | GameMode::kDialog | GameMode::kWorldmap | GameMode::kBarter
-    | GameMode::kPreferences | GameMode::kAutomap;
+    | GameMode::kPreferences | GameMode::kAutomap | GameMode::kHelp;
 
 // ─── Combat outlines on the wire viewer (COMBAT_CLIENT_DESIGN #8) ────────────
 // Vanilla draws colored critter outlines in combat (red=hostile / green=friendly by
@@ -863,7 +864,7 @@ public:
             // Glide ended — reconcile the bar to the authoritative AP.
             if (_dudeApShown != _dudeApAuth) {
                 _dudeApShown = _dudeApAuth;
-                interfaceRenderActionPoints(_dudeApShown, 0);
+                interfaceRenderActionPoints(_dudeApShown, _combat_free_move);
                 interfaceBarRefresh();
             }
             _dudeApDeferring = false;
@@ -877,7 +878,7 @@ public:
             }
             if (shown != _dudeApShown) {
                 _dudeApShown = shown;
-                interfaceRenderActionPoints(_dudeApShown, 0);
+                interfaceRenderActionPoints(_dudeApShown, _combat_free_move);
                 interfaceBarRefresh();
             }
         }
@@ -955,6 +956,46 @@ public:
             }
         }
         return false;
+    }
+
+    // ►► WHAT A SCREEN THAT HIDES THE WORLD CAN STILL SHOW (GitHub issue 54, bugs/080).
+    //
+    // The inventory, the pipboy, the character sheet and the like switch the world off,
+    // and the presentation pump with it: nothing on the queue moves until the screen
+    // closes. In a fight that queue holds every message line, and since bugs/069 a new
+    // hit point total for this player waits on it whenever anything is queued. So a
+    // healing item used from the inventory in a fight went: "You gained 12 hit points"
+    // queued, the new total parked behind it, and both stood there until the inventory
+    // was closed (the counter moved only then, which is the report).
+    //
+    // A message line, a sound and this player's own hit points need no world to be
+    // shown. When they are ALL that is queued, they are let through here, in order. With
+    // anything else in the line (an attack, a recorded sequence, a turn start, the end of
+    // the fight) nothing is touched: a total parked behind a blow still waits for that
+    // blow to be shown, which is what the parking is for.
+    void screenPump()
+    {
+        if (clientViewerActive() && !_presQueue.empty() && !clientCombatAnimActive()) {
+            bool needsNoWorld = true;
+            for (const PresEvent& e : _presQueue) {
+                if (e.kind != PresKind::kConsole && e.kind != PresKind::kSfx && e.kind != PresKind::kDudeHp) {
+                    needsNoWorld = false;
+                    break;
+                }
+            }
+            while (needsNoWorld && !_presQueue.empty()) {
+                PresEvent ev = _presQueue.front();
+                _presQueue.pop_front();
+                clientAnimNotePresentationProgress();
+                switch (ev.kind) {
+                case PresKind::kConsole: applyConsole(ev.text, ev.consoleChannel); break;
+                case PresKind::kSfx: applySfx(ev.text); break;
+                case PresKind::kDudeHp: applyDudeHp(ev.hpNetId, ev.hpValue); break;
+                default: break;
+                }
+            }
+        }
+        rollDudeHp();
     }
 
     void presentationPump()
@@ -1609,6 +1650,34 @@ private:
     // Point gDude at the actor this session owns (MP_PROPOSAL.md Ch 5.6). A
     // session with no roster row is a SPECTATOR: gDude stays the host actor and
     // it renders P1's view, which is exactly what extra viewers do today.
+    // ►► THE CAMERA GOES TO THIS VIEWER'S OWN CHARACTER (GitHub issue 47, pull request
+    // 74). After a load or a rebind the view was left where the save or the host had it.
+    //
+    // Scrolled there a tile at a time, the way the Home key does it, so that it stops at
+    // the map's scroll blockers: a character can stand beyond them (by an exit grid), and
+    // a camera jumped out there cannot be scrolled back in. If that scroll stops so short
+    // that the character is not even on the screen (something lay in the straight line),
+    // the jump is the lesser evil, and it is what this code did before for a joiner.
+    void centerOnLocalActor()
+    {
+        if (gDude == nullptr || gDude->tile < 0) {
+            return;
+        }
+        if (gDude->elevation != gElevation) {
+            mapSetElevation(gDude->elevation);
+        }
+        _tile_scroll_to(gDude->tile, 0x02);
+        int x = 0;
+        int y = 0;
+        tileToScreenXY(gDude->tile, &x, &y, gElevation);
+        bool inView = x >= 0 && x < screenGetWidth() && y >= 0 && y < screenGetVisibleHeight();
+        if (!inView) {
+            tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW);
+        }
+        debugPrint("client_net: camera brought to the local actor (tile %d, centre %d, %s)\n",
+            gDude->tile, gCenterTile, inView ? "scrolled" : "jumped: the scroll stopped short");
+    }
+
     void rebindLocalActor()
     {
         if (!clientViewerActive() || gClientHostDude == nullptr) {
@@ -1657,7 +1726,9 @@ private:
         if (previousDude != nullptr
             && critterGetBaseStat(previousDude, STAT_GENDER) != critterGetBaseStat(gDude, STAT_GENDER)) {
             _proto_dude_update_gender();
-            objectSetFrame(gDude, 0, nullptr);
+            if (!critterIsDead(gDude)) {
+                objectSetFrame(gDude, 0, nullptr);
+            }
         }
 
         // The hit point counter rolls the SHOWN value toward _dudeHpAuth (rollDudeHp),
@@ -1712,12 +1783,7 @@ private:
 
         // The camera and the render elevation belong to MY actor, not the host's
         // — without this a rebound viewer keeps looking at P1.
-        if (gDude != nullptr) {
-            if (gDude->elevation != gElevation) {
-                mapSetElevation(gDude->elevation);
-            }
-            tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW);
-        }
+        centerOnLocalActor();
 
         debugPrint("client_net: session %d bound to actor netId %d\n", _mySessionId,
             gDude != nullptr ? gDude->netId : 0);
@@ -1925,6 +1991,13 @@ private:
         // here AND in the roster decoder because the two can arrive in either
         // order; it is idempotent.
         rebindLocalActor();
+
+        // A reload can keep the same local actor (especially slot 0), in which
+        // case rebindLocalActor returns without updating the camera. Center once
+        // the new world and local actor are available, just like the Home key.
+        if (clientViewerActive()) {
+            centerOnLocalActor();
+        }
 
         _loaded = true;
         _loadCount++;
@@ -2403,6 +2476,28 @@ private:
             // Unlink from the owning inventory FIRST, so the object is only ever in
             // one place. Doing it here also covers a stale/re-minted netId that
             // happens to resolve to a carried item.
+            // Equipped items are parked outside gDude's inventory while a modal
+            // is open. CONNECT transfers this exact object to the ground, so clear
+            // its parked slots before the next reconcile can reattach it and then
+            // remove/free it as absent from the server's inventory.
+            bool droppedEquipment = false;
+            if (gInventoryLeftHandItem == obj) {
+                gInventoryLeftHandItem = nullptr;
+                droppedEquipment = true;
+            }
+            if (gInventoryRightHandItem == obj) {
+                gInventoryRightHandItem = nullptr;
+                droppedEquipment = true;
+            }
+            if (gInventoryArmor == obj) {
+                gInventoryArmor = nullptr;
+                droppedEquipment = true;
+            }
+            if (droppedEquipment) {
+                obj->flags &= ~OBJECT_EQUIPPED;
+                obj->owner = nullptr;
+                gDudeInvDirty = true;
+            }
             unlinkFromAnyInventory(obj);
             // ►► REPAINT THE ARRIVAL TILE, for the same reason onDisconnect repaints the
             // vacated one: _obj_connect only links the object into the tile list, it draws
@@ -2593,6 +2688,14 @@ private:
                 // non-gliding fid applies immediately via the pose helper (frame-gotcha safe).
                 if (!(clientViewerActive() && clientAnimDeferFid(obj, fid))) {
                     clientApplyPose(obj, fid);
+
+                    // Repaint the authoritative appearance behind the inventory.
+                    // This redraws the world without advancing animations.
+                    if (clientViewerActive()
+                        && obj == gDude
+                        && (GameMode::getCurrentGameMode() & GameMode::kInventory) != 0) {
+                        tileWindowRefresh();
+                    }
                 }
             }
             if (hasFlags) objectApplyWireFlags(obj, flags);
@@ -3058,6 +3161,11 @@ private:
         if (hasHp && !dudeCombatHp) obj->data.critter.hp = hp;
         if (hasRad) obj->data.critter.radiation = rad;
         if (hasPoison) obj->data.critter.poison = poison;
+        // Re-derive status labels after applying the authoritative values,
+        // including while inventory is open. This does not advance animations.
+        if (clientViewerActive() && obj == gDude && (hasRad || hasPoison)) {
+            indicatorBarRefresh();
+        }
         // In-combat recorded MOVE: HOLD the mover's authoritative AP until the replayed walk
         // completes (the client's real engine charges AP per step from the pre-walk pool, so
         // it re-walks the identical tiles instead of dying on step 1 with a drained pool).
@@ -3110,11 +3218,11 @@ private:
                 if (obj->data.critter.combat.ap < prevAp && clientAnimActiveFor(gDude)) {
                     _dudeApDeferring = true;
                     _dudeApMoveHops = clientAnimHopsRemaining(gDude);
-                    interfaceRenderActionPoints(_dudeApShown, 0); // unchanged (pre-move)
+                    interfaceRenderActionPoints(_dudeApShown, _combat_free_move); // unchanged (pre-move)
                 } else {
                     _dudeApShown = obj->data.critter.combat.ap;
                     _dudeApDeferring = false;
-                    interfaceRenderActionPoints(_dudeApShown, 0);
+                    interfaceRenderActionPoints(_dudeApShown, _combat_free_move);
                 }
                 touched = true;
             }
@@ -3447,6 +3555,12 @@ private:
             // free-roam motion before establishing combat chrome, exactly as enter does.
             presStandDownAll();
         }
+        // Applied as it arrives, never queued behind what is still being shown (the
+        // comment above says why; a turn start waiting on the queue is also lost to a
+        // rebaseline that empties the queue in the middle of a fight, and the player
+        // then sits out a turn the server is holding for them). The Bonus Move dots do
+        // not need the wait: what used to eat them was other critters' replayed steps
+        // spending this player's budget, and those no longer do (animation.cc).
         applyTurnStart(netId, isPlayer, ap, deadline, freeMove);
     }
 
@@ -3510,6 +3624,9 @@ private:
             interfaceBarEndButtonsRenderGreenLights();
         } else {
             gCombatState &= ~COMBAT_STATE_0x02; // another actor's turn
+            // The Bonus Move budget is this player's, for this player's turn: what was
+            // left of it goes when the turn does, as in the original.
+            _combat_free_move = 0;
             interfaceRenderActionPoints(-1, -1); // all dots red — not your turn
             interfaceBarEndButtonsRenderRedLights();
         }
@@ -3907,12 +4024,23 @@ private:
                     // target's multihex approach).
                     int heldTile = o ? clientCombatAnimHeldMoveTile(o) : -1;
                     if (o && heldTile >= 0) {
-                        if (anim == ANIM_RUNNING) animationRegisterRunToTile(o, heldTile, o->elevation, ap, delay);
-                        else animationRegisterMoveToTile(o, heldTile, o->elevation, ap, delay);
+                        // A zero-length path fails during execution and aborts the
+                        // whole sequence, including its waiting pickup animation.
+                        if (o->tile != heldTile) {
+                            if (anim == ANIM_RUNNING) animationRegisterRunToTile(o, heldTile, o->elevation, ap, delay);
+                            else animationRegisterMoveToTile(o, heldTile, o->elevation, ap, delay);
+                        }
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     } else if (o && target) {
-                        if (anim == ANIM_RUNNING) animationRegisterRunToObject(o, target, ap, delay);
-                        else animationRegisterMoveToObject(o, target, ap, delay);
+                        // Inventory reconciliation may already have disconnected
+                        // this target. With no held movement endpoint, retain the
+                        // current pose and play the remaining gesture in place.
+                        // An adjacent target also needs no approach task.
+                        if (target->tile >= 0 && target->owner == nullptr
+                            && objectGetDistanceBetween(o, target) > ((o->flags & OBJECT_MULTIHEX) != 0 ? 2 : 1)) {
+                            if (anim == ANIM_RUNNING) animationRegisterRunToObject(o, target, ap, delay);
+                            else animationRegisterMoveToObject(o, target, ap, delay);
+                        }
                         clientCombatAnimMarkActive(o, kMoveReplayCapMs, /*ownsMoveFrame=*/true);
                     } else if (o) {
                         // No held position AND no target — nothing to walk to; the reap snaps
@@ -3953,8 +4081,11 @@ private:
                         // the take-out mid-draw → the wield is never seen), and (2) the held
                         // armed-fid OBJECT_DELTA resolves when the draw completes (not on the
                         // 5 s reserve-stall backstop). The generic recorded-seq path doesn't
-                        // promote to Active on its own. 0 = generic replay cap (a draw is <1 s).
-                        clientCombatAnimMarkActive(o, 0);
+                        // promote to Active on its own. The cap covers the WHOLE
+                        // sequence, including a preceding throw or put-away, not
+                        // just the draw. Keep a bounded fallback without cutting
+                        // off the replacement weapon's take-out after two seconds.
+                        clientCombatAnimMarkActive(o, kMoveReplayCapMs);
                     }
                 } else {
                     reserveSeqRef(ref);
@@ -4623,7 +4754,9 @@ private:
                 // as onMovieSeenState.
                 if (critterGetBaseStat(gDude, STAT_GENDER) != genderBefore) {
                     _proto_dude_update_gender();
-                    objectSetFrame(gDude, 0, nullptr);
+                    if (!critterIsDead(gDude)) {
+                        objectSetFrame(gDude, 0, nullptr);
+                    }
                     tileWindowRefresh();
                 }
             }
@@ -4751,7 +4884,9 @@ private:
         // past the new art's count and render nothing (frame-index-render-gotcha), so
         // reset it. Then repaint — this arrives async off the wire.
         _proto_dude_update_gender();
-        objectSetFrame(gDude, 0, nullptr);
+        if (!critterIsDead(gDude)) {
+            objectSetFrame(gDude, 0, nullptr);
+        }
         tileWindowRefresh();
     }
 
@@ -5445,7 +5580,7 @@ public:
     bool inCombat() const { return _decoder.inCombat(); }
     bool myTurn() const { return _decoder.myTurn(); }
     void presentationPump() { _decoder.presentationPump(); }
-    void hudPump() { _decoder.rollDudeHp(); }
+    void hudPump() { _decoder.screenPump(); }
     void recomputeCombatOutlines() { _decoder.recomputeCombatOutlines(); }
     bool everBoundToSlot() const { return _decoder.everBoundToSlot(); }
     bool combatPresentationBusy() const { return _decoder.combatPresentationBusy(); }
@@ -5996,7 +6131,7 @@ static void showPendingYesNoPrompt()
 // them. A fight that STARTS while one is open still closes it; one opened DURING the
 // fight stays until the player closes it (bugs/035).
 static const int kViewerFreeInCombatMask = GameMode::kEditor | GameMode::kPreferences
-    | GameMode::kSkilldex;
+    | GameMode::kSkilldex | GameMode::kHelp;
 
 // Whether the ticker's last call saw the viewer in combat, and whether the fight began
 // while the screen that is open now was already up. Both are updated at the top of

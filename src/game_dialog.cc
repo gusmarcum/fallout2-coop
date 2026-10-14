@@ -919,11 +919,17 @@ int _gdialogInitFromScript(int headFid, int reaction)
     // server records them even though it builds no window.
     gGameDialogFidget = reaction;
 
-    if (_dialogue_state == 1) {
+    // ►► ON THE SERVER THIS IS NOT ASKED TWICE (GitHub issue 53, bugs/083). The two
+    // early returns below are about windows that are already up. The server has none,
+    // and the first of them was reached with a flag a trade leaves set for good
+    // (serverDialogRunPendingBarter ends on _dialogue_state 1 and nothing on this side
+    // clears it): after the first trade of a session no conversation a script opened
+    // by itself was given anybody to answer it. The server's part comes first now.
+    if (!serverLoopActive() && _dialogue_state == 1) {
         return -1;
     }
 
-    if (_gdialog_state == 1) {
+    if (!serverLoopActive() && _gdialog_state == 1) {
         return 0;
     }
 
@@ -2137,31 +2143,45 @@ static void serverDialogPartyOrders()
     memcpy(savedOptions, gDialogOptionEntries, sizeof(GameDialogOptionEntry) * savedLength);
     memcpy(savedReply, gDialogReplyText, sizeof(savedReply));
 
+    // ►► TWO PAGES, SO THAT EVERY LINE IS ON THE SCREEN (GitHub issue 22, follow-up). A
+    // conversation window shows eight lines. The one-page menu had ten (the preset, six
+    // orders, the two one-shots, Done), so "Wear your best armor" and "Done" sat below
+    // the last line shown: they worked by their number keys and could not be seen.
+    //   first page:  Use your best weapon / Wear your best armor / Change how you fight / Done
+    //   second page: the preset, the six orders, Back
+    bool ordersPage = false;
     for (;;) {
-        snprintf(gDialogReplyText, sizeof(gDialogReplyText),
-            "%s: How do you want me to fight? Pick a line to change it.", critterGetName(member));
         gameDialogClearOptions(); // length, scroll and clipping reset
-        {
-            // Line 0: the preset (the window's Berserk / Aggressive / Defensive / Coward /
-            // Custom buttons). Picking it cycles to the next preset, which swaps the
-            // member's whole AI packet exactly as the buttons do (aiSetDisposition).
-            char line[256];
-            snprintf(line, sizeof(line), "Disposition: %s", partyOrdersDispositionName(aiGetDisposition(member)));
-            gameDialogAddTextOption(-1, line, GAME_DIALOG_REACTION_NEUTRAL);
+        if (!ordersPage) {
+            snprintf(gDialogReplyText, sizeof(gDialogReplyText),
+                "%s: What do you want me to do in a fight?", critterGetName(member));
+            // The window's two one-shot buttons (USE BEST WEAPON / USE BEST ARMOR), which
+            // the text menu never offered (GitHub issue 22). Same calls as the window's
+            // 'w' and 'a' handlers below.
+            gameDialogAddTextOption(-1, "Use your best weapon", GAME_DIALOG_REACTION_NEUTRAL);
+            gameDialogAddTextOption(-1, "Wear your best armor", GAME_DIALOG_REACTION_NEUTRAL);
+            gameDialogAddTextOption(-1, "Change how you fight", GAME_DIALOG_REACTION_NEUTRAL);
+            gameDialogAddTextOption(-1, partyOrdersMessage(10), GAME_DIALOG_REACTION_NEUTRAL); // Done
+        } else {
+            snprintf(gDialogReplyText, sizeof(gDialogReplyText),
+                "%s: How do you want me to fight? Pick a line to change it.", critterGetName(member));
+            {
+                // Line 0: the preset (the window's Berserk / Aggressive / Defensive / Coward /
+                // Custom buttons). Picking it cycles to the next preset, which swaps the
+                // member's whole AI packet exactly as the buttons do (aiSetDisposition).
+                char line[256];
+                snprintf(line, sizeof(line), "Disposition: %s", partyOrdersDispositionName(aiGetDisposition(member)));
+                gameDialogAddTextOption(-1, line, GAME_DIALOG_REACTION_NEUTRAL);
+            }
+            for (int type = 0; type < PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT; type++) {
+                int index = partyOrdersCurrentIndex(member, type);
+                char line[256];
+                snprintf(line, sizeof(line), "%s: %s", partyOrdersMessage(type),
+                    partyOrdersMessage(_custom_settings[type][index].messageId));
+                gameDialogAddTextOption(-1, line, GAME_DIALOG_REACTION_NEUTRAL);
+            }
+            gameDialogAddTextOption(-1, "Back", GAME_DIALOG_REACTION_NEUTRAL);
         }
-        for (int type = 0; type < PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT; type++) {
-            int index = partyOrdersCurrentIndex(member, type);
-            char line[256];
-            snprintf(line, sizeof(line), "%s: %s", partyOrdersMessage(type),
-                partyOrdersMessage(_custom_settings[type][index].messageId));
-            gameDialogAddTextOption(-1, line, GAME_DIALOG_REACTION_NEUTRAL);
-        }
-        // The window's two one-shot buttons (USE BEST WEAPON / USE BEST ARMOR), which
-        // the text menu never offered (GitHub issue 22). Same calls as the window's
-        // 'w' and 'a' handlers below.
-        gameDialogAddTextOption(-1, "Use your best weapon", GAME_DIALOG_REACTION_NEUTRAL);
-        gameDialogAddTextOption(-1, "Wear your best armor", GAME_DIALOG_REACTION_NEUTRAL);
-        gameDialogAddTextOption(-1, partyOrdersMessage(10), GAME_DIALOG_REACTION_NEUTRAL); // Done
 
         if (gDialogServerPump != nullptr) {
             dialogEmitNode();
@@ -2187,30 +2207,38 @@ static void serverDialogPartyOrders()
         if (intent.kind != DIALOG_INTENT_SELECT) {
             break; // Combat Control / barter pressed again: treat as Done
         }
-        if (intent.arg == PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT + 1) {
-            // Use best weapon: the window's 'w'.
-            _inven_unwield(member, 1);
-            Object* weapon = _ai_search_inven_weap(member, 0, nullptr);
-            if (weapon != nullptr) {
-                _inven_wield(member, weapon, HAND_RIGHT);
-                aiAttemptWeaponReload(member, 0);
+        if (!ordersPage) {
+            if (intent.arg == 0) {
+                // Use best weapon: the window's 'w'.
+                _inven_unwield(member, 1);
+                Object* weapon = _ai_search_inven_weap(member, 0, nullptr);
+                if (weapon != nullptr) {
+                    _inven_wield(member, weapon, HAND_RIGHT);
+                    aiAttemptWeaponReload(member, 0);
+                }
+                fprintf(stderr, "f2_server: party orders %s: use best weapon -> %s\n", critterGetName(member),
+                    weapon != nullptr ? objectGetName(weapon) : "none carried");
+                continue;
             }
-            fprintf(stderr, "f2_server: party orders %s: use best weapon -> %s\n", critterGetName(member),
-                weapon != nullptr ? objectGetName(weapon) : "none carried");
-            continue;
-        }
-        if (intent.arg == PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT + 2) {
-            // Use best armor: the window's 'a' (Goris, pid 0x10000A1, wears none).
-            Object* armor = member->pid != 0x10000A1 ? _ai_search_inven_armor(member) : nullptr;
-            if (armor != nullptr) {
-                _inven_wield(member, armor, 0);
+            if (intent.arg == 1) {
+                // Use best armor: the window's 'a' (Goris, pid 0x10000A1, wears none).
+                Object* armor = member->pid != 0x10000A1 ? _ai_search_inven_armor(member) : nullptr;
+                if (armor != nullptr) {
+                    _inven_wield(member, armor, 0);
+                }
+                fprintf(stderr, "f2_server: party orders %s: wear best armor -> %s\n", critterGetName(member),
+                    armor != nullptr ? objectGetName(armor) : "none carried");
+                continue;
             }
-            fprintf(stderr, "f2_server: party orders %s: wear best armor -> %s\n", critterGetName(member),
-                armor != nullptr ? objectGetName(armor) : "none carried");
-            continue;
+            if (intent.arg == 2) {
+                ordersPage = true;
+                continue;
+            }
+            break; // Done (or out of range)
         }
         if (intent.arg < 0 || intent.arg > PARTY_MEMBER_CUSTOMIZATION_OPTION_COUNT) {
-            break; // Done (or out of range)
+            ordersPage = false; // Back (or out of range): the first page again
+            continue;
         }
         if (intent.arg == 0) {
             int nextDisposition = (aiGetDisposition(member) + 1) % 5;

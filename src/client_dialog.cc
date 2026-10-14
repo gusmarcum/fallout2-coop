@@ -41,6 +41,8 @@ static bool gClientDialogNodePending = false;  // node content needs (re)applyin
 static bool gClientDialogLipsPending = false;  // a FRESH node wants lipsync played
 static int gClientDialogDriverNetId = 0;
 static bool gClientDialogWaitingForResponse = false;
+// Frames the session window has waited for a speaker the mirror does not have.
+static int gClientDialogSpeakerWaitFrames = 0;
 
 // Latched node payload. Owned copies (not the transient wire buffers) so the render
 // step can run a frame or more after decode, and so a node can be re-applied into
@@ -111,6 +113,7 @@ void clientDialogOnEnd()
     gClientDialogLipsPending = false;
     gClientDialogDriverNetId = 0;
     gClientDialogWaitingForResponse = false;
+    gClientDialogSpeakerWaitFrames = 0;
 }
 
 // ►► THE SINGLE WINDOW OWNER (I2). Pure function of (dialogActive, barterActive):
@@ -137,8 +140,23 @@ void clientModalWindowsSync()
             // Speaker netId not in the map yet (a node can arrive a frame before the
             // object baseline settles). Leave everything latched and retry next
             // frame rather than dropping the conversation.
-            return;
+            //
+            // ►► BUT NOT FOR EVER (GitHub issue 53's family, bugs/083). A conversation a
+            // floor trigger opens is spoken by the trigger's hidden helper object, and
+            // the server may only make that object when the conversation starts: it
+            // was never sent and never will be. The server meanwhile holds the whole
+            // world for the answer, so a window that is never built is a session
+            // nobody can get out of. After a second without the speaker the window
+            // is built around this player's own character, which is where a floor
+            // trigger's speaker stands in any case.
+            if (++gClientDialogSpeakerWaitFrames < 60 || gDude == nullptr) {
+                return;
+            }
+            debugPrint("client_dialog: speaker net %d never arrived, the conversation is shown around the local actor\n",
+                gPendingSpeakerNetId);
+            speaker = gDude;
         }
+        gClientDialogSpeakerWaitFrames = 0;
         // headFid + reaction come off the WIRE (the script's own start_gdialog args,
         // captured server-side). Assign the GLOBALS, not just the init args:
         // _gdialogInitFromScript never stores headFid, and gameDialogStartLips /

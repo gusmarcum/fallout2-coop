@@ -2779,8 +2779,15 @@ static int wmRndEncounterOccurred()
 
             if (!serverLoopActive()) {
                 wmFadeOut();
+                mapLoadById(MAP_IN_GAME_MOVIE1);
+            } else {
+                // The dedicated worldmap driver owns map loading. Calling mapLoadById
+                // from this check leaves the driver with no staged map and strands all
+                // viewers on an unclickable world map. Stage the movie exactly like a
+                // random encounter; server_worldmap.cc performs the load after ending
+                // the worldmap session.
+                wmGenData.encounterMapId = MAP_IN_GAME_MOVIE1;
             }
-            mapLoadById(MAP_IN_GAME_MOVIE1);
             return 1;
         }
     }

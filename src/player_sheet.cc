@@ -34,6 +34,12 @@ namespace fallout {
 //                 nothing, which is what an actor saved before the flag existed had.
 // Writes v2; the reader accepts either, so co-op saves taken before this change
 // still load.
+//
+// ►► THIS BLOCK IS ALSO WHAT A CLIENT IS SENT (the join blob's tail, and every sheet
+// delta), and a client refuses a block whose magic it does not know: it stops loading
+// the world there. A new field here therefore locks every older client out, with the
+// wire version unchanged and nothing to tell the player why. What only the server
+// needs goes in a tail section of the save appendix instead (see 'PASU' below).
 static constexpr int kPlayerSheetBlockMagic = 0x50534854; // 'PSHT' (v1)
 static constexpr int kPlayerSheetBlockMagicV2 = 0x50534832; // 'PSH2' (v2)
 
@@ -65,6 +71,11 @@ static constexpr int kPlayerActorEventsMagic = 0x50414556; // 'PAEV'
 // Tail section after the events: which player each companion follows (bugs/067). Same
 // self-delimiting rule: absent in an older save, ignored by an older server.
 static constexpr int kPlayerActorOwnersMagic = 0x50414F57; // 'PAOW'
+// Tail section after the owners: when each extra player last used First Aid, Doctor and
+// Repair with success, which is what the three-a-day limit counts (GitHub issue 59; the
+// host's table is in the vanilla part of the save). Same rule again: absent in an older
+// save (the extras start the day fresh), ignored by an older server.
+static constexpr int kPlayerActorSkillUsageMagic = 0x50415355; // 'PASU'
 
 // Per-slot "sheet row changed this beat" bits, set by playerSheetMarkDirty and
 // drained by playerSheetDeltaEmit. A runtime sheet mutation (drug, level-up,
@@ -305,6 +316,16 @@ int playerActorAppendixSave(File* stream)
         return -1;
     }
 
+    // Each extra's daily skill uses (GitHub issue 59). Last, behind its own magic.
+    if (fileWriteInt32(stream, kPlayerActorSkillUsageMagic) == -1) {
+        return -1;
+    }
+    for (int slot = 1; slot <= extras; slot++) {
+        if (skillsUsageRowWrite(stream, slot) == -1) {
+            return -1;
+        }
+    }
+
     return 0;
 }
 
@@ -494,6 +515,25 @@ int playerActorAppendixLoad(File* stream)
     if (partyMemberOwnersLoad(stream) == -1) {
         fprintf(stderr, "player_sheet: appendix companion owners read failed\n");
         return -1;
+    }
+
+    // Each extra's daily skill uses (GitHub issue 59). EOF = a save from before the
+    // section existed: the seeds above left every extra's table empty. A COUNTED read.
+    unsigned char usageMagicBytes[4];
+    if (fileRead(usageMagicBytes, 1, sizeof(usageMagicBytes), stream) != sizeof(usageMagicBytes)) {
+        return 0;
+    }
+    int usageMagic = (usageMagicBytes[0] << 24) | (usageMagicBytes[1] << 16)
+        | (usageMagicBytes[2] << 8) | usageMagicBytes[3];
+    if (usageMagic != kPlayerActorSkillUsageMagic) {
+        fprintf(stderr, "player_sheet: bad appendix SKILL USE magic 0x%08x, refusing the save\n", usageMagic);
+        return -1;
+    }
+    for (int slot = 1; slot <= extras; slot++) {
+        if (skillsUsageRowRead(stream, slot) == -1) {
+            fprintf(stderr, "player_sheet: appendix skill use row %d read failed\n", slot);
+            return -1;
+        }
     }
 
     return 0;

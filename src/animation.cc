@@ -5,6 +5,7 @@
 
 #include "animation_scheduler.h"
 #include "art.h"
+#include "client_net.h" // clientViewerActive — a viewer's replayed steps and the Bonus Move budget (issue 58)
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
@@ -2219,7 +2220,22 @@ static void _object_move(int index)
             if (isInCombat() && FID_TYPE(object->fid) == OBJ_TYPE_CRITTER) {
                 // REWRITE_PLAN 2.2: the per-step movement AP charge is a core
                 // sim rule (movement.cc); the HUD update stays client-side.
-                cannotMove = movementChargeApForStep(object);
+                //
+                // ►► On a viewer this step is the REPLAY of a move the server has already
+                // charged for, and _combat_free_move there is this player's own Bonus
+                // Move budget, mirrored from the turn start for the action point dots and
+                // the move preview. Only this player's own steps may spend it. Any other
+                // critter's replay used to (an enemy still walking when the turn came
+                // round), and the yellow dots were gone before the player had taken a
+                // step (GitHub issue 58).
+                if (clientViewerActive() && object != gDude) {
+                    int budget = _combat_free_move;
+                    _combat_free_move = 0;
+                    cannotMove = movementChargeApForStep(object);
+                    _combat_free_move = budget;
+                } else {
+                    cannotMove = movementChargeApForStep(object);
+                }
 
                 if (object == gDude) {
                     interfaceRenderActionPoints(gDude->data.critter.combat.ap, _combat_free_move);

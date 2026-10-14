@@ -23,7 +23,7 @@ Seven of the screen proofs check the real client's whole copy of the world again
 server's, with the server's own audit: `syncwalk`, `doorsync` and `corpsesync` with the
 client in the host's seat, the same three with a 2 on the end with it in the seat of a
 player who joins, and `oldsave`, which loads a save made by each released server it finds
-in the game folder (f2_server-v141.exe, -v140, -v132, -v131: keep copies there).
+in the game folder (f2_server-v142.exe, -v141, -v140, -v132, -v131: keep copies there).
 
 Nothing here touches a live world: point it at a sandbox copy. Needs Pillow.
 
@@ -54,10 +54,11 @@ SCREEN = ["firstjoin", "heldturn", "hp", "chat", "sheet", "invhp", "clock", "han
           "createui", "npcloot", "corpseloot", "lvlup", "dialogdots", "stealgear", "musicline", "lookclick", "earlyspace", "reloads", "tradescroll",
           "hpcount", "armorview", "nightmap", "tradeunload", "acturn",
           "syncwalk", "syncwalk2", "doorsync", "doorsync2", "corpsesync", "corpsesync2", "oldsave",
-          "nightmap2", "hpcount2"]
+          "nightmap2", "hpcount2", "combatheal", "bonusdots"]
 WIRE = ["timer", "templexp", "rest", "cancel", "create", "reach", "retry", "lvlsfx", "ownline",
         "joinfreeze", "entryring", "sneakrun", "hostplace", "companions", "dogs", "rocks", "orders",
-        "armoroff", "bess", "bunload", "gestures", "pronekill"]
+        "armoroff", "bess", "bunload", "gestures", "pronekill", "trap", "orderspages", "healcap",
+        "deadentry", "vaultsuit", "horrigan", "cartracks", "rotkeys"]
 
 runs = []
 for mode in SCREEN:

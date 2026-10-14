@@ -469,7 +469,8 @@ int critterAdjustPoison(Object* critter, int amount)
     if (newPoison > 0) {
         critter->data.critter.poison = newPoison;
 
-        _queue_clear_type(EVENT_TYPE_POISON, nullptr);
+        // Reschedule only this player's poison; other players keep their timers.
+        queueRemoveEventsByType(critter, EVENT_TYPE_POISON);
         queueAddEvent(10 * (505 - 5 * newPoison), critter, nullptr, EVENT_TYPE_POISON);
 
         // You have been poisoned!
@@ -620,7 +621,7 @@ int _critter_check_rads(Object* obj)
 
     _old_rad_level = 0;
 
-    _queue_clear_type(EVENT_TYPE_RADIATION, _get_rad_damage_level);
+    _queue_clear_type(EVENT_TYPE_RADIATION, _get_rad_damage_level, obj);
 
     // NOTE: Uninline
     int radiation = critterGetRadiation(obj);
@@ -773,7 +774,7 @@ int radiationEventProcess(Object* obj, void* data)
         // Schedule healing stats event in 7 days.
         RadiationEvent* newRadiationEvent = (RadiationEvent*)internal_malloc(sizeof(*newRadiationEvent));
         if (newRadiationEvent != nullptr) {
-            _queue_clear_type(EVENT_TYPE_RADIATION, _clear_rad_damage);
+            _queue_clear_type(EVENT_TYPE_RADIATION, _clear_rad_damage, obj);
             newRadiationEvent->radiationLevel = radiationEvent->radiationLevel;
             newRadiationEvent->isHealing = 1;
             queueAddEvent(GAME_TIME_TICKS_PER_DAY * 7, obj, newRadiationEvent, EVENT_TYPE_RADIATION);
@@ -1146,6 +1147,13 @@ bool critterRevive(Object* critter)
     // fid / position / flag / HP changes all stream to viewers via the object-delta +
     // actor-HP channels regardless of the (server-noop) local refresh.
     _dude_stand(critter, critter->rotation, -1);
+
+    // A player's own light, which the kill switched off (critterKill). Nothing else
+    // gave it back but the next map entry, and since a body is left as it lies on a map
+    // entry (pull request 73) a player carried in dead and revived there stayed dark.
+    if (playerActorIs(critter)) {
+        objectSetLight(critter, 4, 0x10000, nullptr);
+    }
 
     // Brought back in the middle of a fight: give the body its turns back. A
     // corpse's roster entry is swept out of the combatant block at round end and

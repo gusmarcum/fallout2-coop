@@ -103,6 +103,7 @@ static bool wmFaded = false;
 
 static int wmWorldMapFunc(int a1);
 static void wmCheckGameEvents();
+static bool wmPartyWellInView();
 static void wmInterfaceScrollTabsStart(int delta);
 static void wmInterfaceScrollTabsStop();
 static void wmInterfaceScrollTabsUpdate();
@@ -200,6 +201,9 @@ static int wmWorldMapFunc(int a1)
         return -1;
     }
 
+    // Open at the current party position instead of the last scrolled view.
+    // Initialization (including its network pumping) has completed at this point.
+    wmInterfaceCenterOnParty();
     wmFadeIn();
 
     wmMatchWorldPosToArea(wmGenData.worldPosX, wmGenData.worldPosY, &(wmGenData.currentAreaId));
@@ -257,13 +261,16 @@ static int wmWorldMapFunc(int a1)
             // event happens to force a repaint.
             if (gWorldmapStateDirty) {
                 gWorldmapStateDirty = false;
-                if (wmGenData.isWalking) {
-                    // Follow the party while travelling. Vanilla gets this from
-                    // wmInterfaceScrollPixel inside wmPartyWalkingStep, which is
-                    // suppressed server-side (it is pure chrome).
+                // Follow the party while it travels, but only when it is about to
+                // leave the view. Centring on every update (what this did until
+                // v1.4.2) takes the map out of the player's hands for the whole
+                // trip; never following (pull request 74) lets the party walk off
+                // the screen. Vanilla scrolls with it at the edge, as this does.
+                if (wmGenData.isWalking && !wmPartyWellInView()) {
                     wmInterfaceCenterOnParty();
+                } else {
+                    wmInterfaceRefresh();
                 }
-                wmInterfaceRefresh();
             }
         } else if (wmGenData.isWalking) {
             {
@@ -481,6 +488,15 @@ static int wmWorldMapFunc(int a1)
     wmFadeIn();
 
     return rc;
+}
+
+// Is the party's marker on the map view, and not within a margin of its edge?
+static bool wmPartyWellInView()
+{
+    const int margin = 40;
+    int x = wmGenData.worldPosX - wmWorldOffsetX;
+    int y = wmGenData.worldPosY - wmWorldOffsetY;
+    return x >= margin && x < WM_VIEW_WIDTH - margin && y >= margin && y < WM_VIEW_HEIGHT - margin;
 }
 
 // 0x4C05C4

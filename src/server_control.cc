@@ -768,6 +768,11 @@ static int interactionGestureAnim(int verb, Object* target)
 // server-only presenter event — no-op on the headless/golden path.
 static void interactionEmitGesture(int verb, Object* actor, Object* target)
 {
+    // Combat GET already records the complete approach and pickup in actionPickUp.
+    // A separate player-only gesture would replay the same crouch twice.
+    if (verb == kInteractGet && isInCombat() && presRecordEnabled()) {
+        return;
+    }
     int anim = interactionGestureAnim(verb, target);
     if (anim < 0) {
         return;
@@ -2896,6 +2901,14 @@ void serverControlLine(int sessionId, const char* line)
     if (strcmp(verb, "sneak") == 0) {
         dudeToggleState(DUDE_STATE_SNEAKING, actor);
         bool sneaking = dudeHasState(DUDE_STATE_SNEAKING, actor);
+        // A run already in flight bypasses the run-registration sneak check.
+        // Stop the current free-roam approach when entering sneak, unless the
+        // actor can legitimately sneak while running with Silent Running.
+        if (sneaking && !isInCombat() && !perkGetRank(actor, PERK_SILENT_RUNNING)) {
+            serverControlSupersedePending(sessionId, "sneak enabled");
+            gMoveRetries.erase(actor);
+            reg_anim_clear(actor);
+        }
         fprintf(stderr, "f2_server: control sneak=%d (session %d)\n", sneaking ? 1 : 0, sessionId);
         return;
     }
@@ -3206,7 +3219,12 @@ void serverControlLine(int sessionId, const char* line)
             serverControlSupersedePending(sessionId, "a fresh action");
             reg_anim_clear(gDude); // and stops any in-flight approach walk
             Rect rect;
-            objectRotateClockwise(gDude, &rect);
+            // Keep bare `rot` clockwise for existing clients.
+            if (n >= 2 && arg == -1) {
+                objectRotateCounterClockwise(gDude, &rect);
+            } else {
+                objectRotateClockwise(gDude, &rect);
+            }
             fprintf(stderr, "f2_server: control rot\n");
             return;
         }

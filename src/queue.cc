@@ -529,13 +529,13 @@ void queueClear()
 }
 
 // 0x4A2790
-void _queue_clear_type(int eventType, QueueEventHandler* fn)
+void _queue_clear_type(int eventType, QueueEventHandler* fn, Object* owner)
 {
     QueueListNode** ptr = &gQueueListHead;
     QueueListNode* curr = *ptr;
 
     while (curr != nullptr) {
-        if (eventType == curr->type) {
+        if (eventType == curr->type && (owner == nullptr || curr->owner == owner)) {
             QueueListNode* tmp = curr;
 
             *ptr = curr->next;

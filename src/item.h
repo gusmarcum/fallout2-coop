@@ -52,6 +52,8 @@ int itemGetActionPointCost(Object* obj, int hitMode, bool aiming);
 int itemGetQuantity(Object* obj, Object* a2);
 int itemIsQueued(Object* obj);
 Object* itemReplace(Object* a1, Object* a2, int a3);
+// Preview the replacement after consuming one item, without changing inventory.
+Object* itemReplacementAfterUse(Object* owner, Object* item);
 bool itemIsHidden(Object* obj);
 int weaponGetAttackTypeForHitMode(Object* a1, int a2);
 int weaponGetSkillForHitMode(Object* a1, int a2);
