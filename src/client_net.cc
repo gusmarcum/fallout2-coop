@@ -485,6 +485,8 @@ public:
         // Each is owed this replay (clientCombatAnimReserve) until the sequence executes
         // or is dropped, and is told so then (clientCombatAnimNotePlayed).
         std::vector<int> seqReserved;
+        std::vector<int> seqPickupTargets;
+        int seqPickupActor = 0;
         std::string text; // kConsole / kFloat / kSfx
         int consoleChannel = kMsgChannelDefault; // kConsole — message-log style (msg_channel.h)
         // kDeferredEvent — the parked state event, re-dispatched verbatim at drain.
@@ -499,6 +501,8 @@ public:
     // teardown paths clear it (§12.6 trap 2: miss the clear and later events defer against
     // a count that never decrements, then force-apply a full cap late, forever).
     std::unordered_map<int, int> _pendingAdopts;
+    std::unordered_map<int, int> _pendingPickupTargets;
+    std::unordered_map<int, int> _pendingPickupActors;
 
     // Set while the pump (or the overflow backstop) is re-dispatching a parked event
     // through event(). Without it the drain would re-park the same event forever: the
@@ -1128,6 +1132,7 @@ public:
             }
             case PresKind::kRecordedSeq:
                 presPlayRecordedSeq(ev.seqOps.data(), (int)ev.seqOps.size(), true);
+                releasePickupSequence(ev);
                 for (int ref : ev.seqReserved) {
                     clientCombatAnimNotePlayed(lookup(ref));
                 }
@@ -1420,6 +1425,7 @@ private:
                     attackNotePlayed(it->attack);
                 }
                 if (it->kind == PresKind::kRecordedSeq) {
+                    releasePickupSequence(*it);
                     // This sequence will never execute, so the mints it promised at decode
                     // will never happen — release them, or the netIds stay entangled with
                     // nothing left to un-entangle them and every later event for them waits
@@ -1485,6 +1491,18 @@ private:
     // X defers, X is entangled for as long as the FIFO holds it, so every LATER event for
     // X defers too — per-netId wire order is preserved end to end by construction, not by
     // a sort.
+    static void releasePickupRef(std::unordered_map<int, int>& refs, int netId)
+    {
+        auto it = refs.find(netId);
+        if (it != refs.end() && --it->second == 0) refs.erase(it);
+    }
+
+    void releasePickupSequence(const PresEvent& e)
+    {
+        for (int target : e.seqPickupTargets) releasePickupRef(_pendingPickupTargets, target);
+        if (e.seqPickupActor != 0) releasePickupRef(_pendingPickupActors, e.seqPickupActor);
+    }
+
     bool presEntangled(int netId) const
     {
         if (netId <= 0) {
@@ -1517,7 +1535,11 @@ private:
         size_t len = r.remaining();
         Reader peek(payload, len);
         int netId = peek.i32();
-        if (peek.overflow() || !presEntangled(netId)) {
+        bool pickupTarget = _pendingPickupTargets.count(netId) != 0;
+        bool pickupInventory = type == EVENT_OBJECT_DELTA
+            && _pendingPickupActors.count(netId) != 0
+            && (peek.u16() & OBJECT_DELTA_INVENTORY) != 0;
+        if (peek.overflow() || (!presEntangled(netId) && !pickupTarget && !pickupInventory)) {
             return false;
         }
         PresEvent e;
@@ -1526,6 +1548,19 @@ private:
         e.defBytes.assign(payload, payload + len); // length-prefixed, so this is the whole event
         e.defEntryId = entryId;
         e.defNetId = netId;
+        if (pickupTarget || pickupInventory) {
+            // Outside combat the general pump need not wait for an actor.
+            // Tie the deferred removal to the picker, not the idle ground item.
+            if (pickupTarget) {
+                for (const PresEvent& pending : _presQueue) {
+                    if (pending.kind == PresKind::kRecordedSeq
+                        && std::find(pending.seqPickupTargets.begin(), pending.seqPickupTargets.end(), netId) != pending.seqPickupTargets.end()) {
+                        e.defNetId = pending.seqPickupActor;
+                        break;
+                    }
+                }
+            }
+        }
         if (getenv("F2_TRACE_EVENTS") != nullptr) {
             fprintf(stderr, "[adopt] PARK type=%d net=%d bytes=%d pendingMints=%d live=%d queued=%d\n",
                 (int)type, netId, (int)len,
@@ -1837,7 +1872,9 @@ private:
         // seedNetMap below is now populate-only.
         _net.clear();
         _adoptTransients.clear(); // adopt transients die with the old world (Fable review A3)
-        _pendingAdopts.clear(); // ...and so do pending adopt mints (§12.6 trap 2)
+        _pendingAdopts.clear();
+        _pendingPickupTargets.clear();
+        _pendingPickupActors.clear(); // ...and so do pending adopt mints (§12.6 trap 2)
 
         // Drop the previous blob's actor registrations BEFORE mapLoad frees the
         // objects they point at (MP_PROPOSAL.md Ch 5.3). Same reasoning as
@@ -3357,7 +3394,9 @@ private:
         presReset();
         _net.clear();
         _adoptTransients.clear(); // adopt transients die with the old world (Fable review A3)
-        _pendingAdopts.clear(); // ...and so do pending adopt mints (§12.6 trap 2)
+        _pendingAdopts.clear();
+        _pendingPickupTargets.clear();
+        _pendingPickupActors.clear(); // ...and so do pending adopt mints (§12.6 trap 2)
         _loaded = false;
         setInCombat(false); // a transition ends any local combat framing
         _myTurn = false;
@@ -3736,6 +3775,7 @@ private:
     // each: a sequence names the same object in several ops, and a reserve counts one
     // replay owed (bugs/077). Read by onPresSeq straight after the pass, like _seqAdoptIds.
     std::vector<int> _seqReservedIds;
+    std::vector<int> _seqPickupTargetIds;
 
     Object* resolveSeqRef(int ref, std::unordered_map<int, Object*>& handles)
     {
@@ -4051,6 +4091,12 @@ private:
                 } else {
                     reserveSeqRef(ref);
                     clientCombatAnimArmMoveHold(lookup(ref)); // hold the MOVER only (not the target)
+                    Object* target = lookup(targetRef);
+                    if (target != nullptr && FID_TYPE(target->fid) == OBJ_TYPE_ITEM
+                        && target->owner == nullptr && target->tile >= 0
+                        && std::find(_seqPickupTargetIds.begin(), _seqPickupTargetIds.end(), targetRef) == _seqPickupTargetIds.end()) {
+                        _seqPickupTargetIds.push_back(targetRef);
+                    }
                 }
                 break;
             }
@@ -4142,6 +4188,7 @@ private:
         // It also PROMISES this sequence's adopt mints, which entangles those netIds from
         // here on — the parking rule for everything that follows on the state lane.
         _seqReservedIds.clear();
+        _seqPickupTargetIds.clear();
         presPlayRecordedSeq(ops.data(), (int)ops.size(), false);
         std::vector<int> promisedAdopts = _seqAdoptIds;
         std::vector<int> reserved = _seqReservedIds;
@@ -4156,6 +4203,12 @@ private:
             e.seqActorNetId = actorNetId;
             e.seqAdopts = std::move(promisedAdopts);
             e.seqReserved = std::move(reserved);
+            if (actorNetId != 0 && !_seqPickupTargetIds.empty()) {
+                e.seqPickupTargets = _seqPickupTargetIds;
+                e.seqPickupActor = actorNetId;
+                for (int target : e.seqPickupTargets) _pendingPickupTargets[target]++;
+                _pendingPickupActors[actorNetId]++;
+            }
             enqueue(e);
         } else {
             // Plays now, so the promise is kept immediately (the execute pass releases it).
