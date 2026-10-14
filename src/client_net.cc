@@ -246,7 +246,8 @@ unsigned int crc32Of(const unsigned char* data, int length)
 // Modal screens that run their own blocking loop on the viewer and hold Object*s into
 // gDude — the wire must keep pumping while one is open, and it must force-close (and
 // rebaselines must defer) on combat/world-rebuild. See viewerServiceTicker().
-static const int kViewerModalMask = GameMode::kInventory | GameMode::kSkilldex
+static const int kViewerModalMask = GameMode::kOptions | GameMode::kQuitConfirmation
+    | GameMode::kCounter | GameMode::kInventory | GameMode::kSkilldex
     | GameMode::kEditor | GameMode::kPipboy | GameMode::kLoot | GameMode::kUseOn
     | GameMode::kDialog | GameMode::kWorldmap | GameMode::kBarter
     | GameMode::kPreferences | GameMode::kAutomap | GameMode::kHelp;
@@ -6245,7 +6246,8 @@ static void viewerServiceTicker()
         // screen the server opened a container for at 3 AP. ESCing those would
         // take the AP and hand back nothing. Every other modal, and an inventory
         // or loot screen opened any other way, still closes as before.
-        int mode = GameMode::getCurrentGameMode() & kViewerModalMask;
+        // Quantity selection inherits its parent inventory/loot combat permission.
+        int mode = GameMode::getCurrentGameMode() & (kViewerModalMask & ~GameMode::kCounter);
         bool sanctioned = gViewerConn->combatModalOpen()
             && (mode == GameMode::kInventory || mode == GameMode::kLoot);
         // ►►►► AND NEVER THE WORLDMAP, for the same reason the gPendingWorldmapEnter
@@ -6333,13 +6335,30 @@ static void viewerServiceTicker()
     if (getenv("F2_NO_MODAL_PRESENT") != nullptr) {
         return;
     }
-    // Only when the isometric world is actually up: the worldmap modal disables it, and
-    // stepping glides for a map nobody is looking at is pure waste.
-    if (isoIsDisabled()) {
+    // Local browsing screens disable iso input while the server keeps moving actors.
+    // Drain queued presentation and advance animations behind these screens so the
+    // viewer neither freezes nor accumulates movement to replay when the menu closes.
+    const int mode = GameMode::getCurrentGameMode();
+    const int backgroundMovementScreens = GameMode::kInventory | GameMode::kEditor
+        | GameMode::kPipboy | GameMode::kAutomap | GameMode::kSkilldex
+        | GameMode::kOptions | GameMode::kPreferences | GameMode::kQuitConfirmation
+        | GameMode::kUseOn | GameMode::kLoot | GameMode::kCounter;
+    const bool presentBehindScreen = !gViewerConn->inCombat()
+        && !clientStealActive()
+        && !clientStealEndPending()
+        && (mode & backgroundMovementScreens) != 0
+        && (mode & ~(backgroundMovementScreens | GameMode::kPlayerTurn)) == 0;
+    if (isoIsDisabled() && !presentBehindScreen) {
         return;
     }
     gViewerConn->presentationTick(); // start/advance queued replays, drain the queue
-    presAdvance(); // glides, reg_anim sequences, reaping — each refreshing its own rects
+    presAdvance(); // glides, reg_anim sequences, reaping
+    if (presentBehindScreen) {
+        // Glides update frames and offsets without requesting dirty-rect redraws.
+        // The main loop normally repaints them, but it is blocked inside the modal.
+        // Window clipping keeps the menu visible above the refreshed world.
+        tileWindowRefresh();
+    }
     // Reap items unlinked mid-fight once nothing can still be pointing at them. Every
     // other flush point is a modal CLOSE, and a fight has none — without this the queue
     // would sit until teardown. The flush re-checks the replay gate itself.
