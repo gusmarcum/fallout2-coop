@@ -4,7 +4,7 @@ Binaries for every version are on the
 [releases page](https://github.com/gusmarcum/fallout2-coop/releases). The server and every
 client must run the same version.
 
-## v1.4.3 (2026-10-13)
+## v1.4.3 (2026-10-14)
 
 Fixes two things v1.4.2 broke (a trap that made you dodge ten times in a row, and healing
 in a fight that did not show until the inventory was closed), a server lock in New Reno,
