@@ -653,6 +653,7 @@ static void showHelp()
 // 0x4440B8
 int showQuitConfirmationDialog()
 {
+    ScopedGameMode gm(GameMode::kQuitConfirmation);
     bool isoWasEnabled = isoDisable();
 
     bool gameMouseWasVisible;

@@ -6248,6 +6248,11 @@ static void viewerServiceTicker()
         int mode = GameMode::getCurrentGameMode() & kViewerModalMask;
         bool sanctioned = gViewerConn->combatModalOpen()
             && (mode == GameMode::kInventory || mode == GameMode::kLoot);
+        // The local quit prompt must stay usable during combat, including
+        // when nested in another screen or when combat starts beneath it.
+        if ((mode & GameMode::kQuitConfirmation) != 0) {
+            sanctioned = true;
+        }
         // ►►►► AND NEVER THE WORLDMAP, for the same reason the gPendingWorldmapEnter
         // branch above already excludes it: ESC there is NOT a local close. The worldmap
         // is a SERVER-DRIVEN modal, and its ESC handler sends the `wmesc` INTENT

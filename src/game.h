@@ -76,6 +76,7 @@ class GameMode {
 public:
     enum Flags {
         kWorldmap = 0x1,
+        kQuitConfirmation = 0x2,
         kDialog = 0x4,
         kOptions = 0x8,
         kSaveGame = 0x10,
