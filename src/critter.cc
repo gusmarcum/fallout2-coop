@@ -328,6 +328,7 @@ int critterLoad(File* stream)
 // 0x42D058
 int critterSave(File* stream)
 {
+    itemInitializePlayerAddictions(gDude);
     if (fileWriteInt32(stream, _sneak_working[0]) == -1) {
         return -1;
     }

@@ -421,6 +421,11 @@ void protoPlayerActorSheetSeedSlot(int slot)
     CritterProto* sheet = &(gPlayerActorProtos[slot - 1]);
     memcpy(sheet, &gDudeProto, sizeof(*sheet));
     sheet->pid = playerActorSheetPid(slot);
+    // A newly seeded player must not inherit the host's addiction identity.
+    for (int state = DUDE_STATE_ADDICT_NUKA; state <= DUDE_STATE_ADDICTIONS_INITIALIZED; state++) {
+        sheet->data.flags &= ~(1 << state);
+    }
+    sheet->data.flags &= ~(1 << DUDE_STATE_ADDICTED);
 }
 
 // The SHEET half of a player actor's proto row: skills + base/bonus SPECIAL,

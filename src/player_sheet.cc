@@ -5,6 +5,7 @@
 #include <vector> // std::vector<unsigned char> below; MinGW pulls it in transitively, libc++ (Android/macOS) does not
 
 #include "critter.h"
+#include "item.h"
 #include "db.h"
 #include "debug.h"
 #include "object.h"
@@ -91,6 +92,7 @@ static bool gPlayerSheetDirty[kMaxPlayerActors] = { false };
 // one-line diff instead of a hunt — add to both or the actor is a chimera.
 static int playerSheetRowWrite(File* stream, int slot)
 {
+    itemInitializePlayerAddictions(playerActorAt(slot));
     if (protoPlayerActorRowWrite(stream, slot) == -1) {
         return -1;
     }
@@ -578,6 +580,7 @@ void playerSheetDeltaEmit()
     }
 
     for (int slot = 0; slot < count; slot++) {
+        itemInitializePlayerAddictions(playerActorAt(slot));
         if (!gPlayerSheetDirty[slot]) {
             continue;
         }

@@ -6,6 +6,10 @@
 
 namespace fallout {
 
+// Addiction identity is separate from the delayed withdrawal stat effects.
+void itemInitializePlayerAddictions(Object* actor);
+bool itemIsAddictedByGvar(Object* actor, int gvar);
+
 typedef enum AttackType {
     ATTACK_TYPE_NONE,
     ATTACK_TYPE_UNARMED,

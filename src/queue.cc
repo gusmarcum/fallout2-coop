@@ -493,6 +493,11 @@ int queueProcessEvents()
             break;
         }
 
+        // Migrate legacy addiction state while the current event is still
+        // present, before the withdrawal callback can consume the last evidence.
+        if (queueListNode->type == EVENT_TYPE_WITHDRAWAL) {
+            itemInitializePlayerAddictions(queueListNode->owner);
+        }
         gQueueListHead = queueListNode->next;
 
         EventTypeDescription* eventTypeDescription = &(gEventTypeDescriptions[queueListNode->type]);

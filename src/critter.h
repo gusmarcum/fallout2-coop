@@ -11,6 +11,17 @@ typedef enum DudeState {
     DUDE_STATE_SNEAKING = 0,
     DUDE_STATE_LEVEL_UP_AVAILABLE = 3,
     DUDE_STATE_ADDICTED = 4,
+    // Per-player addiction types, persisted and replicated in CritterProtoData.flags.
+    // Bits 0..14 retain their existing meanings; bit 15 is left unused.
+    DUDE_STATE_ADDICT_NUKA = 16,
+    DUDE_STATE_ADDICT_BUFFOUT = 17,
+    DUDE_STATE_ADDICT_MENTATS = 18,
+    DUDE_STATE_ADDICT_PSYCHO = 19,
+    DUDE_STATE_ADDICT_RADAWAY = 20,
+    DUDE_STATE_ADDICT_ALCOHOL = 21,
+    DUDE_STATE_ADDICT_JET = 22,
+    DUDE_STATE_ADDICT_TRAGIC = 23,
+    DUDE_STATE_ADDICTIONS_INITIALIZED = 24,
 } DudeState;
 
 int critterInit();
