@@ -24,6 +24,11 @@ bool autorunMutexCreate()
         return true;
     }
 
+    // Allow multiple desktop clients for local co-op testing.
+    if (getenv("F2_ALLOW_MULTIPLE_INSTANCES") != nullptr) {
+        return true;
+    }
+
     gInterplayGenericAutorunMutex = CreateMutexA(nullptr, FALSE, "InterplayGenericAutorunMutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(gInterplayGenericAutorunMutex);

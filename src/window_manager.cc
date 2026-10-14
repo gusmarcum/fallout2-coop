@@ -119,9 +119,9 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
     GNW95_mutex = INVALID_HANDLE_VALUE;
 #endif
 
-    if (_GNW95_already_running) {
-        return WINDOW_MANAGER_ERR_ALREADY_RUNNING;
-    }
+if (_GNW95_already_running && getenv("F2_ALLOW_MULTIPLE_INSTANCES") == nullptr) {
+    return WINDOW_MANAGER_ERR_ALREADY_RUNNING;
+}
 
 #ifdef _WIN32
     if (_GNW95_title_mutex == INVALID_HANDLE_VALUE) {
