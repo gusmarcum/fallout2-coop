@@ -5,6 +5,8 @@
 
 namespace fallout {
 
+// Network authority for the two difficulty controls; -1/-1 clears the session cache.
+void preferencesSetServerDifficulty(int gameDifficulty, int combatDifficulty);
 int preferencesInit();
 int doPreferences(bool animated);
 int preferencesSave(File* stream);

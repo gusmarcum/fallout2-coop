@@ -61,6 +61,7 @@
 #include "scripts.h"
 #include "state_audit.h" // StateAuditRecord / stateAuditCompare — the mirror divergence oracle
 #include "server_players.h"
+#include "preferences.h"
 #include "settings.h" // target_highlight pref — vanilla outline gate (#8)
 #include "stat.h" // pcPlayerActorSeedStats — per-actor sheet rows
 #include "critter.h" // critterPlayerActorSeedNames — per-actor sheet rows
@@ -3300,6 +3301,11 @@ private:
             // Global ambient light (scripted map darkness/brightness). true = repaint now.
             lightSetAmbientIntensity(r.i32(), true);
         }
+        if (r.remaining() >= 8) {
+            int gameDifficulty = r.i32();
+            int combatDifficulty = r.i32();
+            preferencesSetServerDifficulty(gameDifficulty, combatDifficulty);
+        }
     }
 
     void onSnapshotObject(Reader& r)
@@ -6020,6 +6026,7 @@ static bool gViewerAttackCommitted = false;
 
 void clientViewerSetConnection(ClientConnection* conn)
 {
+    preferencesSetServerDifficulty(-1, -1); // discard the previous session's values
     gViewerConn = conn;
 }
 

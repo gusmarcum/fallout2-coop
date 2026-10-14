@@ -1,9 +1,12 @@
 #include "options.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 #include "art.h"
 #include "color.h"
+#include "client_net.h"
 #include "combat.h"
 #include "combat_ai.h"
 #include "debug.h"
@@ -393,6 +396,38 @@ static PreferenceDescription gPreferenceDescriptions[PREF_COUNT] = {
 static FrmImage _preferencesFrmImages[PREFERENCES_WINDOW_FRM_COUNT];
 static int _oldFont;
 
+static int gServerGameDifficulty = -1;
+static int gServerCombatDifficulty = -1;
+
+void preferencesSetServerDifficulty(int gameDifficulty, int combatDifficulty)
+{
+    if (gameDifficulty == -1 && combatDifficulty == -1) {
+        gServerGameDifficulty = -1;
+        gServerCombatDifficulty = -1;
+        return;
+    }
+    if (gameDifficulty < 0 || gameDifficulty > 2
+        || combatDifficulty < 0 || combatDifficulty > 2) {
+        return;
+    }
+    gServerGameDifficulty = gameDifficulty;
+    gServerCombatDifficulty = combatDifficulty;
+    settings.preferences.game_difficulty = gameDifficulty;
+    settings.preferences.combat_difficulty = combatDifficulty;
+}
+
+static bool preferencesSyncServerDifficulty()
+{
+    if (!clientViewerActive() || gServerGameDifficulty < 0 || gServerCombatDifficulty < 0) {
+        return false;
+    }
+    bool changed = gPreferencesGameDifficulty1 != gServerGameDifficulty
+        || gPreferencesCombatDifficulty1 != gServerCombatDifficulty;
+    gPreferencesGameDifficulty1 = gServerGameDifficulty;
+    gPreferencesCombatDifficulty1 = gServerCombatDifficulty;
+    return changed;
+}
+
 int preferencesInit()
 {
     for (int index = 0; index < 11; index++) {
@@ -436,6 +471,7 @@ static void _SetSystemPrefs()
 // 0x493054
 static void _SaveSettings()
 {
+    preferencesSyncServerDifficulty();
     gPreferencesGameDifficulty2 = gPreferencesGameDifficulty1;
     gPreferencesCombatDifficulty2 = gPreferencesCombatDifficulty1;
     gPreferencesViolenceLevel2 = gPreferencesViolenceLevel1;
@@ -508,6 +544,7 @@ static void preferencesSetDefaults(bool a1)
     gPreferencesMusicVolume1 = 22281;
     gPreferencesSoundEffectsVolume1 = 22281;
     gPreferencesSpeechVolume1 = 22281;
+    preferencesSyncServerDifficulty();
 
     if (a1) {
         for (int index = 0; index < PREF_COUNT; index++) {
@@ -522,6 +559,7 @@ static void preferencesSetDefaults(bool a1)
 // 0x4931F8
 static void _JustUpdate_()
 {
+    preferencesSyncServerDifficulty();
     gPreferencesGameDifficulty1 = std::clamp(gPreferencesGameDifficulty1, 0, 2);
     gPreferencesCombatDifficulty1 = std::clamp(gPreferencesCombatDifficulty1, 0, 2);
     gPreferencesViolenceLevel1 = std::clamp(gPreferencesViolenceLevel1, 0, 3);
@@ -779,6 +817,7 @@ static void _UpdateThing(int index)
 // 0x492CB0
 int _SavePrefs(bool save)
 {
+    preferencesSyncServerDifficulty();
     settings.preferences.game_difficulty = gPreferencesGameDifficulty1;
     settings.preferences.combat_difficulty = gPreferencesCombatDifficulty1;
     settings.preferences.violence_level = gPreferencesViolenceLevel1;
@@ -1210,6 +1249,12 @@ int doPreferences(bool animated)
         sharedFpsLimiter.mark();
 
         int eventCode = inputGetInput();
+        // A server state update may have arrived while this window was open.
+        if (preferencesSyncServerDifficulty()) {
+            _UpdateThing(PREF_GAME_DIFFICULTY);
+            _UpdateThing(PREF_COMBAT_DIFFICULTY);
+            windowRefresh(gPreferencesWindow);
+        }
 
         switch (eventCode) {
         case KEY_RETURN:
@@ -1276,6 +1321,16 @@ static void _DoThing(int eventCode)
     // This preference index also contains out-of-bounds value 19,
     // which is the only preference expressed as checkbox.
     int preferenceIndex = eventCode - 505;
+
+    if (clientViewerActive()
+        && (preferenceIndex == PREF_GAME_DIFFICULTY || preferenceIndex == PREF_COMBAT_DIFFICULTY)) {
+        // Acknowledge the click without ever drawing a client-selected difficulty.
+        preferencesSyncServerDifficulty();
+        soundPlayFile("ib3p1xx1");
+        _UpdateThing(preferenceIndex);
+        windowRefresh(gPreferencesWindow);
+        return;
+    }
 
     if (preferenceIndex >= FIRST_PRIMARY_PREF && preferenceIndex <= LAST_PRIMARY_PREF) {
         PreferenceDescription* meta = &(gPreferenceDescriptions[preferenceIndex]);

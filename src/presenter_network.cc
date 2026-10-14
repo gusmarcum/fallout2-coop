@@ -15,6 +15,7 @@
 #include "combat_defs.h"
 #include "light.h" // lightGetAmbientIntensity — global ambient-light worldDelta
 #include "scripts.h"
+#include "settings.h"
 #include "map.h" // mapGetLoadGeneration (WireFrameMeta.mapGeneration)
 #include "object.h"
 #include "pres_record.h" // kPresStreamVersion / presRecordCostMs
@@ -483,6 +484,11 @@ public:
         }
         if ((changedFields & WORLD_DELTA_LIGHT) != 0) {
             putI32(lightGetAmbientIntensity());
+        }
+        // Optional trailing fields: older viewers skip them via event framing.
+        if (serverDedicatedActive()) {
+            putI32(settings.preferences.game_difficulty);
+            putI32(settings.preferences.combat_difficulty);
         }
         endEvent();
     }
