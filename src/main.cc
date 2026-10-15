@@ -762,10 +762,14 @@ static void viewerPollPendingLoot(ClientConnection& conn)
 {
     // ►► THE SERVER'S ANSWER OUTRANKS OUR GUESS. It fires the loot interaction (on
     // arrival, or immediately when the dude is already adjacent) and now says so with
-    // an addressed grant; that is the authoritative "the container is open". The
-    // adjacency poll below stays as the fallback for a container opened without a
-    // grant, but the grant is what normally lands, and it ends the deadlock where the
-    // server thought we had arrived and we did not.
+    // an addressed grant; that is the authoritative "the container is open".
+    // A server grant confirms authoritative arrival, but this actor's combat
+    // replay may still be walking there. Wait before consuming the grant, so
+    // the loot screen opens only after the approach has been shown.
+    if (conn.inCombat() && gDude != nullptr
+        && (animationIsBusyIgnoringFidgets(gDude) || clientAnimActiveFor(gDude))) {
+        return;
+    }
     int granted = conn.takeLootGrant();
     if (granted != 0) {
         gViewerPendingLootNetId = granted;
