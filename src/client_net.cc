@@ -5997,7 +5997,7 @@ static void showPendingYesNoPrompt()
 // them. A fight that STARTS while one is open still closes it; one opened DURING the
 // fight stays until the player closes it (bugs/035).
 static const int kViewerFreeInCombatMask = GameMode::kEditor | GameMode::kPreferences
-    | GameMode::kSkilldex;
+    | GameMode::kSkilldex | GameMode::kOptions;
 
 // Whether the ticker's last call saw the viewer in combat, and whether the fight began
 // while the screen that is open now was already up. Both are updated at the top of
