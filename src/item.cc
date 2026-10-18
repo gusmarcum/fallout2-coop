@@ -2944,7 +2944,28 @@ int _item_d_take_drug(Object* critter, Object* item)
     _wd_gvar = drugGetAddictionGvarByPid(item->pid);
     _wd_onset = proto->item.data.drug.withdrawalOnset;
 
+    // Jet's end event expires without removing its permanent penalty. A new
+    // dose must suspend that penalty even when there is no event left to reset.
+    // Only the player can use the legacy GVAR as evidence; it says nothing
+    // about an NPC's addiction. Inspect before resetting existing events so a
+    // failed replacement cannot be mistaken for an expired permanent penalty.
+    bool permanentJetWithdrawal = false;
+    if (critter == gDude && item->pid == PROTO_ID_JET && dudeIsAddicted(PROTO_ID_JET)) {
+        auto* event = static_cast<WithdrawalEvent*>(queueFindFirstEvent(critter, EVENT_TYPE_WITHDRAWAL));
+        while (event != nullptr && event->pid != PROTO_ID_JET) {
+            event = static_cast<WithdrawalEvent*>(queueFindNextEvent(critter, EVENT_TYPE_WITHDRAWAL));
+        }
+        permanentJetWithdrawal = event == nullptr;
+    }
+
     _queue_clear_type(EVENT_TYPE_WITHDRAWAL, _item_wd_clear_all);
+
+    if (permanentJetWithdrawal
+        && _insert_withdrawal(critter, 1, proto->item.data.drug.withdrawalOnset,
+               PERK_JET_ADDICTION, PROTO_ID_JET) == 0) {
+        // Schedule first: allocation failure must not leave a permanent cure.
+        performWithdrawalEnd(critter, PERK_JET_ADDICTION);
+    }
 
     if (_drug_effect_allowed(critter, item->pid)) {
         _perform_drug_effect(critter, proto->item.data.drug.stat, proto->item.data.drug.amount, true);
