@@ -3279,8 +3279,6 @@ static bool dudeIsAddicted(int drugPid)
         if (drugPid == -1 || drugPid == drugDescription->drugPid) {
             if (gGameGlobalVars[drugDescription->gvar] != 0) {
                 return true;
-            } else {
-                return false;
             }
         }
     }
