@@ -2991,7 +2991,8 @@ int _item_d_take_drug(Object* critter, Object* item)
 // 0x47A178
 int _item_d_clear(Object* obj, void* data)
 {
-    if (objectIsPartyMember(obj)) {
+    // Co-op players travel too, but are not in the vanilla party list.
+    if (playerActorIs(obj) || objectIsPartyMember(obj)) {
         return 0;
     }
 
@@ -3078,7 +3079,8 @@ int _item_wd_clear(Object* obj, void* data)
 {
     WithdrawalEvent* withdrawalEvent = (WithdrawalEvent*)data;
 
-    if (objectIsPartyMember(obj)) {
+    // Keep both pending onset and active withdrawal on their original player.
+    if (playerActorIs(obj) || objectIsPartyMember(obj)) {
         return 0;
     }
 
