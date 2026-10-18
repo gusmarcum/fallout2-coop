@@ -63,6 +63,8 @@ static int stealthBoyTurnOff(Object* critter, Object* item);
 static int _insert_drug_effect(Object* critter, Object* item, int duration, int* stats, int* mods);
 static void _perform_drug_effect(Object* critter, int* stats, int* mods, bool isImmediate);
 static bool _drug_effect_allowed(Object* critter, int pid);
+static bool critterIsAddictedToDrug(Object* critter, int drugPid);
+static int clearNpcJetWithdrawal(Object* obj, void* data);
 static int _insert_withdrawal(Object* obj, int a2, int a3, int a4, int a5);
 static int _item_wd_clear_all(Object* a1, void* data);
 static void performWithdrawalStart(Object* obj, int perk, int a3);
@@ -2876,6 +2878,39 @@ static void _perform_drug_effect(Object* critter, int* stats, int* mods, bool is
     }
 }
 
+// Player addiction identity still uses the legacy globals. NPC identity lives in
+// its own withdrawal events, including the pending onset before penalties begin.
+static bool critterIsAddictedToDrug(Object* critter, int drugPid)
+{
+    if (playerActorIs(critter)) {
+        return dudeIsAddicted(drugPid);
+    }
+
+    int gvar = drugGetAddictionGvarByPid(drugPid);
+    auto* event = static_cast<WithdrawalEvent*>(queueFindFirstEvent(critter, EVENT_TYPE_WITHDRAWAL));
+    while (event != nullptr) {
+        // Beer and booze share one addiction, just as they do for the player.
+        if (event->pid == drugPid
+            || (gvar != -1 && drugGetAddictionGvarByPid(event->pid) == gvar)) {
+            return true;
+        }
+        event = static_cast<WithdrawalEvent*>(queueFindNextEvent(critter, EVENT_TYPE_WITHDRAWAL));
+    }
+    return false;
+}
+
+static int clearNpcJetWithdrawal(Object* obj, void* data)
+{
+    auto* event = static_cast<WithdrawalEvent*>(data);
+    if (event->pid != PROTO_ID_JET) {
+        return 0;
+    }
+    if (!event->field_0) {
+        performWithdrawalEnd(obj, event->perk);
+    }
+    return 1;
+}
+
 // 0x479EE4
 static bool _drug_effect_allowed(Object* critter, int pid)
 {
@@ -2923,6 +2958,13 @@ int _item_d_take_drug(Object* critter, Object* item)
         return -1;
     }
 
+    if (!playerActorIs(critter) && item->pid == PROTO_ID_JET_ANTIDOTE) {
+        // Only the recipient's Jet events matter; never consult or clear the
+        // player's global flag. Pending onset has no stat penalty to reverse.
+        _queue_clear_type(EVENT_TYPE_WITHDRAWAL, clearNpcJetWithdrawal, critter);
+        return 1;
+    }
+
     Proto* proto;
     protoGetProto(item->pid, &proto);
 
@@ -2959,7 +3001,7 @@ int _item_d_take_drug(Object* critter, Object* item)
         }
     }
 
-    if (!dudeIsAddicted(item->pid)) {
+    if (!critterIsAddictedToDrug(critter, item->pid)) {
         int addictionChance = proto->item.data.drug.addictionChance;
         if (playerActorIs(critter)) {
             if (traitIsSelected(TRAIT_CHEM_RELIANT, critter)) {
@@ -3122,6 +3164,11 @@ int withdrawalEventProcess(Object* obj, void* data)
         performWithdrawalStart(obj, withdrawalEvent->perk, withdrawalEvent->pid);
     } else {
         if (withdrawalEvent->perk == PERK_JET_ADDICTION) {
+            if (!playerActorIs(obj)) {
+                // As in sfall, retain evidence of an NPC's permanent Jet penalty.
+                // Renew the active event without applying the penalty a second time.
+                _insert_withdrawal(obj, 0, 10080, withdrawalEvent->perk, withdrawalEvent->pid);
+            }
             return 0;
         }
 
