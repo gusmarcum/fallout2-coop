@@ -483,6 +483,8 @@ bool queueHasEvent(Object* owner, int eventType)
 // 0x4A26D0
 int queueProcessEvents()
 {
+    // Legacy migration must still see the first expiring withdrawal event.
+    itemInitializePlayerAddictions();
     unsigned int time = gameTimeGetTime();
     // TODO: this is 0 or 1, but in some cases -1. Probably needs to be bool.
     int stopProcess = 0;

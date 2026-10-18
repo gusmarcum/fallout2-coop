@@ -4661,7 +4661,7 @@ static int characterPrintToFile(const char* fileName)
 
     bool hasAddictionsHeading = false;
     for (int index = 0; index < ADDICTION_REPUTATION_COUNT; index++) {
-        if (gGameGlobalVars[gAddictionReputationVars[index]] != 0) {
+        if (itemIsAddictedByGvar(gDude, gAddictionReputationVars[index])) {
             if (!hasAddictionsHeading) {
                 fileWriteString("\n", stream);
 
@@ -5737,7 +5737,7 @@ static void characterEditorDrawKarmaFolder()
 
     bool hasAddictionsHeading = false;
     for (int index = 0; index < ADDICTION_REPUTATION_COUNT; index++) {
-        if (gGameGlobalVars[gAddictionReputationVars[index]] != 0) {
+        if (itemIsAddictedByGvar(gDude, gAddictionReputationVars[index])) {
             if (!hasAddictionsHeading) {
                 // Addictions
                 msg = getmsg(&gCharacterEditorMessageList, &gCharacterEditorMessageListItem, 4001);

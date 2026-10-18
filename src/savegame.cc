@@ -295,6 +295,7 @@ void savegameResetErrorCode()
 // 0x47D88C
 int lsgPerformSaveGame()
 {
+    itemInitializePlayerAddictions();
     _ls_error_code = 0;
     _map_backup_count = -1;
     gameMouseSetCursor(MOUSE_CURSOR_WAIT_PLANET);
@@ -577,6 +578,9 @@ int lsgLoadGameInSlot(int slot)
     // reason as the "game saved" one above.
 
     _loadingGame = false;
+
+    // Both the vanilla host queue and all appendix-owned queues are now loaded.
+    itemInitializePlayerAddictions();
 
     // SFALL: Start global scripts.
     sfall_gl_scr_exec_start_proc();

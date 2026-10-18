@@ -11,6 +11,11 @@ typedef enum DudeState {
     DUDE_STATE_SNEAKING = 0,
     DUDE_STATE_LEVEL_UP_AVAILABLE = 3,
     DUDE_STATE_ADDICTED = 4,
+    // Co-op addiction identity, persisted in the existing personal sheet flags.
+    // Alcohol deliberately has one bit for both beer and booze.
+    DUDE_STATE_ADDICTION_FIRST = 16,
+    DUDE_STATE_ADDICTION_LAST = 23,
+    DUDE_STATE_ADDICTIONS_INITIALIZED = 24,
 } DudeState;
 
 int critterInit();

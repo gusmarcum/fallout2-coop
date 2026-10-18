@@ -206,6 +206,11 @@ int explosionGetMaxTargets();
 void explosionSetMaxTargets(int maxTargets);
 bool itemIsHealing(int pid);
 
+// Server-only legacy migration; call after ALL player sheets and queues load.
+void itemInitializePlayerAddictions();
+// Also reads replicated personal state on clients; legacy/SP falls back to gvars.
+bool itemIsAddictedByGvar(Object* actor, int gvar);
+
 } // namespace fallout
 
 #endif /* ITEM_H */

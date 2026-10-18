@@ -7,6 +7,7 @@
 #include "critter.h"
 #include "db.h"
 #include "debug.h"
+#include "item.h"
 #include "object.h"
 #include "party_member.h" // partyMemberOwnersSave/Load — the appendix carries who follows whom
 #include "perk.h"
@@ -161,6 +162,7 @@ static int playerSheetRowRead(File* stream, int slot, bool withOwedPick)
 
 int playerSheetBlockWrite(File* stream, int firstSlot)
 {
+    itemInitializePlayerAddictions();
     int count = playerActorCount() - firstSlot;
     if (count <= 0) {
         // Nothing to say. Emitting a zero-row header instead would append eight
@@ -568,6 +570,7 @@ void playerSheetMarkDirty(Object* critter)
 
 void playerSheetDeltaEmit()
 {
+    itemInitializePlayerAddictions();
     // Network only. On any other presenter (single-player, golden probe) clear the
     // bits and emit nothing, so the stat setters' mark calls are free there.
     bool wanted = presenter()->wantsSheetDeltas();
