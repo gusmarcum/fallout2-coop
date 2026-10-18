@@ -71,6 +71,7 @@ static int drugGetAddictionGvarByPid(int drugPid);
 static void dudeSetAddiction(int drugPid);
 static void dudeClearAddiction(int drugPid);
 static bool dudeIsAddicted(int drugPid);
+static int clearJetWithdrawal(Object* obj, void* data);
 
 static void booksInit();
 static void booksInitVanilla();
@@ -2928,7 +2929,22 @@ int _item_d_take_drug(Object* critter, Object* item)
 
     if (item->pid == PROTO_ID_JET_ANTIDOTE) {
         if (dudeIsAddicted(PROTO_ID_JET)) {
-            performWithdrawalEnd(critter, PERK_JET_ADDICTION);
+            bool hasJetEvent = false;
+            auto* event = static_cast<WithdrawalEvent*>(queueFindFirstEvent(critter, EVENT_TYPE_WITHDRAWAL));
+            while (event != nullptr) {
+                if (event->pid == PROTO_ID_JET) {
+                    hasJetEvent = true;
+                }
+                event = static_cast<WithdrawalEvent*>(queueFindNextEvent(critter, EVENT_TYPE_WITHDRAWAL));
+            }
+
+            // Pending onset has no penalty to undo. Cancel only this actor's Jet
+            // withdrawal; the separate delayed drug effects must still run.
+            _queue_clear_type(EVENT_TYPE_WITHDRAWAL, clearJetWithdrawal, critter);
+            if (!hasJetEvent) {
+                // Jet's end event can expire without lifting its permanent penalty.
+                performWithdrawalEnd(critter, PERK_JET_ADDICTION);
+            }
 
             if (critter == gDude) {
                 // NOTE: Uninline.
@@ -3286,6 +3302,18 @@ static bool dudeIsAddicted(int drugPid)
     }
 
     return false;
+}
+
+static int clearJetWithdrawal(Object* obj, void* data)
+{
+    auto* event = static_cast<WithdrawalEvent*>(data);
+    if (event->pid != PROTO_ID_JET) {
+        return 0;
+    }
+    if (!event->field_0) {
+        performWithdrawalEnd(obj, event->perk);
+    }
+    return 1;
 }
 
 // item_caps_total
