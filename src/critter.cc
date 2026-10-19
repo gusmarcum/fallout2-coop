@@ -1106,7 +1106,7 @@ void critterKill(Object* critter, int anim, bool a3)
 // The single HP is load-bearing: critterIsDead reports dead on DAM_DEAD OR
 // current-HP <= 0, so clearing the flag without giving back a hit point would
 // leave the critter dead by the second test.
-bool critterRevive(Object* critter)
+bool critterRevive(Object* critter, Object* reviver)
 {
     if (critter == nullptr || PID_TYPE(critter->pid) != OBJ_TYPE_CRITTER) {
         return false;
@@ -1146,6 +1146,11 @@ bool critterRevive(Object* critter)
     // render gotcha), and refreshes. fid = -1 lets it choose STAND vs FIRE_DANCE. The
     // fid / position / flag / HP changes all stream to viewers via the object-delta +
     // actor-HP channels regardless of the (server-noop) local refresh.
+    // Reserve the patient's presentation before the final standing state is sent.
+    // The reviver is only a dependency; the patient owns the animation and busy mark.
+    if (serverDedicatedActive() && presRecordEnabled() && !presRecordActive()) {
+        _dude_standup(critter, reviver != nullptr ? reviver->netId : 0);
+    }
     _dude_stand(critter, critter->rotation, -1);
 
     // A player's own light, which the kill switched off (critterKill). Nothing else
@@ -1814,7 +1819,7 @@ void _dude_stand(Object* obj, int rotation, int fid)
 }
 
 // 0x418574
-void _dude_standup(Object* a1)
+void _dude_standup(Object* a1, int waitForNetId)
 {
     // ►► RECORD THE STAND-UP, or nobody sees it. This registers a real animation
     // (ANIM_BACK_TO_STANDING / ANIM_PRONE_TO_STANDING), but on the dedicated server the
@@ -1860,7 +1865,7 @@ void _dude_standup(Object* a1)
 
     if (recording) {
         presRecordSectionEnd();
-        presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), a1->netId);
+        presenter()->presSeq(presRecordData(), presRecordSize(), presRecordOpCount(), a1->netId, waitForNetId);
     }
 
     a1->data.critter.combat.results &= ~DAM_KNOCKED_DOWN;

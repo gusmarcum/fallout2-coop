@@ -176,7 +176,8 @@ void serverActorBusyMark(int slot, int durMs, const char* what);
 
 // Resolve `actorNetId` to its registry slot and mark it busy (the presSeq hook only
 // has the acting object's netId). A netId that is not a player actor is ignored.
-void serverActorBusyMarkByNetId(int actorNetId, int durMs);
+// waitForNetId adds that player's remaining busy time to this actor's duration.
+void serverActorBusyMarkByNetId(int actorNetId, int durMs, int waitForNetId = 0);
 
 // True while `slot`'s busy window has not yet elapsed (timestamp compare — self-
 // expiring, wrap-safe). False for an unmarked or out-of-range slot.

@@ -155,7 +155,7 @@ void serverActorBusyMark(int slot, int durMs, const char* what)
     }
 }
 
-void serverActorBusyMarkByNetId(int actorNetId, int durMs)
+void serverActorBusyMarkByNetId(int actorNetId, int durMs, int waitForNetId)
 {
     if (actorNetId == 0) {
         return;
@@ -163,6 +163,16 @@ void serverActorBusyMarkByNetId(int actorNetId, int durMs)
     Object* actor = objectFindByNetId(actorNetId);
     int slot = actor != nullptr ? playerActorSlotOf(actor) : -1;
     if (slot >= 0) {
+        // A dependent action occupies its own actor through the preceding action
+        // as well. Do not overwrite or extend the preceding actor's busy window.
+        Object* preceding = waitForNetId != 0 ? objectFindByNetId(waitForNetId) : nullptr;
+        int precedingSlot = preceding != nullptr ? playerActorSlotOf(preceding) : -1;
+        if (durMs > 0 && precedingSlot >= 0 && precedingSlot != slot) {
+            unsigned int elapsed = getTicksBetween(getTicks(), gActorBusyMarkAt[precedingSlot]);
+            if (elapsed < gActorBusyDurMs[precedingSlot]) {
+                durMs += gActorBusyDurMs[precedingSlot] - elapsed;
+            }
+        }
         serverActorBusyMark(slot, durMs, "seq");
     }
 }

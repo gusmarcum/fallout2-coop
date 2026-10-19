@@ -497,7 +497,8 @@ public:
     // play the stream (0 = no such actor, e.g. an explosion, which plays on arrival).
     // No-op here → byte-identical on every non-network path (and only emitted at all
     // under F2_SERVER_PRES_RECORD).
-    virtual void presSeq(const unsigned char* data, int size, int opCount, int actorNetId = 0) {}
+    // waitForNetId is an earlier action to finish, not the owner of this sequence.
+    virtual void presSeq(const unsigned char* data, int size, int opCount, int actorNetId = 0, int waitForNetId = 0) {}
 
     // A door (or openable scenery) opened/closed on a server-driven path
     // (proto_instance.cc _obj_use_door / objectOpenClose serverLoopActive branch).

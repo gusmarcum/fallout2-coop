@@ -60,7 +60,7 @@ int _critter_heal_hours(Object* obj, int a2);
 void critterKill(Object* critter, int anim, bool a3);
 // Minimal inverse of critterKill: revive a dead critter at 1 HP, standing and
 // blocking again. No-op (returns false) if the critter is not actually dead.
-bool critterRevive(Object* critter);
+bool critterRevive(Object* critter, Object* reviver = nullptr);
 int critterGetExp(Object* critter);
 bool critterIsActive(Object* critter);
 bool critterIsDead(Object* critter);

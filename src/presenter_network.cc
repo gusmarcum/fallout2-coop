@@ -833,7 +833,7 @@ public:
         endEvent();
     }
 
-    void presSeq(const unsigned char* data, int size, int opCount, int actorNetId) override
+    void presSeq(const unsigned char* data, int size, int opCount, int actorNetId, int waitForNetId) override
     {
         if (presenterEmissionsSuppressed() || data == nullptr || size <= 0) return;
         if (eventTraceEnabled()) fprintf(stderr, "[presseq] SEND ops=%d bytes=%d actor=%d\n", opCount, size, actorNetId);
@@ -846,7 +846,7 @@ public:
         int costMs = presRecordCostMs();
         if ((unsigned int)costMs > _frameSeqCostMs) _frameSeqCostMs = (unsigned int)costMs;
         if (serverDedicatedActive() && actorNetId != 0) {
-            serverActorBusyMarkByNetId(actorNetId, costMs);
+            serverActorBusyMarkByNetId(actorNetId, costMs, waitForNetId);
         }
         beginEvent(EVENT_PRES_SEQ, 0);
         putI32(actorNetId); // primary actor to wait for (0 = none); precedes the op blob
@@ -854,6 +854,9 @@ public:
         putU16((unsigned short)opCount);
         // Raw op bytes (already LE-encoded by the recorder, matching the Reader).
         _frame.insert(_frame.end(), data, data + size);
+        // Optional trailer after the counted ops: old viewers ignore it, and old
+        // streams without it retain their original independent-actor scheduling.
+        if (waitForNetId != 0) putI32(waitForNetId);
         endEvent();
     }
 

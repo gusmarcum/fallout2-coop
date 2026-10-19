@@ -662,7 +662,7 @@ static void interactionFireBody(int verb, Object* actor, Object* target, int arg
                 if (!interactionChargeReviveAp(actor)) {
                     break;
                 }
-                if (critterRevive(target)) {
+                if (critterRevive(target, actor)) {
                     // Consume exactly one authoritative unit. itemRemove peels one object
                     // off a stack but deliberately does not destroy that detached object;
                     // normal drug/item use finishes the same lifecycle with _obj_destroy.
@@ -701,7 +701,7 @@ static void interactionFireBody(int verb, Object* actor, Object* target, int arg
         if (!interactionChargeReviveAp(actor)) {
             break;
         }
-        if (critterRevive(target)) {
+        if (critterRevive(target, actor)) {
             char who[64];
             snprintf(who, sizeof(who), "%s", critterGetName(actor));
             char line[160];

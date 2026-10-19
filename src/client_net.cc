@@ -475,6 +475,7 @@ public:
         int hpNetId = 0, hpValue = 0; // kDudeHp: whose total it is (the body may be rebound meanwhile) and the total
         std::vector<unsigned char> seqOps; // kRecordedSeq — the raw op buffer (played at pump time)
         int seqActorNetId = 0; // kRecordedSeq — actor whose approach glide must drain before play (0 = none)
+        int seqWaitForNetId = 0; // earlier action dependency; never owns this sequence
         // kRecordedSeq — the adopt netIds this sequence INCREMENTED in _pendingAdopts at
         // decode and will decrement when it executes. Carried so that DROPPING this entry
         // on backlog can release them: a stranded count never decrements, and then every
@@ -1032,6 +1033,19 @@ public:
             // released here in wire order, so an approach never glides over the turn
             // it belongs to. The blocks below keep the fight strictly sequential:
             const PresEvent& front = _presQueue.front();
+            if (front.kind == PresKind::kRecordedSeq && front.seqWaitForNetId != 0) {
+                Object* preceding = lookup(front.seqWaitForNetId);
+                if (_presQueue.front().defCapAt == 0) {
+                    _presQueue.front().defCapAt = getTicks();
+                }
+                // Missing/cancelled actors release immediately. Bound the wait so a
+                // stuck animation cannot strand the patient and the presentation queue.
+                if (preceding != nullptr && getTicksSince(front.defCapAt) < 10000
+                    && (clientAnimPlayableActiveFor(preceding)
+                        || animationIsBusyIgnoringFidgets(preceding))) {
+                    break;
+                }
+            }
             // (1) An attacker approaches by gliding into range; hold its attack until
             //     the participants stop PLAYABLE-gliding — else clientCombatAnimPlay
             //     would cancel the glide instantly and the approach would teleport.
@@ -2237,6 +2251,14 @@ private:
         bool run = r.remaining() >= 4 ? (r.i32() != 0) : false;
         Object* obj = lookup(netId);
         if (obj != nullptr) {
+            // _dude_stand re-buckets the revived patient at the same position.
+            // Preserve the reserved get-up rather than cancelling it with this refresh.
+            if (clientViewerActive() && durMs <= 0
+                && fromTile == toTile && fromElev == toElev
+                && obj->tile == toTile && obj->elevation == toElev
+                && clientCombatAnimDeferSnapMove(obj, toTile, toElev)) {
+                return;
+            }
             // In-combat recorded MOVE: this mover's walk is being replayed from the record
             // channel, which owns its motion. HOLD the authoritative position (applied at
             // walk completion, resolveHeld) — do NOT snap/glide/kMoveRelease/notifyReposition
@@ -3770,8 +3792,11 @@ private:
     // Walk the op stream. execute=false = DRY reserve pass at decode (reserve live
     // participants only). execute=true = register the sequence on the real engine
     // (ticked by presAdvance -> _object_animate, exactly like the other replays).
+    int _seqWaitForNetId = 0;
+
     void presPlayRecordedSeq(const unsigned char* data, int size, bool execute)
     {
+        if (!execute) _seqWaitForNetId = 0;
         if (data == nullptr || size <= 0) {
             return;
         }
@@ -4110,6 +4135,12 @@ private:
             }
         }
     
+        // The optional dependency follows the counted op stream. It participates
+        // only in scheduling, never in reservation or active/busy ownership.
+        if (!execute && !r.overflow() && r.remaining() >= 4) {
+            _seqWaitForNetId = r.i32();
+        }
+
         // ►► ONE LINE THAT ANSWERS "why did nothing happen?". Every recorded op is
         // `if (o) animationRegister...`, so an unresolvable ref is skipped in silence:
         // a throw whose flight transient does not resolve animates the THROWER and
@@ -4154,6 +4185,7 @@ private:
             e.kind = PresKind::kRecordedSeq;
             e.seqOps = std::move(ops);
             e.seqActorNetId = actorNetId;
+            e.seqWaitForNetId = _seqWaitForNetId;
             e.seqAdopts = std::move(promisedAdopts);
             e.seqReserved = std::move(reserved);
             enqueue(e);
